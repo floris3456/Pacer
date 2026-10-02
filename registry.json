@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "quota-handoff",
+      "name": "Quota handoff",
+      "description": "Claude/Codex quota views, chat reminders and OpenCodePlus compaction handoffs",
+      "author": "floris3456",
+      "version": "0.1.2",
+      "repository": "https://github.com/floris3456/cliproxyapi-quota-handoff",
+      "license": "MIT",
+      "tags": ["quota", "opencodeplus", "claude", "codex"]
+    }
+  ]
+}

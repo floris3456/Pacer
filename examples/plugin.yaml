@@ -1,0 +1,35 @@
+# Merge into CPA config.yaml. Paths are inside CPA's process/container.
+plugins:
+  enabled: true
+  dir: /CLIProxyAPI/plugins
+  configs:
+    quota-handoff:
+      enabled: true
+      priority: 1
+      state_path: /CLIProxyAPI/plugins/quota-handoff/state.sqlite
+      max_age_seconds: 90
+      usage_auth_url: http://127.0.0.1:8317/v1/models
+      adaptive:
+        mode: shadow
+        # Optional compatible CPAMP backend; leave omitted for quota reminders.
+        # cpamp_url: http://10.0.0.10:18317
+        # token_file: /CLIProxyAPI/plugins/quota-handoff/backend-token
+        lease_seconds: 120
+        observation_lag_seconds: 5
+        margin_points: 1
+        warning_requests: 4
+      credentials:
+        # Copy these identifiers from CPA's authenticated auth-files management API.
+        # Do not put OAuth tokens or frontend API keys here.
+        - auth_id: REPLACE_SMALL_AUTH_ID
+          auth_index: REPLACE_SMALL_AUTH_INDEX
+          account: claude-small
+          provider: claude
+          alias: Claude Small
+          rank: 1
+        - auth_id: REPLACE_LARGE_AUTH_ID
+          auth_index: REPLACE_LARGE_AUTH_INDEX
+          account: claude-large
+          provider: claude
+          alias: Claude Large
+          rank: 2

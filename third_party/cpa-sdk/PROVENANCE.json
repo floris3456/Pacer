@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/floris3456/CLIProxyAPI",
+  "commit": "ef9e71201e0ca72b03a540d9b6e0862f8c053347",
+  "abi": 1,
+  "schema": 6,
+  "files": {
+    "sdk/pluginapi/types.go": "84092b1701719032847d2369bf7254393272194c29d75fca730d172c68b08d3f",
+    "sdk/pluginapi/types_test.go": "a64057dc69802fea6fc2566ececfdbb0934ca8ab96b22a7dbb070e93eddd5554",
+    "sdk/pluginabi/types.go": "eb99fe8ecb2a443dd58bd71e37985a47e440256b2d5867603687aaedac1fec36",
+    "sdk/pluginabi/types_test.go": "4f80bd39f76dc4e5297d6a542e0bfdb10c2034de973e06714c0bafb5a3ba24f7",
+    "LICENSE": "879792e89cf1bdd6a8d446033ec87e30496f97dcafc4656dc53f641509b346a6"
+  }
+}

@@ -1,0 +1,30 @@
+# Complete minimal example without SSO. Replace hostname and CPA upstream.
+proxy.example.com {
+    route {
+        @quota_events {
+            method GET
+            path /v0/resource/plugins/quota-handoff/events
+        }
+        handle @quota_events {
+            reverse_proxy 127.0.0.1:8317 {
+                header_up -Remote-User
+                header_up -Remote-Email
+                header_up -Remote-Groups
+                header_up -Remote-Name
+                header_up -X-Auth-Request-User
+                header_up -X-Auth-Request-Email
+                header_up -X-Auth-Request-Groups
+                header_up -X-Authenticated-User
+                header_up -X-Forwarded-User
+            }
+        }
+        handle /v1/* {
+            # CPA authenticates the original Authorization header.
+            reverse_proxy 127.0.0.1:8317
+        }
+        handle {
+            # Manage CPA locally or through your existing protected admin route.
+            respond "Not found" 404
+        }
+    }
+}

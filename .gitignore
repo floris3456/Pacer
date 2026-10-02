@@ -1,0 +1,7 @@
+/dist/
+/.cache/
+*.sqlite*
+*.so
+*.h
+*.log
+.DS_Store
