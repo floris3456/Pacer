@@ -35,7 +35,8 @@ jobs:
           PY
       - name: Race tests and native ABI build
         run: |
-          docker run --rm -v "$PWD:/src" -w /src \
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
+            -e GOCACHE=/tmp/go-build -e GOPATH=/tmp/go \
             golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d \
             sh -c 'go test -race ./... && (cd third_party/cpa-sdk && go test ./...) && sh scripts/build.sh'
       - name: Package
