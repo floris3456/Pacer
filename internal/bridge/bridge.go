@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
-	"gopkg.in/yaml.v3"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/adaptive"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/handoff"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/quota"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"gopkg.in/yaml.v3"
 )
 
 const ControlHeader = "X-Quota-Handoff"
@@ -33,18 +33,21 @@ type tracked struct {
 	Legacy   *legacyStream
 }
 type Plugin struct {
-	usageAuthURL string
-	exchangeMu   sync.Mutex
-	nextExchange time.Time
-	stopped      atomic.Bool
-	closeOnce    sync.Once
-	configDigest string
-	mu           sync.Mutex
-	Engine       *handoff.Engine
-	Host         Host
-	requests     map[string]tracked
-	refreshMu    sync.Mutex
-	next         map[string]time.Time
+	usageAuthURL       string
+	notificationsMuted atomic.Bool
+	noticeLogMu        sync.Mutex
+	loggedNotices      map[string]bool
+	exchangeMu         sync.Mutex
+	nextExchange       time.Time
+	stopped            atomic.Bool
+	closeOnce          sync.Once
+	configDigest       string
+	mu                 sync.Mutex
+	Engine             *handoff.Engine
+	Host               Host
+	requests           map[string]tracked
+	refreshMu          sync.Mutex
+	next               map[string]time.Time
 }
 
 func New(host Host) *Plugin {
@@ -63,7 +66,7 @@ func (p *Plugin) Close() {
 	})
 }
 func registration() any {
-	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.2", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
+	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.3-local.1", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
 		"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true,
 	}}
 }
@@ -103,7 +106,10 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, err
 		}
-		var cfg handoff.Config
+		var cfg struct {
+			handoff.Config       `yaml:",inline"`
+			NotificationsEnabled *bool `yaml:"notifications_enabled"`
+		}
 		if err := yaml.Unmarshal(req.ConfigYAML, &cfg); err != nil {
 			return nil, err
 		}
@@ -114,21 +120,25 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		normalized, _ := json.Marshal(cfg)
+		// Delivery can be changed live without reopening quota state or altering
+		// routing, accounting, outstanding reservations or calibration.
+		normalized, _ := json.Marshal(cfg.Config)
 		digest := handoff.Digest(string(normalized))
 		if p.Engine != nil {
 			if p.configDigest == digest {
+				p.configureNotifications(cfg.NotificationsEnabled)
 				return registration(), nil
 			}
 			return nil, fmt.Errorf("quota configuration changes require an idle plugin reload")
 		}
 		p.configDigest = digest
-		e, err := handoff.Open(cfg, time.Now)
+		e, err := handoff.Open(cfg.Config, time.Now)
 		if err != nil {
 			return nil, err
 		}
 		p.Engine = e
 		p.usageAuthURL = usageURL
+		p.configureNotifications(cfg.NotificationsEnabled)
 		go p.exchange()
 		return registration(), nil
 	}
@@ -172,6 +182,12 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		snapshot, err = p.Engine.Snapshot(token, cursor, req.Query.Get("model"))
 		if err != nil {
 			return resource(503, map[string]string{"error": "quota_state_unavailable"}), nil
+		}
+		// Keep the durable engine events and cursor even while delivery is muted.
+		// Clients advance the cursor without receiving model-visible notices.
+		p.logQuotaEvents(snapshot.Events)
+		if p.notificationsMuted.Load() {
+			snapshot.Events = []handoff.Event{}
 		}
 		return resource(200, snapshot), nil
 	case pluginabi.MethodRequestInterceptBefore:
@@ -303,6 +319,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		// Reporting cannot turn an admitted inference request into a refusal.
 		_ = p.Engine.ConfirmUsage(t.Selected.Admission, value(req.Metadata, "selected_auth_id"))
+		p.logQuotaEvents(p.Engine.LegacyWarnings(value(req.Metadata, "selected_auth_id"), req.Model, t.Estimate))
 		clear := []string{ControlHeader, AckHeader, "X-Quota-Protocol", reservationHeader}
 		for k := range req.Headers {
 			if strings.HasPrefix(strings.ToLower(k), "x-quota-") {

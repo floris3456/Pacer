@@ -9,6 +9,14 @@ compaction and credential handoffs with
 keeps its normal routing. Quota-triggered compaction and switching are disabled.
 An optional compatible CPAMP backend supplies calibration for adaptive estimates.
 
+Local maintenance build `0.1.3-local.1` adds `notifications_enabled: false` in
+the plugin configuration. It mutes both inline stream warnings and polled chat
+notices. Quota state, usage, calibration, thresholds and routing keep operating;
+notices are written through CPA's host logger and coordinated events remain in
+SQLite. Re-enable with `true` or omit the setting. This setting supports live
+reconfiguration without a plugin reload. It does not disable enforcement actions
+if enforce mode is selected. Existing client history is not removed.
+
 ## What it provides
 
 - Five-hour and seven-day quota windows, shared-account accounting and reset times.

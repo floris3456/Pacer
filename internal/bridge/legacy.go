@@ -3,9 +3,9 @@ package bridge
 import (
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/handoff"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/notice"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 type legacyStream struct {
@@ -49,6 +49,10 @@ func (p *Plugin) legacyChunk(req pluginapi.StreamChunkInterceptRequest) pluginap
 		go p.refresh(nil)
 	}
 	events := p.Engine.LegacyWarnings(t.Legacy.auth, req.Model, t.Estimate)
+	p.logQuotaEvents(events)
+	if p.notificationsMuted.Load() {
+		return pluginapi.StreamChunkInterceptResponse{}
+	}
 	warnings := make([]notice.Warning, 0, len(events))
 	for _, event := range events {
 		warnings = append(warnings, notice.Warning{Key: event.ID, Text: event.Text})

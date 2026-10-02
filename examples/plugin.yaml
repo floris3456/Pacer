@@ -6,6 +6,9 @@ plugins:
     quota-handoff:
       enabled: true
       priority: 1
+      # Set false to mute streamed/chat notices while retaining quota logs/state.
+      # This switch can be reconfigured live; it does not disable monitoring.
+      notifications_enabled: true
       state_path: /CLIProxyAPI/plugins/quota-handoff/state.sqlite
       max_age_seconds: 90
       usage_auth_url: http://127.0.0.1:8317/v1/models
