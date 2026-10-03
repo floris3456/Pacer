@@ -35,6 +35,7 @@ type tracked struct {
 type Plugin struct {
 	usageAuthURL       string
 	notificationsMuted atomic.Bool
+	switchGate         atomic.Bool
 	noticeLogMu        sync.Mutex
 	loggedNotices      map[string]bool
 	exchangeMu         sync.Mutex
@@ -68,7 +69,7 @@ func (p *Plugin) Close() {
 	})
 }
 func registration() any {
-	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.4-local.1", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
+	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.5-local.1", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
 		"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true,
 	}}
 }
@@ -111,6 +112,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		var cfg struct {
 			handoff.Config       `yaml:",inline"`
 			NotificationsEnabled *bool `yaml:"notifications_enabled"`
+			CompactOnSwitch      *bool `yaml:"compact_on_switch"`
 		}
 		if err := yaml.Unmarshal(req.ConfigYAML, &cfg); err != nil {
 			return nil, err
@@ -129,6 +131,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if p.Engine != nil {
 			if p.configDigest == digest {
 				p.configureNotifications(cfg.NotificationsEnabled)
+				p.configureSwitchGate(cfg.CompactOnSwitch)
 				return registration(), nil
 			}
 			return nil, fmt.Errorf("quota configuration changes require an idle plugin reload")
@@ -141,6 +144,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.Engine = e
 		p.usageAuthURL = usageURL
 		p.configureNotifications(cfg.NotificationsEnabled)
+		p.configureSwitchGate(cfg.CompactOnSwitch)
 		go p.exchange()
 		go p.discover(true)
 		return registration(), nil
@@ -314,6 +318,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 				if err == nil {
 					p.selected(req.RequestID, f)
 					t.Selected = f
+				} else if refusal, isRefusal := err.(*handoff.Refusal); isRefusal && refusal.Code == "quota_compact_required" {
+					// Before any upstream call on the new account: the client compacts
+					// and retries; CPA's credential loop stops here for this request.
+					p.notificationLog("info", "compact on switch: "+refusal.Message, map[string]any{"notifications_enabled": !p.notificationsMuted.Load()})
+					return termination(refusal.Code, refusal.Message), nil
 				}
 			}
 		}

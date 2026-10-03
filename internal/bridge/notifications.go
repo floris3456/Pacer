@@ -20,6 +20,17 @@ func (p *Plugin) configureNotifications(enabled *bool) {
 	}
 }
 
+// The shadow-mode account-switch gate is off unless explicitly enabled. Like
+// notification delivery it changes live, without reopening quota state.
+func (p *Plugin) configureSwitchGate(enabled *bool) {
+	on := enabled != nil && *enabled
+	if p.switchGate.Swap(on) != on {
+		p.notificationLog("info", fmt.Sprintf("compact_on_switch=%v: chats that declare support compact before CPA moves them to another account", on),
+			map[string]any{"notifications_enabled": !p.notificationsMuted.Load()})
+	}
+	p.Engine.SetCompactOnSwitch(on)
+}
+
 // A threshold is logged once per event ID per plugin lifetime, not once per
 // streamed token. Legacy IDs include account, window, quota cycle and severity;
 // coordinated event IDs use the persisted global cursor. The bounded cache is

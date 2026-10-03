@@ -47,6 +47,9 @@ type Claim struct {
 	Checkpoint   string `json:"checkpoint,omitempty"`
 	Generation   int    `json:"generation"`
 	Intent       string `json:"intent,omitempty"`
+	// CompactOnSwitch declares that the client compacts when a primary request
+	// is refused with quota_compact_required. Older clients never see the refusal.
+	CompactOnSwitch bool `json:"compact_on_switch,omitempty"`
 }
 
 func (c Claim) Valid() bool {
@@ -127,7 +130,19 @@ type Engine struct {
 	now          func() time.Time
 	broken       error
 	flights      map[string]Flight
+	// switchGate (shadow mode): a declared client's chat moves to another
+	// account only with a fresh checkpoint. Live setting, guarded by mu.
+	switchGate bool
 }
+
+// SetCompactOnSwitch changes the shadow-mode account-switch gate live. It has
+// no effect on enforce mode, whose scheduler owns handoffs.
+func (e *Engine) SetCompactOnSwitch(on bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.switchGate = on
+}
+
 type Refusal struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -33,7 +33,29 @@ func (e *Engine) observeSelection(caller, provider, model string, selected []str
 		b = &Binding{Key: key, Route: q.Route, Capability: q.Capability, Provider: provider, Generation: 1, Seen: map[string]bool{}}
 		e.state.Bindings[key] = b
 	}
-	if b.Account != "" && b.Account != f.Account {
+	moved := b.Account != "" && b.Account != f.Account
+	if moved && e.switchGate && q.CompactOnSwitch {
+		if q.Kind != "primary" {
+			// Titles and summaries may run on the new account. The chat stays
+			// bound until its own primary request carries a fresh checkpoint.
+			f.Key, f.Generation, f.Kind = key, b.Generation, q.Kind
+			f.Admission = "shadow:" + key + ":" + q.Request + ":" + c.ID
+			e.flights[f.Admission] = f
+			return f, nil
+		}
+		// Nothing to compact (new chat), compaction refused by the user (auto
+		// off), or a checkpoint the old account never received: switch now.
+		ready := q.Fresh || !q.Auto || (q.Checkpoint != "" && q.Checkpoint != b.Consumed)
+		if !ready {
+			b.Last = e.now().Unix()
+			if err := e.save(); err != nil {
+				return Flight{}, err
+			}
+			return Flight{}, refuse("quota_compact_required", fmt.Sprintf("CPA moves this chat from %s to %s.", b.Alias, c.Alias))
+		}
+		e.emit(b, "switched", fmt.Sprintf("Switched this chat from %s to %s.", b.Alias, c.Alias))
+	}
+	if moved {
 		b.Generation++
 	}
 	b.Account, b.Auth, b.Alias, b.Model = f.Account, c.ID, c.Alias, model

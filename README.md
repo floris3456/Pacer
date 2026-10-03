@@ -25,6 +25,17 @@ appear in usage views and chats bind to the credential actually in use. Configur
 deleting an auth in CPA removes it from the set; its quota history stays in SQLite
 and returns with it. Changing this setting requires an idle plugin reload.
 
+Local maintenance build `0.1.5-local.1` adds `compact_on_switch: true` (shadow mode,
+live setting, default off). Accounts stay CPA's choice (for example `fill-first`), but when
+CPA would serve a chat from another account than the one it is bound to, a primary request
+from a client that declares support (`compact_on_switch` in its claim; OpenCodePlus 1.1.9+)
+is refused before the new account sees it: `409 quota_compact_required`. The client compacts
+(OpenCodePlus: with its configured `compactionModel`) and retries; a primary request carrying
+a checkpoint the old account never received is admitted on the new account and rebinds the
+chat. Auxiliary requests (titles, the summary itself), new chats, chats with automatic
+compaction off and undeclared clients are switched without a refusal, as before. In enforce
+mode the setting has no effect.
+
 ## What it provides
 
 - Five-hour and seven-day quota windows, shared-account accounting and reset times.
