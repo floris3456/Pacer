@@ -17,6 +17,14 @@ SQLite. Re-enable with `true` or omit the setting. This setting supports live
 reconfiguration without a plugin reload. It does not disable enforcement actions
 if enforce mode is selected. Existing client history is not removed.
 
+Local maintenance build `0.1.4-local.1` adds `discover_credentials: true`. The
+credential set then follows CPA's enabled Claude/Codex auths (checked every 30 s,
+and immediately when CPA selects an unknown credential), so accounts added in CPA
+appear in usage views and chats bind to the credential actually in use. Configured
+`credentials` entries only override alias, rank and account seed. Disabling or
+deleting an auth in CPA removes it from the set; its quota history stays in SQLite
+and returns with it. Changing this setting requires an idle plugin reload.
+
 ## What it provides
 
 - Five-hour and seven-day quota windows, shared-account accounting and reset times.

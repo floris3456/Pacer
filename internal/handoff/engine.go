@@ -29,6 +29,9 @@ type Config struct {
 	StatePath    string          `yaml:"state_path"`
 	Credentials  []Credential    `yaml:"credentials"`
 	MaxAge       int64           `yaml:"max_age_seconds"`
+	// DiscoverCredentials follows CPA's enabled Claude/Codex auths; configured
+	// credentials then only override alias, rank and account seed.
+	DiscoverCredentials bool `yaml:"discover_credentials"`
 }
 type Claim struct {
 	Route        string `json:"route"`
@@ -118,6 +121,7 @@ type Engine struct {
 	pendingKey   string
 	mu           sync.Mutex
 	cfg          Config
+	static       []Credential
 	db           *sql.DB
 	state        State
 	now          func() time.Time
@@ -154,8 +158,8 @@ func Open(cfg Config, now func() time.Time) (*Engine, error) {
 	if !cfg.Adaptive.Valid() {
 		return nil, errors.New("invalid adaptive reserve settings")
 	}
-	if cfg.StatePath == "" || len(cfg.Credentials) == 0 {
-		return nil, errors.New("state_path and credentials are required")
+	if cfg.StatePath == "" || (len(cfg.Credentials) == 0 && !cfg.DiscoverCredentials) {
+		return nil, errors.New("state_path and credentials (or discover_credentials) are required")
 	}
 	if cfg.MaxAge == 0 {
 		cfg.MaxAge = 90
@@ -184,7 +188,8 @@ func Open(cfg Config, now func() time.Time) (*Engine, error) {
 			ticket.Orphan = true
 		}
 	}
-	return &Engine{cfg: cfg, db: db, state: state, now: now, flights: map[string]Flight{}}, nil
+	static := append([]Credential(nil), cfg.Credentials...)
+	return &Engine{cfg: cfg, static: static, db: db, state: state, now: now, flights: map[string]Flight{}}, nil
 }
 func (e *Engine) Close() error    { e.mu.Lock(); defer e.mu.Unlock(); return e.db.Close() }
 func Digest(s string) string      { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }

@@ -13,6 +13,7 @@ import (
 // Only fixed provider quota URLs are used. The host owns OAuth persistence and
 // refresh; credentials live only for this callback and never enter plugin state.
 func (p *Plugin) refresh(raw []byte) {
+	p.discover(false)
 	if p.Host == nil || p.stopped.Load() || !p.refreshMu.TryLock() {
 		return
 	}

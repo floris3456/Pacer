@@ -47,6 +47,8 @@ type Plugin struct {
 	Host               Host
 	requests           map[string]tracked
 	refreshMu          sync.Mutex
+	discoverMu         sync.Mutex
+	lastDiscover       time.Time
 	next               map[string]time.Time
 }
 
@@ -66,7 +68,7 @@ func (p *Plugin) Close() {
 	})
 }
 func registration() any {
-	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.3-local.1", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
+	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "quota-handoff", Version: "0.1.4-local.1", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{
 		"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true,
 	}}
 }
@@ -140,6 +142,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.usageAuthURL = usageURL
 		p.configureNotifications(cfg.NotificationsEnabled)
 		go p.exchange()
+		go p.discover(true)
 		return registration(), nil
 	}
 	if method == pluginabi.MethodPluginQuiesce || method == pluginabi.MethodPluginShutdown {
@@ -299,7 +302,14 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		if p.Engine.AdaptiveConfig().Shadow() && t.Estimate.ID != "" {
 			auth := value(req.Metadata, "selected_auth_id")
-			if c, ok := p.Engine.Credential(auth); ok {
+			c, ok := p.Engine.Credential(auth)
+			if !ok && auth != "" {
+				// A credential added in CPA after the last sync: refresh the set
+				// before observing, so the chat binds to the credential in use.
+				p.discover(true)
+				c, ok = p.Engine.Credential(auth)
+			}
+			if ok {
 				f, err := p.Engine.Pick(t.Caller, c.Provider, req.Model, []string{auth}, t.Claim, t.Estimate)
 				if err == nil {
 					p.selected(req.RequestID, f)
