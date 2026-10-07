@@ -209,6 +209,7 @@ func TestNewerConflictCannotBeClearedByDelayedCompleteSample(t *testing.T) {
 	changed := reset.Add(24 * time.Hour)
 	observe(t, s, "a", "codex", Window{Scope: "all", Seconds: 604800, Reset: changed, ResetEvidence: Field{At: conflictingAt, Source: APISource, Quality: Absolute}})
 	observe(t, s, "a", "codex", sample(at.Add(5*time.Minute), reset, 45))
+	observe(t, s, "a", "codex", Window{Scope: "all", Seconds: 604800, NotApplicable: true, StatusEvidence: Field{At: at.Add(6 * time.Minute), Source: APISource, Quality: Measured}})
 	got := s.Windows("a")[0]
 	if !got.Conflict || !got.ConflictAt.Equal(conflictingAt) || !got.ConflictingReset.Equal(changed) {
 		t.Fatalf("delayed reply hid a newer conflict: %#v", got)
@@ -229,5 +230,21 @@ func TestOlderUnseenExpiredCycleCannotDisplaceFutureCycle(t *testing.T) {
 	got := s.Windows("a")[0]
 	if !got.Conflict || !got.Reset.Equal(reset) || *got.Remaining != 50 {
 		t.Fatal("expired unseen cycle displaced coherent future evidence")
+	}
+}
+
+func TestRelativeEarlyResetCanReplaceAbsoluteCycleWithoutPromotingQuality(t *testing.T) {
+	s, c, _ := testStore(t)
+	at := c.Now()
+	oldReset := at.Add(24 * time.Hour)
+	observe(t, s, "a", "codex", sample(at, oldReset, 5))
+	c.Add(time.Minute)
+	next := sample(c.Now(), c.Now().Add(7*24*time.Hour), 93)
+	next.ResetEvidence.Quality = Estimated
+	next.ResetEvidence.Raw = "604800"
+	observe(t, s, "a", "codex", next)
+	got := s.Windows("a")[0]
+	if got.State(c.Now()) != "estimated" || !got.Reset.Equal(next.Reset) || *got.Remaining != 93 {
+		t.Fatalf("relative early-reset evidence was pinned: %#v", got)
 	}
 }

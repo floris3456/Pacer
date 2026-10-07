@@ -97,6 +97,9 @@ flagged; full evidence newer than the conflict resolves them. The last coherent 
 `Reset`; display `ConflictingReset` as disputed when present, rather than presenting either
 as a verified countdown. `History` preserves accepted, stale and conflicting input samples,
 source times, receipt times and dispositions append-only. Receipt time never wins a conflict.
+An estimated reset can establish a new cycle over an older absolute reset when complete
+evidence also shows replenishment with a later reset, or the preceding cycle has passed.
+It remains estimated. A relative-only correction does not downgrade an absolute deadline.
 
 ### Verified parser coverage
 

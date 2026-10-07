@@ -13,3 +13,17 @@ No external filesystem changes or provider requests. Task caches and Go test tem
 are under `/Users/bliss/Agent/homeserverr/pacer/.cache/observer`; missing modules are installed
 only in that task-local module cache. Production bridge integration is owned by the parent
 worktree. The existing module path is retained for cherry-picking.
+
+Verified locally on 2026-10-08 (Go 1.27.1, darwin/arm64):
+
+```text
+go test -count=1 -timeout=90s ./internal/observation       PASS
+go test -race -count=1 -timeout=120s -cover ./internal/observation
+                                                        PASS, 80.7% statements
+go build ./...                                          PASS
+git diff --check                                        PASS
+```
+
+All commands used task-local `GOCACHE`, `GOMODCACHE`, `GOTMPDIR`, and `TMPDIR` under
+the cache directory above. Module downloads first checked the existing CPA download cache,
+then used the public Go proxy for missing versions.

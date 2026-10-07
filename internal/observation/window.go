@@ -187,8 +187,9 @@ func merge(old, next Window) (Window, string) {
 	}
 	full := next.Remaining != nil && !next.Reset.IsZero() && next.Usage.At.Equal(next.ResetEvidence.At)
 	if next.NotApplicable || next.Dormant {
-		if !next.StatusEvidence.At.After(old.ObservedAt()) {
-			if next.StatusEvidence.At.Equal(old.ObservedAt()) && (next.NotApplicable != old.NotApplicable || next.Dormant != old.Dormant) {
+		knownAt := latest(old.ObservedAt(), old.ConflictAt)
+		if !next.StatusEvidence.At.After(knownAt) {
+			if next.StatusEvidence.At.Equal(knownAt) && (next.NotApplicable != old.NotApplicable || next.Dormant != old.Dormant) {
 				return conflict(old, next), "conflict"
 			}
 			return old, "stale"
@@ -196,7 +197,7 @@ func merge(old, next Window) (Window, string) {
 		return cycle(next), "accepted-status"
 	}
 	if old.NotApplicable || old.Dormant {
-		if !at.After(old.StatusEvidence.At) {
+		if !at.After(latest(old.StatusEvidence.At, old.ConflictAt)) {
 			return old, "stale"
 		}
 		return cycle(next), "accepted-cycle"
@@ -206,7 +207,14 @@ func merge(old, next Window) (Window, string) {
 		if next.ResetEvidence.At.Before(latest(old.ObservedAt(), old.ConflictAt)) {
 			return old, "stale"
 		}
-		if !full || !next.ObservedAt().After(latest(old.ObservedAt(), old.ConflictAt)) || (old.ResetEvidence.Quality == Absolute && next.ResetEvidence.Quality == Estimated) || (!next.Reset.After(at) && old.Reset.After(at)) {
+		// An estimate cannot casually revise an absolute deadline. It can
+		// establish a labelled new cycle when full evidence shows replenishment
+		// with a later reset, or when the preceding cycle has already passed.
+		estimatedCorrection := old.ResetEvidence.Quality == Absolute && next.ResetEvidence.Quality == Estimated
+		if !old.Reset.After(at) || (full && old.Remaining != nil && *next.Remaining > *old.Remaining && next.Reset.After(old.Reset)) {
+			estimatedCorrection = false
+		}
+		if !full || !next.ObservedAt().After(latest(old.ObservedAt(), old.ConflictAt)) || estimatedCorrection || (!next.Reset.After(at) && old.Reset.After(at)) {
 			return conflict(old, next), "conflict"
 		}
 		// Full, newer, source-backed early-reset evidence replaces the old cycle
