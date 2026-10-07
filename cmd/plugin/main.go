@@ -58,14 +58,14 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/pacer"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
-	"github.com/floris3456/cliproxyapi-quota-handoff/internal/bridge"
 	"unsafe"
 )
 
 type envelope = pluginabi.Envelope
 
-var plugin = bridge.New(callHost)
+var plugin = pacer.New(callHost)
 
 func main() {}
 

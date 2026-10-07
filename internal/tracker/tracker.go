@@ -66,8 +66,8 @@ type Binding struct {
 }
 
 type Flight struct {
-	ID, Key, Auth, Account, Kind string
-	Started                      time.Time
+	ID, Key, Auth, Account, Kind, Checkpoint string
+	Started                                  time.Time
 }
 
 type Selection struct {
@@ -161,7 +161,7 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 		kind = q.Kind
 	}
 	if kind != "primary" {
-		s.flights[id] = Flight{id, key, c.Auth, c.Account, kind, s.now()}
+		s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Started: s.now()}
 		return b, nil
 	}
 	moved := b.Account != "" && b.Account != c.Account
@@ -179,12 +179,16 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 	b.Auth, b.Account, b.Alias, b.Provider, b.Model = c.Auth, c.Account, c.Alias, c.Provider, c.Model
 	b.PrimaryUsed, b.LastUsed = true, s.now()
 	if q != nil {
+		if b.Consumed != q.Checkpoint {
+			b.ProtectedUntil = time.Time{}
+			b.UnknownWarmth = true
+		}
 		b.Capability, b.Route, b.Consumed = q.Capability, q.Route, q.Checkpoint
 	}
 	if err = s.save(b); err != nil {
 		return Binding{}, err
 	}
-	s.flights[id] = Flight{id, key, c.Auth, c.Account, kind, s.now()}
+	s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Checkpoint: b.Consumed, Started: s.now()}
 	return b, nil
 }
 
@@ -202,7 +206,7 @@ func (s *Store) CacheActivity(id string, success, qualifying bool, ttl time.Dura
 	if err != nil {
 		return err
 	}
-	if b.Account != f.Account {
+	if b.Account != f.Account || b.Consumed != f.Checkpoint {
 		return nil
 	}
 	until := f.Started.Add(ttl)

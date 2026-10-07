@@ -1,0 +1,28 @@
+# Offline lab only. Fixed dummy keys, no production directories or credentials.
+config-version: 8
+server:
+  host: "0.0.0.0"
+  port: 8317
+management:
+  allow-remote: true
+  secret-key: "pacer-test-admin"
+  disable-control-panel: true
+access:
+  api-keys: ["pacer-test-inference"]
+oauth:
+  auth-dir: "/lab/auths"
+routing:
+  strategy: fill-first
+  session-affinity: true
+  session-affinity-ttl: 24h
+plugins:
+  enabled: true
+  dir: "/lab/plugins"
+  configs:
+    pacer:
+      enabled: true
+      priority: 1
+      state_path: "/lab/state/pacer.sqlite"
+      compact_on_switch: true
+      routing:
+        mode: off

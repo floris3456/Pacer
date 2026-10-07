@@ -10,11 +10,11 @@ out="dist/linux_${arch}"
 mkdir -p "$out"
 CGO_ENABLED=1 go build -mod=readonly -trimpath -buildvcs=false \
   -ldflags='-s -w -buildid=' -buildmode=c-shared \
-  -o "$out/quota-handoff-v${version}.so" ./cmd/plugin
+  -o "$out/pacer-v${version}.so" ./cmd/plugin
 cc -Wall -Wextra -Werror -o "$out/native-probe" tests/native-probe.c -ldl
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/quota-handoff-probe.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/pacer-probe.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
-config=$(printf 'state_path: %s/state.sqlite\nadaptive:\n  mode: shadow\ncredentials:\n  - auth_id: dummy\n    auth_index: dummy-index\n    account: dummy\n    alias: Dummy\n    provider: claude\n' "$scratch" | base64 | tr -d '\n')
+config=$(printf 'state_path: %s/state.sqlite\ncompact_on_switch: true\nrouting:\n  mode: off\n' "$scratch" | base64 | tr -d '\n')
 printf '{"config_yaml":"%s"}' "$config" > "$scratch/register.json"
-"$out/native-probe" "$PWD/$out/quota-handoff-v${version}.so" "$scratch/register.json" "$version"
+"$out/native-probe" "$PWD/$out/pacer-v${version}.so" "$scratch/register.json" "$version"
 go version > "$out/toolchain.txt"

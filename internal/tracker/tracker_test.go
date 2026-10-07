@@ -97,3 +97,40 @@ func TestColdMoveNeverCompactsAndWarmthUsesRequestStart(t *testing.T) {
 		t.Fatal("account move transferred cache", b)
 	}
 }
+
+func TestLateUsageFromOldCheckpointCannotWarmCompactedPrefix(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "state.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	s, err := Open(db, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := Claim{Protocol: 1, Installation: "i", Session: "s", Route: "r", Request: "q", Kind: "primary", Capability: Digest("secret"), Checkpoint: "old"}
+	key := Key("caller", "claude", q)
+	selection := Selection{Auth: "a", Account: "a"}
+	if _, err = s.Admit("old-attempt", key, selection, &q, true); err != nil {
+		t.Fatal(err)
+	}
+	q.Checkpoint = "new"
+	if _, err = s.Admit("new-attempt", key, selection, &q, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CacheActivity("old-attempt", true, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := s.Get(key)
+	if err != nil || !b.UnknownWarmth || !b.ProtectedUntil.IsZero() {
+		t.Fatal("old prefix refreshed new one", b, err)
+	}
+	if err = s.CacheActivity("new-attempt", true, true, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = s.Get(key)
+	if err != nil || b.UnknownWarmth || !b.ProtectedUntil.Equal(now.Add(5*time.Minute)) {
+		t.Fatal(b, err)
+	}
+}

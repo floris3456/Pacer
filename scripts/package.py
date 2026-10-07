@@ -9,10 +9,10 @@ version = (root / "VERSION").read_text().strip()
 dist = root / "dist"
 archives = []
 for arch in ("amd64", "arm64"):
-    binary = dist / f"linux_{arch}" / f"quota-handoff-v{version}.so"
+    binary = dist / f"linux_{arch}" / f"pacer-v{version}.so"
     if not binary.exists():
         continue
-    archive = dist / f"quota-handoff_{version}_linux_{arch}.zip"
+    archive = dist / f"pacer_{version}_linux_{arch}.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
         for path, name in (
             (binary, binary.name),

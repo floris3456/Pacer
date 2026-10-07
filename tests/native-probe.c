@@ -33,7 +33,7 @@ int main(int argc,char **argv) {
   assert(strstr(json,"\"ok\":true") && strstr(json,"\"schema_version\":6"));
   char expected[128];
   assert(snprintf(expected,sizeof(expected),"\"Version\":\"%s\"",argv[3])<(int)sizeof(expected));
-  assert(strstr(json,"cliproxyapi-quota-handoff") && strstr(json,expected));
+  assert(strstr(json,"\"Name\":\"pacer\"") && strstr(json,expected));
   plugin.free(response.ptr,response.len);free(json);plugin.shutdown();
   puts("Linux C ABI load, failure envelope, dummy registration, buffer ownership and shutdown: passed");
   return 0;
