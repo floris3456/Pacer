@@ -36,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 exhausted.update(body.get("accounts", []))
             return self.reply(200, {"ok": True})
-        if self.path != "/v1/messages":
+        if self.path.split("?", 1)[0] != "/v1/messages":
             return self.reply(404, {"error": "not_found"})
         # Expose only the known dummy account label, never arbitrary bearer text.
         token = self.headers.get("Authorization", "").removeprefix("Bearer ")

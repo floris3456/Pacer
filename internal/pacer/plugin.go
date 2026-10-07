@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	_ "github.com/mattn/go-sqlite3"
@@ -28,6 +29,8 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
+	Enabled         bool   `yaml:"enabled"`
+	Priority        int    `yaml:"priority"`
 	StatePath       string `yaml:"state_path"`
 	CompactOnSwitch bool   `yaml:"compact_on_switch"`
 	UsageAuthURL    string `yaml:"usage_auth_url"`
@@ -45,22 +48,27 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
-	mu        sync.Mutex
-	Host      Host
-	now       func() time.Time
-	db        *sql.DB
-	chats     *tracker.Store
-	cfg       Config
-	creds     map[string]credential
-	requests  map[string]attempt
-	decisions []routing.Decision
-	// Source-backed budgets are populated only by the observation adapter.
-	budgets map[string][]routing.Budget
-	stopped bool
+	mu           sync.Mutex
+	Host         Host
+	now          func() time.Time
+	db           *sql.DB
+	chats        *tracker.Store
+	observer     *observation.Store
+	cfg          Config
+	creds        map[string]credential
+	requests     map[string]attempt
+	decisions    []routing.Decision
+	workerOnce   sync.Once
+	workerDone   chan struct{}
+	workerWait   sync.WaitGroup
+	refreshMu    sync.Mutex
+	discoverMu   sync.Mutex
+	lastDiscover time.Time
+	stopped      bool
 }
 
 func New(host Host) *Plugin {
-	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, budgets: map[string][]routing.Budget{}}
+	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, workerDone: make(chan struct{})}
 }
 
 func registration() any {
@@ -86,6 +94,11 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if cfg.StatePath == "" {
 		return nil, errors.New("state_path is required")
 	}
+	usageURL, err := validateUsageURL(cfg.UsageAuthURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.UsageAuthURL = usageURL
 	if cfg.Routing.Mode == "" {
 		cfg.Routing.Mode = "off"
 	}
@@ -129,14 +142,26 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		db.Close()
 		return nil, err
 	}
+	observer, err := observation.Open(db, p.now)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	p.db, p.chats, p.cfg = db, chats, cfg
+	p.observer = observer
 	return registration(), nil
 }
 
 func (p *Plugin) Close() {
 	p.mu.Lock()
+	if !p.stopped {
+		p.stopped = true
+		close(p.workerDone)
+	}
+	p.mu.Unlock()
+	p.workerWait.Wait()
+	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.stopped = true
 	if p.db != nil {
 		_ = p.db.Close()
 		p.db = nil
@@ -148,12 +173,16 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		result, err := p.configure(raw)
 		if err == nil {
 			p.discover()
+			p.startWorker()
 		}
 		return result, err
 	}
 	if method == pluginabi.MethodPluginShutdown || method == pluginabi.MethodPluginQuiesce {
 		p.mu.Lock()
-		p.stopped = true
+		if !p.stopped {
+			p.stopped = true
+			close(p.workerDone)
+		}
 		p.mu.Unlock()
 		return struct{}{}, nil
 	}
@@ -165,7 +194,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	}
 	switch method {
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}}}, nil
+		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}}}, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -206,6 +235,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, err
 		}
+		p.observe(req.RequestID, req.Metadata, req.ResponseHeaders, p.now())
 		return pluginapi.ResponseInterceptResponse{Headers: p.ack(req.RequestID)}, nil
 	case pluginabi.MethodResponseInterceptStreamChunk:
 		var req pluginapi.StreamChunkInterceptRequest
@@ -213,6 +243,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return nil, err
 		}
 		if req.ChunkIndex == -1 {
+			p.observe(req.RequestID, req.Metadata, req.ResponseHeaders, p.now())
 			return pluginapi.StreamChunkInterceptResponse{Headers: p.ack(req.RequestID)}, nil
 		}
 		return pluginapi.StreamChunkInterceptResponse{}, nil
@@ -227,6 +258,20 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
+		var req pluginapi.UsageRecord
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		// Older hosts do not supply the response-capture clock. Absolute headers
+		// still carry useful evidence; strip countdowns rather than re-anchor a
+		// delayed stream's relative reset to callback time.
+		h := req.ResponseHeaders.Clone()
+		for key := range h {
+			if strings.HasSuffix(strings.ToLower(key), "-reset-after-seconds") {
+				delete(h, key)
+			}
+		}
+		p.observeAuth(req.AuthID, h, req.RequestedAt)
 		return struct{}{}, nil
 	}
 	return nil, fmt.Errorf("unsupported Pacer method %s", method)
@@ -294,7 +339,11 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		if !ok || c.Provider != provider {
 			continue
 		}
-		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: p.budgets[c.Account]})
+		windows, readErr := p.observer.ReadWindows(c.Account)
+		if readErr != nil {
+			continue
+		}
+		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(provider, req.Model, windows, p.now())})
 	}
 	p.mu.Unlock()
 	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active}, accounts)
@@ -376,11 +425,14 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 }
 
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if (req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/quota") || (req.Method == "POST" && req.Path == "/v0/management/plugins/pacer/quota/reconcile") {
+		return p.quotaAPI(req)
+	}
 	if req.Method == "GET" && req.Path == "/v0/resource/plugins/pacer/index.html" {
 		return pluginapi.ManagementResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/html; charset=utf-8"}, "Cache-Control": {"no-store"}, "Content-Security-Policy": {"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'"}}, Body: management.Page}
 	}
-	if req.Method == "GET" && req.Path == "/v0/resource/plugins/pacer/events" && req.Headers.Get("Authorization") == "" {
-		return resource(200, map[string]any{"protocol": 1, "mode": "pacer", "cache_policy": false})
+	if req.Method == "GET" && req.Path == "/v0/resource/plugins/pacer/events" {
+		return p.events(req)
 	}
 	// Exact management paths only: the public resource namespace cannot reach
 	// these branches. CPA authenticates management routes before ABI dispatch.
@@ -389,7 +441,24 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		defer p.mu.Unlock()
 		accounts := []map[string]any{}
 		for _, c := range p.creds {
-			accounts = append(accounts, map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "state": "unknown", "windows": []any{}})
+			windows, err := p.observer.ReadWindows(c.Account)
+			if err != nil {
+				return resource(503, map[string]string{"error": "observation_unavailable"})
+			}
+			views := []map[string]any{}
+			state := "unknown"
+			for _, w := range windows {
+				state = w.State(p.now())
+				if w.Remaining != nil && w.BalanceAge(p.now()) >= time.Hour {
+					state = "stale"
+				}
+				views = append(views, map[string]any{"scope": w.Scope, "seconds": w.Seconds, "remaining": w.Remaining, "reset": w.Reset, "state": state, "source": w.Usage.Source, "usage_evidence": w.Usage, "reset_evidence": w.ResetEvidence})
+			}
+			job, _, err := p.observer.Status(c.Account)
+			if err != nil {
+				return resource(503, map[string]string{"error": "observation_unavailable"})
+			}
+			accounts = append(accounts, map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}})
 		}
 		sort.Slice(accounts, func(i, j int) bool { return fmt.Sprint(accounts[i]["id"]) < fmt.Sprint(accounts[j]["id"]) })
 		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": p.decisions})

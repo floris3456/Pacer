@@ -3,7 +3,9 @@ package pacer
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -14,6 +16,12 @@ func (p *Plugin) discover() {
 	if p.Host == nil {
 		return
 	}
+	p.discoverMu.Lock()
+	defer p.discoverMu.Unlock()
+	if !p.lastDiscover.IsZero() && p.now().Sub(p.lastDiscover) < 5*time.Second {
+		return
+	}
+	p.lastDiscover = p.now()
 	raw, err := p.Host("host.auth.list", map[string]any{})
 	if err != nil {
 		return
@@ -66,4 +74,9 @@ func (p *Plugin) discover() {
 	p.mu.Lock()
 	p.creds = found
 	p.mu.Unlock()
+	for _, c := range found {
+		if _, exists, err := p.observer.Status(c.Account); err == nil && !exists {
+			_ = p.observer.Queue(c.Account, observation.Endpoint(c.Provider), observation.ReasonSeed, time.Time{})
+		}
+	}
 }
