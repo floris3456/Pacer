@@ -229,8 +229,20 @@ func load(ctx context.Context, q queryer, key, capHash string) (State, error) {
 }
 
 func validState(state State) bool {
-	if state.Protocol != Protocol || !validScope(state.Scope) || state.Revision < 1 || !identifier(state.Active.ContextEpoch) || state.Active.Checkpoint != state.Active.ContextEpoch || (state.Active.TTL != TTL5m && state.Active.TTL != TTL1h) {
+	if state.Protocol != Protocol || !validScope(state.Scope) || state.Revision < 1 || !identifier(state.Active.ContextEpoch) || state.Active.Checkpoint != state.Active.ContextEpoch {
 		return false
+	}
+	if state.EnrollmentRequired {
+		if state.Active.TTL != "" || !state.Active.Used || state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveAttempts != 0 || state.LastCommit != nil {
+			return false
+		}
+	} else if state.Active.TTL != TTL5m && state.Active.TTL != TTL1h {
+		return false
+	}
+	if p := state.LastCommit; p != nil {
+		if !validReceipt(p.Receipt) || p.Receipt.Checkpoint != state.Active.Checkpoint || p.AcknowledgedAt.IsZero() || !state.Active.Used {
+			return false
+		}
 	}
 	if state.ActivePrimary < 0 || state.ActiveWarming < 0 || state.ActiveAuxiliary < 0 || state.ActiveAttempts < 0 {
 		return false
@@ -243,7 +255,7 @@ func validState(state State) bool {
 			return false
 		}
 	}
-	return state.WarmingPaused == (state.Pending != nil)
+	return state.WarmingPaused == (state.Pending != nil || state.EnrollmentRequired)
 }
 
 func save(ctx context.Context, tx *sql.Tx, key string, state State) error {

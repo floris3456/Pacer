@@ -27,6 +27,9 @@ func (s *Store) BeginRequest(ctx context.Context, auth Credentials, request Requ
 		if err != nil {
 			return err
 		}
+		if state.EnrollmentRequired && request.Kind != Auxiliary {
+			return conflict("enrollment_required", "Initial existing-history compaction must commit before primary or warming requests.")
+		}
 		var raw []byte
 		var payload, outcome string
 		err = tx.QueryRowContext(ctx, `SELECT payload_hash,snapshot,outcome FROM cache_policy_requests WHERE scope_key=? AND request_id=?`, key, request.RequestID).Scan(&payload, &raw, &outcome)
@@ -174,6 +177,9 @@ func (s *Store) BeginAttempt(ctx context.Context, auth Credentials, attempt Atte
 			return conflict("request_settled", "The logical request has already settled.")
 		}
 		if snap.Managed {
+			if state.EnrollmentRequired {
+				return conflict("enrollment_required", "Initial existing-history compaction has not committed.")
+			}
 			if state.Pending != nil {
 				return conflict("transition_pending", "New physical primary and warming attempts pause during a transition.")
 			}

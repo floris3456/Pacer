@@ -9,6 +9,12 @@ import (
 
 const Protocol = 1
 
+// ContractRevision identifies the protocol-1 extension requiring transition-bound
+// checkpoint receipts and supporting compaction-gated existing-history enrollment.
+const ContractRevision = 2
+
+const CheckpointReceiptVersion = 1
+
 type TTL string
 
 const (
@@ -29,8 +35,9 @@ type Credentials struct {
 	Capability   string `json:"-"`
 }
 
-// Evidence is trusted host input. NewEmpty must come from a verified empty-session
-// enrollment path, not simply from the existence of an unknown session ID.
+// Evidence is trusted host input. NewEmpty may be attested by an authenticated,
+// trusted client plugin after inspecting its local Core session. It never follows
+// merely from a missing server policy, and does not require CPA to query client DBs.
 type Evidence struct {
 	NewEmpty bool
 }
@@ -39,15 +46,35 @@ type Command struct {
 	Protocol  int    `json:"protocol"`
 	Operation string `json:"operation"`
 	Scope
-	ContextEpoch          string    `json:"context_epoch"`
-	ExpectedRevision      int64     `json:"expected_revision"`
-	TTL                   TTL       `json:"ttl"`
-	OperationID           string    `json:"operation_id"`
-	TransitionID          string    `json:"transition_id,omitempty"`
-	Checkpoint            string    `json:"checkpoint,omitempty"`
-	CompactionStartedAt   time.Time `json:"compaction_started_at,omitempty"`
-	CheckpointCommittedAt time.Time `json:"checkpoint_committed_at,omitempty"`
-	Enrollment            string    `json:"enrollment,omitempty"`
+	ContextEpoch          string             `json:"context_epoch"`
+	ExpectedRevision      int64              `json:"expected_revision"`
+	TTL                   TTL                `json:"ttl"`
+	OperationID           string             `json:"operation_id"`
+	TransitionID          string             `json:"transition_id,omitempty"`
+	Checkpoint            string             `json:"checkpoint,omitempty"`
+	CompactionStartedAt   time.Time          `json:"compaction_started_at,omitempty"`
+	CheckpointCommittedAt time.Time          `json:"checkpoint_committed_at,omitempty"`
+	Enrollment            string             `json:"enrollment,omitempty"`
+	CheckpointReceipt     *CheckpointReceipt `json:"checkpoint_receipt,omitempty"`
+}
+
+// CheckpointReceipt is the authenticated client's durable Core acknowledgement.
+// The client binds this transition and previous checkpoint BEFORE compaction and
+// marks Committed only after a new checkpoint durably commits. Timestamps are not
+// the ordering authority; this receipt is an attestation, not a contents proof.
+type CheckpointReceipt struct {
+	Version            int    `json:"version"`
+	TransitionID       string `json:"transition_id"`
+	PreviousCheckpoint string `json:"previous_checkpoint"`
+	Checkpoint         string `json:"checkpoint"`
+	Committed          bool   `json:"committed"`
+}
+
+type CommitProvenance struct {
+	Receipt               CheckpointReceipt `json:"checkpoint_receipt"`
+	CompactionStartedAt   time.Time         `json:"compaction_started_at,omitempty"`
+	CheckpointCommittedAt time.Time         `json:"checkpoint_committed_at,omitempty"`
+	AcknowledgedAt        time.Time         `json:"acknowledged_at"`
 }
 
 type Policy struct {
@@ -77,6 +104,10 @@ type State struct {
 	ActiveAuxiliary int64       `json:"active_auxiliary"`
 	ActiveAttempts  int64       `json:"active_attempts"`
 	WarmingPaused   bool        `json:"warming_paused"`
+	// Until initial existing-history compaction commits, Active describes only
+	// the old checkpoint: TTL is unknown (empty), Used=true, and primary is blocked.
+	EnrollmentRequired bool              `json:"enrollment_required,omitempty"`
+	LastCommit         *CommitProvenance `json:"last_commit,omitempty"`
 }
 
 // Reference is mandatory on every managed lifecycle request. Scope, revision,

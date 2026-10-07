@@ -18,8 +18,14 @@ func validateCommand(c Command) error {
 	if c.TTL != TTL5m && c.TTL != TTL1h {
 		return failure(422, "unsupported", "TTL must be 5m or 1h.")
 	}
-	if c.Enrollment != "" && c.Enrollment != "new_empty" {
-		return failure(422, "enrollment_unsupported", "Existing-history enrollment and copied-context forks are not supported.")
+	if c.Enrollment != "" && c.Enrollment != "new_empty" && c.Enrollment != "existing_history" {
+		return failure(422, "enrollment_unsupported", "Enrollment must declare new_empty or existing_history.")
+	}
+	if c.Enrollment == "new_empty" && c.Operation != "ensure" || c.Enrollment == "existing_history" && c.Operation != "prepare" {
+		return failure(422, "enrollment_unsupported", "Empty history enrolls with ensure; existing or unknown history enrolls with prepare and compaction.")
+	}
+	if c.Operation != "commit" && c.CheckpointReceipt != nil {
+		return invalid("A checkpoint receipt is only accepted by commit.")
 	}
 	switch c.Operation {
 	case "ensure", "prepare":
@@ -27,8 +33,8 @@ func validateCommand(c Command) error {
 			return invalid("Checkpoint proof is only accepted by commit.")
 		}
 	case "commit":
-		if !identifier(c.TransitionID) || !identifier(c.Checkpoint) || c.CompactionStartedAt.IsZero() || c.CheckpointCommittedAt.IsZero() {
-			return invalid("Commit requires a transition and a durably committed checkpoint acknowledgement.")
+		if !identifier(c.TransitionID) || !identifier(c.Checkpoint) {
+			return invalid("Commit requires a transition and a checkpoint.")
 		}
 	case "cancel":
 		if !identifier(c.TransitionID) || c.Checkpoint != "" || !c.CompactionStartedAt.IsZero() || !c.CheckpointCommittedAt.IsZero() {
@@ -36,9 +42,6 @@ func validateCommand(c Command) error {
 		}
 	default:
 		return invalid("Operation must be ensure, prepare, commit or cancel.")
-	}
-	if c.Operation != "ensure" && c.Enrollment != "" {
-		return invalid("Enrollment is only accepted by ensure.")
 	}
 	return nil
 }
@@ -92,7 +95,7 @@ func (s *Store) Apply(ctx context.Context, auth Credentials, cmd Command, eviden
 			if !errors.As(err, &e) || e.Code != "pacer_cache_state_missing" {
 				return err
 			}
-			if cmd.Operation != "ensure" {
+			if cmd.Operation != "ensure" && !(cmd.Operation == "prepare" && cmd.Enrollment == "existing_history") {
 				domainErr = err
 			} else {
 				result, domainErr = s.enroll(ctx, tx, auth, cmd, evidence, key, capHash)
@@ -138,8 +141,9 @@ func (s *Store) enroll(ctx context.Context, tx *sql.Tx, auth Credentials, cmd Co
 	if prior != 0 {
 		return State{}, conflict("state_missing", "Previously enrolled state is missing; restore it before continuing.")
 	}
-	if cmd.Enrollment != "new_empty" || !evidence.NewEmpty {
-		return State{}, failure(422, "enrollment_unsupported", "Only independently verified, genuinely empty sessions can enroll.")
+	existing := cmd.Operation == "prepare" && cmd.Enrollment == "existing_history"
+	if !existing && (cmd.Operation != "ensure" || cmd.Enrollment != "new_empty" || !evidence.NewEmpty) {
+		return State{}, failure(422, "enrollment_unsupported", "Empty-session enrollment requires a trusted client attestation; existing or unknown history requires prepare and compaction.")
 	}
 	if err := s.support(cmd.ProviderRoute, cmd.TTL); err != nil {
 		return State{}, err
@@ -149,9 +153,20 @@ func (s *Store) enroll(ctx context.Context, tx *sql.Tx, auth Credentials, cmd Co
 		return State{}, unavailable()
 	}
 	if count != 0 {
-		return State{}, failure(422, "enrollment_unsupported", "A route change cannot enroll existing context as empty.")
+		return State{}, failure(422, "enrollment_unsupported", "This session already has a policy on another route; route migration requires reconciliation.")
 	}
 	state := State{Protocol: Protocol, Scope: cmd.Scope, Revision: 1, Active: Policy{ContextEpoch: cmd.ContextEpoch, Checkpoint: cmd.ContextEpoch, TTL: cmd.TTL}}
+	if existing {
+		state.EnrollmentRequired = true
+		state.Active.TTL = "" // Prior selected/wire TTL is unknown, never assumed 5m.
+		state.Active.Used = true
+		if err := s.prepare(&state, cmd.TTL); err != nil {
+			return State{}, err
+		}
+	}
+	if !validState(state) {
+		return State{}, unavailable()
+	}
 	raw, err := json.Marshal(state)
 	if err != nil {
 		return State{}, unavailable()
@@ -170,6 +185,9 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 	if cmd.ExpectedRevision != state.Revision {
 		return State{}, conflict("revision_conflict", "Expected revision does not match durable state.")
 	}
+	if cmd.Enrollment == "existing_history" && !state.EnrollmentRequired {
+		return State{}, failure(422, "enrollment_unsupported", "This scope is already enrolled; prepare its active policy without an enrollment declaration.")
+	}
 	if cmd.Operation != "cancel" {
 		if err := s.support(cmd.ProviderRoute, cmd.TTL); err != nil {
 			return State{}, err
@@ -180,6 +198,9 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 	}
 	switch cmd.Operation {
 	case "ensure":
+		if state.EnrollmentRequired {
+			return State{}, conflict("enrollment_required", "Existing or unknown history needs a newly committed compaction before a managed policy is active.")
+		}
 		if state.Pending != nil {
 			return State{}, conflict("transition_pending", "Reconcile or cancel the pending transition first.")
 		}
@@ -198,13 +219,10 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		if state.Pending != nil {
 			return State{}, conflict("transition_pending", "A transition is already pending.")
 		}
-		id, err := randomID()
-		if err != nil {
+		state.Revision++
+		if err := s.prepare(&state, cmd.TTL); err != nil {
 			return State{}, err
 		}
-		state.Revision++
-		state.Pending = &Transition{ID: id, TTL: cmd.TTL, FromEpoch: state.Active.ContextEpoch, FromCheckpoint: state.Active.Checkpoint, PreparedAt: s.now(), PreparedRevision: state.Revision}
-		state.WarmingPaused = true
 	case "commit":
 		p := state.Pending
 		if p == nil || p.ID != cmd.TransitionID || p.TTL != cmd.TTL {
@@ -213,8 +231,10 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		if cmd.ContextEpoch != cmd.Checkpoint || cmd.ContextEpoch == state.Active.ContextEpoch || cmd.Checkpoint == state.Active.Checkpoint {
 			return State{}, conflict("checkpoint_required", "Commit requires a changed checkpoint as the new context epoch.")
 		}
-		if !cmd.CompactionStartedAt.After(p.PreparedAt) || cmd.CheckpointCommittedAt.Before(cmd.CompactionStartedAt) || cmd.CheckpointCommittedAt.After(s.now()) {
-			return State{}, conflict("checkpoint_required", "Compaction must start after prepare and durably commit before acknowledgement.")
+		// Validate proof after receipt replay lookup: old successful operations can
+		// still recover their result, but no new timestamp-only commit is accepted.
+		if err := committedReceipt(cmd.CheckpointReceipt, p, cmd.Checkpoint); err != nil {
+			return State{}, err
 		}
 		if state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveAttempts != 0 {
 			return State{}, conflict("inflight", "Old primary requests, warming or physical attempts are not settled.")
@@ -233,6 +253,8 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		// Compaction preserves existing history: even before its first dispatch the
 		// new epoch cannot be reclassified as an empty chat for a direct TTL write.
 		state.Active = Policy{ContextEpoch: cmd.ContextEpoch, Checkpoint: cmd.Checkpoint, TTL: cmd.TTL, Used: true}
+		state.EnrollmentRequired = false
+		state.LastCommit = &CommitProvenance{Receipt: *cmd.CheckpointReceipt, CompactionStartedAt: cmd.CompactionStartedAt, CheckpointCommittedAt: cmd.CheckpointCommittedAt, AcknowledgedAt: s.now()}
 		state.Pending = nil
 		state.WarmingPaused = false
 	case "cancel":
@@ -241,10 +263,37 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		}
 		state.Revision++
 		state.Pending = nil
-		state.WarmingPaused = false
+		state.WarmingPaused = state.EnrollmentRequired
 	}
 	if err := save(ctx, tx, key, state); err != nil {
 		return State{}, err
 	}
 	return state, nil
+}
+
+func (s *Store) prepare(state *State, ttl TTL) error {
+	id, err := randomID()
+	if err != nil {
+		return err
+	}
+	state.Pending = &Transition{ID: id, TTL: ttl, FromEpoch: state.Active.ContextEpoch, FromCheckpoint: state.Active.Checkpoint, PreparedAt: s.now(), PreparedRevision: state.Revision}
+	state.WarmingPaused = true
+	return nil
+}
+
+func validReceipt(r CheckpointReceipt) bool {
+	return r.Version == CheckpointReceiptVersion && r.Committed && identifier(r.TransitionID) && identifier(r.PreviousCheckpoint) && identifier(r.Checkpoint) && r.PreviousCheckpoint != r.Checkpoint
+}
+
+func committedReceipt(r *CheckpointReceipt, p *Transition, checkpoint string) error {
+	if r == nil {
+		return failure(422, "checkpoint_receipt_required", "Commit requires a transition-bound durable Core checkpoint receipt; timestamps alone are insufficient.")
+	}
+	if r.Version != CheckpointReceiptVersion {
+		return failure(422, "unsupported", "Unsupported checkpoint receipt version.")
+	}
+	if !validReceipt(*r) || r.TransitionID != p.ID || r.PreviousCheckpoint != p.FromCheckpoint || r.Checkpoint != checkpoint {
+		return conflict("checkpoint_required", "Receipt must acknowledge a newly committed checkpoint from this prepared transition and previous checkpoint.")
+	}
+	return nil
 }

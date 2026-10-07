@@ -120,6 +120,7 @@ func (f *fixture) commit(state State, epoch string) Command {
 	c := f.command("commit", state, state.Pending.TTL)
 	c.TransitionID = state.Pending.ID
 	c.ContextEpoch, c.Checkpoint = epoch, epoch
+	c.CheckpointReceipt = &CheckpointReceipt{Version: CheckpointReceiptVersion, TransitionID: state.Pending.ID, PreviousCheckpoint: state.Pending.FromCheckpoint, Checkpoint: epoch, Committed: true}
 	c.CompactionStartedAt = f.clock.advance()
 	c.CheckpointCommittedAt = f.clock.advance()
 	return c
@@ -301,14 +302,16 @@ func TestFreshCheckpointRulesCancelAndOrdinaryCompaction(t *testing.T) {
 	}{
 		{"unchanged", func(c *Command) { c.Checkpoint = state.Active.Checkpoint; c.ContextEpoch = c.Checkpoint }},
 		{"different-epoch", func(c *Command) { c.ContextEpoch = "not-the-checkpoint" }},
-		{"before-prepare", func(c *Command) { c.CompactionStartedAt = pending.Pending.PreparedAt.Add(-time.Nanosecond) }},
-		{"at-prepare", func(c *Command) { c.CompactionStartedAt = pending.Pending.PreparedAt }},
-		{"not-committed", func(c *Command) { c.CheckpointCommittedAt = c.CompactionStartedAt.Add(-time.Nanosecond) }},
-		{"future", func(c *Command) { c.CheckpointCommittedAt = f.clock.now().Add(time.Second) }},
+		{"before-prepare-receipt", func(c *Command) { c.CheckpointReceipt.TransitionID = "previous-transition" }},
+		{"wrong-previous-checkpoint", func(c *Command) { c.CheckpointReceipt.PreviousCheckpoint = "another-checkpoint" }},
+		{"not-committed", func(c *Command) { c.CheckpointReceipt.Committed = false }},
+		{"wrong-checkpoint-receipt", func(c *Command) { c.CheckpointReceipt.Checkpoint = "not-committed-checkpoint" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := good
+			receipt := *good.CheckpointReceipt
+			cmd.CheckpointReceipt = &receipt
 			cmd.OperationID = f.id()
 			tc.change(&cmd)
 			_, err := f.s.Apply(ctx, f.auth, cmd, Evidence{})
