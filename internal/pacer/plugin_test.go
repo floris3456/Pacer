@@ -52,6 +52,32 @@ func startPlugin(t *testing.T, path string) *Plugin {
 	return p
 }
 
+func TestRegistrationSatisfiesCPAMetadataAndCapabilities(t *testing.T) {
+	// The native loader requires all four metadata fields. A successful C ABI
+	// call alone does not establish that CPA registered the plugin.
+	raw, err := json.Marshal(registration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registered struct {
+		Schema       int                `json:"schema_version"`
+		Metadata     pluginapi.Metadata `json:"metadata"`
+		Capabilities map[string]bool    `json:"capabilities"`
+	}
+	if err = json.Unmarshal(raw, &registered); err != nil {
+		t.Fatal(err)
+	}
+	m := registered.Metadata
+	if registered.Schema != 6 || m.Name != "pacer" || m.Version == "" || m.Author == "" || m.GitHubRepository == "" {
+		t.Fatalf("incomplete CPA registration: %+v", registered)
+	}
+	for _, key := range []string{"scheduler", "request_interceptor", "request_lifecycle_plugin", "response_interceptor", "response_stream_interceptor", "usage_plugin", "management_api"} {
+		if !registered.Capabilities[key] {
+			t.Fatal("missing capability", key)
+		}
+	}
+}
+
 func TestNativeDispatchForcedMoveStopsBeforeFakeUpstreamAndRecovers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pacer.sqlite")
 	p := startPlugin(t, path)

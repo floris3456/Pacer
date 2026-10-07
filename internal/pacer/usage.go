@@ -73,7 +73,7 @@ func (p *Plugin) legacyWindows(account, model string, all bool) ([]map[string]an
 	for _, w := range windows {
 		// Older clients require numeric remaining/reset; do not fabricate zeros
 		// for missing fields. New management views retain the full partial record.
-		if w.Remaining == nil || w.Reset.IsZero() || w.NotApplicable || (!all && !w.Applies(model)) {
+		if w.Remaining == nil || w.Reset.IsZero() || w.NotApplicable || w.Dormant || !w.FreshComplete(p.now(), time.Hour) || (!all && !w.Applies(model)) {
 			continue
 		}
 		state := w.State(p.now())
