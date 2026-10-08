@@ -131,7 +131,7 @@ func TestQuotaManualRequestsOnlyJoinSharedSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 10; i++ {
-		r := p.manage(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/plugins/pacer/quota/reconcile", Body: []byte(`{"auth_index":"ia"}`)})
+		r := p.manage(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/plugins/pacer/observations/reconcile", Body: []byte(`{"auth_index":"ia"}`)})
 		if r.StatusCode != 200 {
 			t.Fatal(string(r.Body))
 		}
@@ -141,7 +141,7 @@ func TestQuotaManualRequestsOnlyJoinSharedSchedule(t *testing.T) {
 		t.Fatal(before, after, err)
 	}
 	for _, body := range []string{`{"auth_index":"missing"}`, `{"auth_index":"ia","force":true}`, `{"auth_index":"ia"}{}`} {
-		if r := p.manage(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/plugins/pacer/quota/reconcile", Body: []byte(body)}); r.StatusCode < 400 {
+		if r := p.manage(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/plugins/pacer/observations/reconcile", Body: []byte(body)}); r.StatusCode < 400 {
 			t.Fatal("unsafe refresh accepted", body)
 		}
 	}

@@ -18,6 +18,8 @@ for path, key, want in [
     ("/v8/management/oauth/settings/models", "pacer-test-admin", 200),
     ("/v0/resource/plugins/pacer/state", None, 404),
     ("/v0/resource/plugins/pacer/events", None, 200),
+    ("/v0/management/plugins/pacer/observations", "pacer-test-admin", 400),
+    ("/v0/management/plugins/pacer/observations", "pacer-test-inference", 401),
 ]:
     request = urllib.request.Request(BASE + path, headers={} if key is None else {"Authorization": "Bearer " + key})
     try:
@@ -35,6 +37,14 @@ with http.open(request, timeout=5) as response:
     plugins = json.load(response)["plugins"]
 pacer = next(plugin for plugin in plugins if plugin["id"] == "pacer")
 checks.append({"name": "native-plugin-registered-and-enabled", "pass": pacer["registered"] and pacer["effective_enabled"]})
+request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/state", headers={"Authorization": "Bearer pacer-test-admin"})
+with http.open(request, timeout=5) as response:
+    accounts = json.load(response)["accounts"]
+assert accounts, "lab must expose dummy subscription credentials"
+request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/observations?auth_index=" + accounts[0]["auth_index"], headers={"Authorization": "Bearer pacer-test-admin"})
+with http.open(request, timeout=5) as response:
+    observation = json.load(response)
+checks.append({"name": "unreserved-native-observation-route", "pass": isinstance(observation["windows"], list) and "reconciliation" in observation})
 out = pathlib.Path(os.environ.get("PACER_EVIDENCE", "../../evidence/implementation"))
 out.mkdir(parents=True, exist_ok=True)
 (out / "native-host-auth.json").write_text(json.dumps(checks, indent=2) + "\n")

@@ -285,7 +285,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return p.policy.Dispatch(context.Background(), method, raw)
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}}, nil
+		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}}, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -552,7 +552,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	if req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/keys" {
 		return p.keysView()
 	}
-	if (req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/quota") || (req.Method == "POST" && req.Path == "/v0/management/plugins/pacer/quota/reconcile") {
+	if (req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/observations") || (req.Method == "POST" && req.Path == "/v0/management/plugins/pacer/observations/reconcile") {
 		return p.quotaAPI(req)
 	}
 	if req.Method == "GET" && req.Path == "/v0/resource/plugins/pacer/index.html" {
