@@ -114,10 +114,9 @@ func TestPhysicalNativeHandlePersistenceRefusalAndOptionalMalformedRetention(t *
 			p, _, c := physicalHookPlugin(t)
 			admitCoverage(t, p, "physical-logical", c.ID)
 			u := physicalHookUsage(c, "negative-"+mode)
+			var restore func()
 			if mode == "sql" {
-				if _, err := p.db.Exec(`CREATE TRIGGER physical_sql_failure BEFORE INSERT ON measurement_physical_records BEGIN SELECT RAISE(ABORT,'dummy physical write'); END`); err != nil {
-					t.Fatal(err)
-				}
+				restore = rejectSQLInsert(t, p.db, "measurement_physical_records")
 			}
 			if mode == "unsupported" {
 				e := u["SourceEvidence"].(pluginapi.UsageSourceEvidence)
@@ -140,6 +139,9 @@ func TestPhysicalNativeHandlePersistenceRefusalAndOptionalMalformedRetention(t *
 				raw, _ = json.Marshal(body)
 			}
 			_, err := p.Handle(pluginabi.MethodUsageHandle, raw)
+			if restore != nil {
+				restore()
+			}
 			if (mode == "sql" || mode == "malformed") != (err != nil) {
 				t.Fatal("native acknowledgment mismatch", mode, err)
 			}

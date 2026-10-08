@@ -1,36 +1,66 @@
 package measurement
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mattn/go-sqlite3"
 )
 
-func auditRejectFeedInsert(t *testing.T, db *sql.DB, reject bool) {
+func auditRejectFeedInsert(t *testing.T, db *sql.DB) func() {
 	t.Helper()
-	c, err := db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if db.Stats().MaxOpenConnections != 1 {
+		t.Fatal("SQL fault fixture requires a one-connection pool")
 	}
-	defer c.Close()
-	if err = c.Raw(func(raw any) error {
-		driver := raw.(*sqlite3.SQLiteConn)
-		if !reject {
-			driver.RegisterAuthorizer(nil)
-			return nil
+	change := func(fn func(*sqlite3.SQLiteConn) error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		c, err := db.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
 		}
-		driver.RegisterAuthorizer(func(op int, table, column, database string) int {
-			if op == sqlite3.SQLITE_INSERT && table == "measurement_report_feed" {
+		defer c.Close()
+		if err = c.Raw(func(raw any) error { return fn(raw.(*sqlite3.SQLiteConn)) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var original *sqlite3.SQLiteConn
+	var denied atomic.Int64
+	change(func(c *sqlite3.SQLiteConn) error {
+		original = c
+		c.RegisterAuthorizer(func(op int, table, column, database string) int {
+			if op == sqlite3.SQLITE_INSERT && database == "main" && table == "measurement_report_feed" {
+				denied.Add(1)
 				return sqlite3.SQLITE_DENY
 			}
 			return sqlite3.SQLITE_OK
 		})
 		return nil
-	}); err != nil {
-		t.Fatal(err)
+	})
+	var once sync.Once
+	restore := func() {
+		t.Helper()
+		once.Do(func() {
+			change(func(c *sqlite3.SQLiteConn) error {
+				if c != original {
+					return errors.New("SQL fault fixture replaced its connection")
+				}
+				c.RegisterAuthorizer(nil)
+				return nil
+			})
+			if denied.Load() == 0 {
+				t.Error("SQL fault did not reach INSERT into measurement_report_feed")
+			}
+		})
 	}
+	t.Cleanup(restore)
+	return restore
 }
 
 // This intentionally models an older compatible writer: it knows the immutable

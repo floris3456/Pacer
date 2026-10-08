@@ -12,7 +12,7 @@ func TestReportFeedAtomicFailureAndRevisions(t *testing.T) {
 	r := record("feed-attempt", base, 1)
 	// Reject the actual feed INSERT without changing the schema epoch. DDL
 	// loss/recreation is separately tested as a permanent integrity refusal.
-	auditRejectFeedInsert(t, db, true)
+	restore := auditRejectFeedInsert(t, db)
 	if _, err := s.PutRecord(ctx, r); err == nil {
 		t.Fatal("feed failure acknowledged")
 	}
@@ -22,7 +22,7 @@ func TestReportFeedAtomicFailureAndRevisions(t *testing.T) {
 			t.Fatal(table, n, err)
 		}
 	}
-	auditRejectFeedInsert(t, db, false)
+	restore()
 	put(t, s, r)
 	r.Revision = 2
 	r.Usage.CacheCreate = 9

@@ -220,15 +220,15 @@ func TestForwardHandleFeedRollbackAndPostPrimaryPhysicalFailure(t *testing.T) {
 			if physical {
 				table = "measurement_physical_records"
 			}
-			if _, e := p.db.Exec(`CREATE TRIGGER fail_forward_fixture BEFORE INSERT ON ` + table + ` BEGIN SELECT RAISE(ABORT,'synthetic private SQL failure'); END`); e != nil {
-				t.Fatal(e)
-			}
+			restore := rejectSQLInsert(t, p.db, table)
 			u := forwardMixed(c, "logical", "failed-callback", hookEpoch.Add(time.Second))
 			se := u["SourceEvidence"].(pluginapi.UsageSourceEvidence)
 			se.Physical = &pluginapi.UsagePhysicalDispatch{Version: 1, AdmissionSequence: 11, DispatchSequence: 12, StartedAt: se.UpstreamStartedAt.Add(time.Nanosecond)}
 			u["SourceEvidence"] = se
 			f.h.clock.Add(int64(3 * time.Second))
-			if _, e := p.Handle(pluginabi.MethodUsageHandle, hookRaw(t, u)); e == nil || strings.Contains(e.Error(), "synthetic private SQL failure") {
+			_, e := p.Handle(pluginabi.MethodUsageHandle, hookRaw(t, u))
+			restore()
+			if e == nil || strings.Contains(e.Error(), "not authorized") {
 				t.Fatal("false acknowledgement/raw SQL", e)
 			}
 			expected := 0

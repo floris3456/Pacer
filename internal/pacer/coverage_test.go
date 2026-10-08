@@ -231,6 +231,7 @@ func TestCoverageHooksMissingCorrelationAndDBFailureAreAcknowledgmentErrors(t *t
 			admitCoverage(t, p, "logical", c.ID)
 			u := hookUsage(c, "logical", "physical", hookEpoch)
 			h.clock.Add(int64(2 * time.Second))
+			var restore func()
 			switch mode {
 			case "no-lifecycle":
 				delete(u, "LifecycleRequestID")
@@ -241,19 +242,16 @@ func TestCoverageHooksMissingCorrelationAndDBFailureAreAcknowledgmentErrors(t *t
 			case "bad-index":
 				u["AuthIndex"] = "different-index"
 			case "record-write":
-				_, err := p.db.Exec(`CREATE TRIGGER fail_record BEFORE INSERT ON measurement_records BEGIN SELECT RAISE(FAIL,'dummy'); END`)
-				if err != nil {
-					t.Fatal(err)
-				}
+				restore = rejectSQLInsert(t, p.db, "measurement_records")
 			case "gap-write":
-				_, err := p.db.Exec(`CREATE TRIGGER fail_fault BEFORE INSERT ON measurement_source_faults BEGIN SELECT RAISE(FAIL,'dummy'); END`)
-				if err != nil {
-					t.Fatal(err)
-				}
+				restore = rejectSQLInsert(t, p.db, "measurement_source_faults")
 			case "invalid-headers":
 				u["ResponseHeaders"] = 123
 			}
 			_, err := p.Handle(pluginabi.MethodUsageHandle, hookRaw(t, u))
+			if restore != nil {
+				restore()
+			}
 			if err == nil {
 				t.Fatal("unrecorded/invalid callback acknowledged")
 			}
@@ -261,9 +259,6 @@ func TestCoverageHooksMissingCorrelationAndDBFailureAreAcknowledgmentErrors(t *t
 				t.Fatal("callback error leaks identity")
 			}
 			if mode == "gap-write" {
-				if _, err = p.db.Exec(`DROP TRIGGER fail_fault`); err != nil {
-					t.Fatal(err)
-				}
 				p.refreshMeasurements()
 				if hookCount(t, p, `SELECT poisoned FROM measurement_source_consumers WHERE id=?`, p.coverage.ID()) != 1 {
 					t.Fatal("write failure latch not persisted")

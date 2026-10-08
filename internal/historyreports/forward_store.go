@@ -170,7 +170,7 @@ func (s *ForwardStore) PreparedForwardHead(ctx context.Context) (ForwardStatus, 
 		return status, time.Time{}, ErrSource
 	}
 	var m forwardManifest
-	if json.Unmarshal(body, &m) != nil || m.Version != ForwardVersion || m.Converter != ForwardConverterVersion || !validForwardTime(m.At) {
+	if json.Unmarshal(body, &m) != nil || m.Version != ForwardVersion || (m.Converter != ForwardConverterVersion && m.Converter != forwardQualifiedConverterVersion) || !validForwardTime(m.At) {
 		return status, time.Time{}, ErrSource
 	}
 	return status, m.At, nil

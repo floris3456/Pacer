@@ -315,22 +315,20 @@ func TestScopedGapDBFailureFusesBeforeNextReadOrAdvance(t *testing.T) {
 	m := membership("members-a", "a", "a")
 	must(t, f.c.PutMembership(ctx, m))
 	apply(t, f, m.ID, "a", 1)
-	_, err := f.db.Exec(`CREATE TRIGGER fail_gap BEFORE INSERT ON measurement_source_gaps BEGIN SELECT RAISE(FAIL,'dummy gap write failure'); END`)
-	must(t, err)
+	restore := rejectSQLInsert(t, f.db, "measurement_source_gaps")
 	r := response("a", 2)
 	r.Coverage = "unknown"
 	r.Through = nil
 	r.GapCount = 1
 	r.GapsTruncated = true
-	if err = f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r); err == nil {
+	if err := f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r); err == nil {
 		t.Fatal("gap failure acknowledged")
 	}
-	_, err = f.db.Exec(`DROP TRIGGER fail_gap`)
-	must(t, err)
+	restore()
 	if snapshot(t, f, m.ID, "a", epoch, epoch.Add(time.Hour)).Known {
 		t.Fatal("proof readable before failed invalidation persisted")
 	}
-	if err = f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), response("a", 3)); !errors.Is(err, measurement.ErrStaleSource) {
+	if err := f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), response("a", 3)); !errors.Is(err, measurement.ErrStaleSource) {
 		t.Fatal(err)
 	}
 	var poisoned bool
@@ -435,15 +433,13 @@ func TestScopedMissingCorrelationErrorsAndLegacyRecordsRemainValuable(t *testing
 func TestScopedPersistenceFailureMustReachParentHook(t *testing.T) {
 	f := newFixture(t)
 	must(t, f.c.PutMembership(ctx, membership("members-a", "a", "a")))
-	_, err := f.db.Exec(`CREATE TRIGGER fail_record BEFORE INSERT ON measurement_records BEGIN SELECT RAISE(FAIL,'dummy record failure'); END`)
-	must(t, err)
+	restore := rejectSQLInsert(t, f.db, "measurement_records")
 	raw, capture := rawUsage("failed-write", "a", epoch.Add(time.Minute))
-	if _, err = f.c.ObserveUsage(ctx, raw, capture); err == nil {
+	if _, err := f.c.ObserveUsage(ctx, raw, capture); err == nil {
 		t.Fatal("unrecorded tracked callback returned nil")
 	}
-	_, err = f.db.Exec(`DROP TRIGGER fail_record`)
-	must(t, err)
-	if err = f.c.ApplyCheckpoint(ctx, "members-a", tuple("a"), response("a", 1)); !errors.Is(err, measurement.ErrStaleSource) {
+	restore()
+	if err := f.c.ApplyCheckpoint(ctx, "members-a", tuple("a"), response("a", 1)); !errors.Is(err, measurement.ErrStaleSource) {
 		t.Fatal(err)
 	}
 	if snapshot(t, f, "members-a", "a", epoch, epoch.Add(time.Hour)).Known {

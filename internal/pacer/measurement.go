@@ -19,11 +19,14 @@ import (
 
 func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	ctx := context.Background()
-	m, err := measurement.Open(ctx, db, measurement.Options{Clock: p.now})
-	if err != nil {
+	// Finish the independent compiled namespace before Open establishes the
+	// feed's durable schema witness. Existing guarded stores still reject drift;
+	// this ordering does not refresh or repair a previously recorded witness.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth)); CREATE TABLE IF NOT EXISTS pacer_usage_capture_metadata(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
 		return nil, err
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth)); CREATE TABLE IF NOT EXISTS pacer_usage_capture_metadata(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
+	m, err := measurement.Open(ctx, db, measurement.Options{Clock: p.now})
+	if err != nil {
 		return nil, err
 	}
 	var source [16]byte

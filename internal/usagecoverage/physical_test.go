@@ -440,15 +440,13 @@ func TestPhysicalRestartRetainsHistoryNeverBorrowsAndOldGapStaysAtOrigin(t *test
 func TestPhysicalSQLFailureIsNotAcknowledgedAndLatches(t *testing.T) {
 	f, m := physicalSetup(t)
 	beginPhysical(t, f, m, 10)
-	_, err := f.db.Exec(`CREATE TRIGGER physical_failure BEFORE INSERT ON measurement_physical_records BEGIN SELECT RAISE(ABORT,'dummy physical failure'); END`)
-	must(t, err)
+	restore := rejectSQLInsert(t, f.db, "measurement_physical_records")
 	raw, capture := physicalUsage(t, "failed-store", "a", 11, 12)
-	if _, err = f.c.ObserveUsage(ctx, raw, capture); err == nil {
+	if _, err := f.c.ObserveUsage(ctx, raw, capture); err == nil {
 		t.Fatal("physical persistence failure acknowledged")
 	}
-	_, err = f.db.Exec(`DROP TRIGGER physical_failure`)
-	must(t, err)
-	_, err = f.c.ObserveUsage(ctx, raw, capture)
+	restore()
+	_, err := f.c.ObserveUsage(ctx, raw, capture)
 	must(t, err)
 	r := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
 	err = f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r)

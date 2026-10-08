@@ -253,18 +253,19 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		db.Close()
 		return nil, err
 	}
+	// Optional marker telemetry does not authorize policy operations and must
+	// never turn an evidence-store failure into a policy reset or fake readback.
+	// Its compiled namespace must precede the guarded measurement feed boundary.
+	p.policyEvidence, err = policyevidence.Open(db, p.now)
+	if err != nil {
+		p.measurementErrors++
+	}
 	measure, err := p.openMeasurements(db)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	p.measurement = measure
-	// Optional marker telemetry does not authorize policy operations and must
-	// never turn an evidence-store failure into a policy reset or fake readback.
-	p.policyEvidence, err = policyevidence.Open(db, p.now)
-	if err != nil {
-		p.measurementErrors++
-	}
 	p.measurements = map[string]measurement.Report{}
 	if cfg.HistoryPath != "" {
 		if _, err = os.Stat(cfg.HistoryPath); err != nil {
