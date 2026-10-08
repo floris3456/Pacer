@@ -125,7 +125,7 @@ DEPLOY_SCRIPTS = ('cutover_v8', 'deploy-discover', 'deploy-compact-on-switch', '
                   'deploy-shadow', 'mute-notifications', 'deploy-quota-usage-ct104', 'deploy-profile-keys-ct104',
                   'deploy-model-settings-ct104')
 # House scripts piped as `python3 -B - <phase>` show no file name; any other stdin script counts as busy.
-STDIN_PYTHON = re.compile(r'(^|/)python3?(\.\d+)?\s+(-[A-Za-z]+\s+)*-(\s|$)')
+STDIN_PYTHON = re.compile(r'(^|/)python3?(\.\d+)?\s+(-[A-Za-z]+\s+)*-(\s|$)', re.I)
 EXIT_OK, EXIT_ERROR, EXIT_REFUSED, EXIT_NOT_IDLE, EXIT_ROLLED_BACK, EXIT_ROLLBACK_FAILED, EXIT_VERIFY = 0, 1, 2, 3, 4, 5, 6
 
 DOCKERFILE = 'ARG BASE\nFROM ${BASE}\nCOPY CLIProxyAPI /CLIProxyAPI/CLIProxyAPI\n'
