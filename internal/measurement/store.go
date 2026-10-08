@@ -95,6 +95,9 @@ func Open(ctx context.Context, db *sql.DB, opts Options) (*Store, error) {
 	if version != schemaVersion {
 		return nil, fmt.Errorf("measurement: unsupported schema version %d", version)
 	}
+	if err = openReportFeed(ctx, c); err != nil {
+		return nil, fmt.Errorf("measurement report feed schema: %w", err)
+	}
 	// Fail closed for partial/lost schema without scanning any evidence tables.
 	for _, name := range append([]string{"measurement_books", "measurement_records", "measurement_record_revisions", "measurement_observations", "measurement_closures", "measurement_delivery_runs", "measurement_gaps"}, sourceTables...) {
 		if err = c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&exists); err != nil {
