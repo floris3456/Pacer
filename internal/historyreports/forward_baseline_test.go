@@ -17,7 +17,7 @@ import (
 
 // An explicitly modified COPY of the original synthetic SQL fixture supplies
 // physical IDs for identity tests. Original golden files/oracles are untouched.
-func forwardFrozenFixture(t *testing.T) *Reader {
+func forwardFrozenFixture(t *testing.T, edits ...func(*sql.DB)) *Reader {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -31,6 +31,9 @@ func forwardFrozenFixture(t *testing.T) *Reader {
 	}
 	if _, err = db.Exec(`UPDATE analytics_events SET payload=json_set(payload,'$.request_id','synthetic-physical-'||event_id)`); err != nil {
 		t.Fatal(err)
+	}
+	for _, edit := range edits {
+		edit(db)
 	}
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
