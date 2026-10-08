@@ -14,7 +14,7 @@ import (
 
 type testClock struct{ t time.Time }
 
-func (c *testClock) now() time.Time           { return c.t }
+func (c *testClock) now() time.Time          { return c.t }
 func (c *testClock) advance(d time.Duration) { c.t = c.t.Add(d) }
 
 func openLedgerDB(t *testing.T, path string) *sql.DB {

@@ -20,7 +20,9 @@ var (
 
 const opus = "claude-opus-5-5"
 
-func at(h, m int) time.Time { return day.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute) }
+func at(h, m int) time.Time {
+	return day.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+}
 
 var stays = map[string]bool{"protected": true, "current_best": true, "cold_margin": true}
 
