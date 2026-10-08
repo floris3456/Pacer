@@ -111,6 +111,10 @@ The independent historical store and native display metadata contracts are in
 offline importer preserves a frozen CPAMP snapshot; native Usage Quota report
 parity and management integration remain separate acceptance gates.
 
+The follow-up [native report adapter](docs/history-reports.md) ports the active
+Profile Workspace, Compare and window-evidence calculations. Its frozen synthetic
+oracle checks original CPAMP service outputs and JSON/CSV exports byte-for-byte.
+
 With Go 1.26, a C compiler and libc development headers:
 
 ```sh

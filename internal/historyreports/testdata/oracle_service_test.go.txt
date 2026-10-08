@@ -1,0 +1,97 @@
+// This test is overlaid into the ORIGINAL CPAMP usagehistory package, never
+// compiled into Pacer. It executes original service methods and writes fixtures.
+package usagehistory
+
+import (
+ "context"
+ "encoding/json"
+ "fmt"
+ "os"
+ "path/filepath"
+ "regexp"
+ "sort"
+ "strings"
+ "testing"
+
+ "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
+ "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
+)
+
+func TestPacerReportOracle(t *testing.T) {
+ out:=os.Getenv("PACER_ORACLE_OUT");if out==""{t.Fatal("offline output required")};ctx:=context.Background()
+ st,e:=store.Open(filepath.Join(out,"oracle.sqlite"));if e!=nil{t.Fatal(e)};defer st.Close();s:=New(st,nil);if e=s.Init(ctx);e!=nil{t.Fatal(e)}
+ exec:=func(q string,args ...any){t.Helper();if _,e:=s.db.Exec(q,args...);e!=nil{t.Fatal(e)}}
+ const cut int64=1790726400000;const day int64=86400000;const H int64=cut+day
+ const keyA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ const keyB="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ const checkpoint="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+ exec(`UPDATE analytics_state SET value=0`)
+ for _,a:=range []Account{{ID:"a",Provider:"claude",Label:"Main"},{ID:"b",Provider:"claude",Label:"Early reset"},{ID:"c",Provider:"claude",Label:"Ambiguous reset"},{ID:"d",Provider:"claude",Label:"H uncertainty"},{ID:"gap",Provider:"claude",Label:"No quota evidence"}}{
+  exec(`INSERT INTO analytics_accounts VALUES(?,?,?,?,?,?,0,'')`,a.ID,a.Provider,a.Label,"","",H)
+  exec(`INSERT INTO analytics_credential_inventory VALUES(?,?,?)`,a.ID,H,"connected")
+ }
+ cfg:=ProfileConfig{Revision:7,Profiles:[]Profile{{ID:"main",Name:"=Main subscription",Provider:"claude",Memberships:[]ProfileMembership{{Account:"a"}}},{ID:"partial",Name:"Dated membership",Provider:"claude",Memberships:[]ProfileMembership{{Account:"a",Start:cut-2*day,End:cut+1000}}},{ID:"early",Name:"Early reset",Provider:"claude",Memberships:[]ProfileMembership{{Account:"b"}}},{ID:"ambiguous",Name:"Ambiguous",Provider:"claude",Memberships:[]ProfileMembership{{Account:"c"},{Account:"d"}}},{ID:"gap",Name:"Ledger without quota",Provider:"claude",Memberships:[]ProfileMembership{{Account:"gap"}}}},Bindings:[]Binding{}}
+ exec(`INSERT INTO analytics_profile_revisions VALUES(7,?,'fixture',?)`,cut-3*day,string(encode(cfg)))
+ exec(`INSERT INTO api_key_aliases VALUES(?,?,?)`,keyA,"Work",cut)
+ exec(`INSERT INTO api_key_alias_history VALUES(?,?)`,keyB,keyA)
+ price:=model.ModelPrice{Prompt:4,Completion:20,CacheRead:.4,CacheCreation:5,PromptConfigured:true,CompletionConfigured:true,CacheReadConfigured:true,CacheCreationConfigured:true,Source:"synthetic fixture"}
+ exec(`INSERT INTO model_prices(model,prompt_per_1m,completion_per_1m,cache_per_1m,cache_read_per_1m,cache_creation_per_1m,prompt_configured,completion_configured,cache_read_configured,cache_creation_configured,source,updated_at_ms) VALUES('claude-opus-5-5',4,20,0,.4,5,1,1,1,1,'synthetic fixture',?)`,cut)
+ exec(`INSERT INTO analytics_prices VALUES('captured','claude-opus-5-5',?,?)`,cut,string(encode(map[string]any{"price":price,"source":"synthetic fixture"})))
+ obs:=func(id,account,kind,win string,start,end,at int64,used float64){o:=Observation{ID:id,Account:account,Provider:"claude",Kind:kind,Scope:"all",WindowID:win,Start:start,Reset:end,Duration:end-start,Used:&used,Observed:at,Received:at,Source:"provider_api",TimeLow:at,TimeHigh:at,TimeSource:"provider",Evidence:encode(map[string]any{"used_percent":used}),Boundary:"explicit"};exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`,o.ID,o.Account,o.Observed,o.WindowID,string(encode(o)))}
+ obs("a-week-open","a","weekly","a-week",cut-6*day,cut+day/2,cut-6*day+1000,10)
+ obs("a-week-last","a","weekly","a-week",cut-6*day,cut+day/2,cut+day/2-1000,60)
+ obs("a-old-open","a","5h","a-old",cut-2*day,cut-2*day+18000000,cut-2*day+1000,5)
+ obs("a-old-last","a","5h","a-old",cut-2*day,cut-2*day+18000000,cut-2*day+18000000-1000,20)
+ obs("a-h-open","a","5h","a-h",H-18000000,H,H-18000000+1000,1)
+ obs("a-h-last","a","5h","a-h",H-18000000,H,H-1000,50)
+ obs("a-current","a","5h","a-current",H,H+18000000,H,2)
+ for _,a:=range []string{"b","c"}{obs(a+"-open",a,"weekly",a+"-early",cut-5*day,cut+2*day,cut-4*day,10);obs(a+"-last",a,"weekly",a+"-early",cut-5*day,cut+2*day,cut-10000,80);obs(a+"-next",a,"weekly",a+"-current",cut+1000,cut+7*day+1000,cut+5000,1)
+  o:=Observation{ID:a+"-closure",Account:a,Provider:"claude",Kind:"weekly",Scope:"all",WindowID:a+"-early",Observed:cut+5000,Received:cut+5000,Source:"fixture:canonical-cycle",ClosedCycle:&CycleClosure{WindowID:a+"-early",End:cut,Earliest:cut,Latest:cut,Status:"closed"}}
+  exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`,o.ID,a,o.Observed,o.WindowID,string(encode(o)))
+  if a=="c"{o.ID="c-conflict";o.ClosedCycle.End++;o.ClosedCycle.Latest++;exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`,o.ID,a,o.Observed,o.WindowID,string(encode(o)))}
+ }
+ obs("d-open","d","5h","d-h-band",H-18000000,H-500,H-18000000+1000,10)
+ obs("d-last","d","5h","d-h-band",H-18000000,H+500,H-2000,50)
+ events:=[]Event{}
+ event:=func(id int64,name,account string,at int64,write int64,details *SourceTokenDetails) {e:=Event{ID:id,Hash:name,Account:account,Provider:"claude",Label:account,Model:"claude-opus-5-5",Started:at,Completed:at+100,Recorded:at+200,AccountingVersion:2,APIKeyHash:keyA,PriceID:"captured",SourceTokens:details,Tokens:Tokens{Input:write,CacheCreation:write,Total:write},Quality:"complete"};cost:=eventCost(e,price);e.CostNano=&cost;events=append(events,e)}
+ five,hour:=int64(250000),int64(750000)
+ event(1,"known-mixed","a",cut-2*day+2000,1000000,&SourceTokenDetails{Write5m:&five,Write1h:&hour})
+ event(2,"unknown-crossing","a",cut-2*day+3000,1000000,nil)
+ event(3,"enriched-mixed","a",H-17000000,1000000,nil)
+ event(4,"recorded-after-H","a",H-16000000,1000000,nil);events[len(events)-1].Recorded=H+1
+ event(5,"early-before","b",cut-20000,1000000,nil)
+ event(6,"early-after","b",cut+500,1000000,nil)
+ event(7,"ambiguous-unknown","c",cut-20000,1000000,nil)
+ event(8,"uncertain-H","d",H-16000000,1000000,nil)
+ event(9,"missing-price","gap",cut-1000,1000,nil);events[len(events)-1].Model="missing-model"
+ event(10,"invalid-counters","gap",cut-1000,1000,nil);events[len(events)-1].Tokens.Total=3
+ event(11,"allocation-boundary","a",H-18000000+500,1000000,nil);events[len(events)-1].Completed=H-18000000+1500
+ for i:=int64(12);i<=40;i++{event(i,fmt.Sprintf("request-%d",i),"a",cut-2*day+10000+i,1000,nil);if i%2==0{events[len(events)-1].APIKeyHash=keyB}}
+ event(100,"beyond-checkpoint","a",cut-2*day+5000,999999999,nil)
+ for _,e:=range events{exec(`INSERT INTO analytics_events VALUES(?,?,?,?,?,?)`,e.Hash,e.ID,e.Account,e.Started,e.Completed,string(encode(e)));exec(`INSERT INTO analytics_event_keys VALUES(?,?)`,e.Hash,e.APIKeyHash)}
+ exec(`INSERT OR REPLACE INTO analytics_state VALUES('events',100),('event_keys',0)`)
+ partialHour:=int64(500000);if _,e=s.RecordTokenEvidence(ctx,"enriched-mixed","provider:late-split",SourceTokenDetails{Write5m:&five,Write1h:&partialHour});e!=nil{t.Fatal(e)}
+ var observed int64;if e=s.db.QueryRow(`SELECT max(rowid) FROM analytics_observations`).Scan(&observed);e!=nil{t.Fatal(e)}
+ cp:=HistoricalImportCheckpoint{SourceCheckpoint:checkpoint,EventsThrough:40,ObservationsThrough:observed,At:H};if _,e=s.PinHistoricalValuation(ctx,cp);e!=nil{t.Fatal(e)}
+ book,e:=s.comparisonPriceBook(ctx,"");if e!=nil{t.Fatal(e)};book.Captured=H;exec(`UPDATE analytics_normalization_rules SET captured_ms=?,payload=? WHERE id=?`,H,string(encode(book)),book.ID)
+ legacy:=ComparisonPriceBook{Policy:legacyProfileValuePolicy,Prices:book.Prices,References:book.References};legacy.ID=legacyProfileValuePolicy+":"+digest(string(encode(legacy)));legacy.Captured=cut-3*day;exec(`INSERT INTO analytics_normalization_rules VALUES(?,?,?)`,legacy.ID,legacy.Captured,string(encode(legacy)))
+ type result struct{Name string `json:"name"`;Filter ProfileWorkspaceFilter `json:"filter"`;Report json.RawMessage `json:"report"`;Evidence map[string]json.RawMessage `json:"evidence"`}
+ base:=ProfileWorkspaceFilter{ProfileFilter:ProfileFilter{At:H,Through:40,ObservationsThrough:observed,Revision:7,ValuationRule:book.ID,TokenEvidenceThrough:1,Estimator:EstimatorVersion}}
+ results:=[]result{}
+ for _,name:=range []string{"v3","v2","page-1","key-filter","partial","initial-revision","v2-evidence-pin"}{f:=base;switch name{case "v2","v2-evidence-pin":f.ValuationRule=legacy.ID;f.TokenEvidenceThrough=0;f.Estimator="";case "page-1":f.Page=1;case "key-filter":f.APIKey=keyB;case "partial":f.Profile="partial";case "initial-revision":f.Revision=0}
+  r,e:=s.ProfileWorkspace(ctx,f);if e!=nil{t.Fatal(e)};item:=result{Name:name,Filter:f,Report:encode(r),Evidence:map[string]json.RawMessage{}}
+  if name=="v3"||name=="v2"||name=="key-filter"||name=="partial"||name=="v2-evidence-pin"{windows:=r.Windows;if name=="partial"{for _,p:=range r.Profiles{if p.ID=="partial"{windows=p.Windows}}};for _,w:=range windows{pin:=QuotaUsageFilter{ProfileFilter:f.ProfileFilter,WindowID:w.ID,Period:"history"};if name=="v2-evidence-pin"{if w.ID!="a-week"{continue};pin.Kind="weekly";pin.Period="current";pin.Basis="then";pin.SourcePlan="claude-max-20x";pin.TargetPlan="claude-max-5x";pin.CapacityRatio=2;pin.GatewayOnly=true};p,e:=s.QuotaEvidence(ctx,pin);if e!=nil{t.Fatal(name,w.ID,e)};item.Evidence[w.ID]=encode(p)}}
+  results=append(results,item)
+ }
+ raw,e:=json.MarshalIndent(results,"","  ");if e!=nil{t.Fatal(e)};if e=os.WriteFile(filepath.Join(out,"oracle.json"),append(raw,'\n'),0600);e!=nil{t.Fatal(e)}
+ schema,e:=os.ReadFile(os.Getenv("PACER_SCHEMA"));if e!=nil{t.Fatal(e)};names:=[]string{};for _,m:=range regexp.MustCompile(`(?i)create table if not exists ([a-z_]+)`).FindAllStringSubmatch(string(schema),-1){names=append(names,m[1])};sort.Strings(names)
+ var sqlout strings.Builder
+ for _,name:=range names{var ddl string;if e=s.db.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='table' AND name=?`,name).Scan(&ddl);e!=nil{t.Fatal(e)};sqlout.WriteString(ddl+";\n")
+  rows,e:=s.db.Query(`PRAGMA table_info("`+name+`")`);if e!=nil{t.Fatal(e)};cols:=[]string{};for rows.Next(){var cid,nn,pk int;var n,typ string;var d any;if e=rows.Scan(&cid,&n,&typ,&nn,&d,&pk);e!=nil{t.Fatal(e)};cols=append(cols,n)};rows.Close()
+  targets:=[]string{"rowid"};selects:=[]string{"quote(rowid)"};for _,n:=range cols{targets=append(targets,`"`+n+`"`);selects=append(selects,`quote("`+n+`")`)}
+  rows,e=s.db.Query(`SELECT `+strings.Join(selects,",")+` FROM "`+name+`" ORDER BY rowid`);if e!=nil{t.Fatal(e)}
+  for rows.Next(){values:=make([]string,len(targets));ptr:=make([]any,len(values));for i:=range ptr{ptr[i]=&values[i]};if e=rows.Scan(ptr...);e!=nil{t.Fatal(e)};sqlout.WriteString(`INSERT INTO "`+name+`" (`+strings.Join(targets,",")+") VALUES("+strings.Join(values,",")+");\n")};rows.Close()
+ }
+ if e=os.WriteFile(filepath.Join(out,"fixture.sql"),[]byte(sqlout.String()),0600);e!=nil{t.Fatal(e)}
+ t.Logf("original CPAMP: %d pinned reports, %d observation rows, H=%d",len(results),observed,H)
+}

@@ -1,0 +1,31 @@
+// Overlaid only into ORIGINAL CPAMP controllers; calls actual HTTP export code.
+package usagehistory
+
+import (
+ "bytes"
+ "context"
+ "encoding/json"
+ "fmt"
+ "net/http/httptest"
+ "net/url"
+ "os"
+ "path/filepath"
+ "testing"
+ "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/app"
+ history "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/usagehistory"
+ "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
+)
+
+func TestPacerExportOracle(t *testing.T){
+ out:=os.Getenv("PACER_ORACLE_OUT");raw,e:=os.ReadFile(filepath.Join(out,"oracle.json"));if e!=nil{t.Fatal(e)}
+ var cases []struct{Name string `json:"name"`;Filter history.ProfileWorkspaceFilter `json:"filter"`;Evidence map[string]json.RawMessage `json:"evidence"`};if e=json.Unmarshal(raw,&cases);e!=nil{t.Fatal(e)}
+ st,e:=store.Open(filepath.Join(out,"oracle.sqlite"));if e!=nil{t.Fatal(e)};defer st.Close();s:=history.New(st,nil);if e=s.Init(context.Background());e!=nil{t.Fatal(e)};h:=Handler{App:&app.Context{UsageHistoryService:s}}
+ results:=map[string]string{}
+ for _,item:=range cases{
+  f,_:=json.Marshal(item.Filter);var fields map[string]any;decoder:=json.NewDecoder(bytes.NewReader(f));decoder.UseNumber();if e=decoder.Decode(&fields);e!=nil{t.Fatal(e)};q:=url.Values{};for k,v:=range fields{q.Set(k,fmt.Sprint(v))};q.Set("view","profiles")
+  for _,kind:=range []string{"daily","comparisons","json"}{q.Set("format","csv");q.Del("export");if kind=="comparisons"{q.Set("export","comparisons")};if kind=="json"{q.Set("format","json")};w:=httptest.NewRecorder();h.profileWorkspace(w,httptest.NewRequest("GET","/profiles?"+q.Encode(),nil));if w.Code!=200{t.Fatalf("%s %s: %s",item.Name,kind,w.Body.String())};results[item.Name+"/"+kind]=w.Body.String()}
+  q.Del("export");q.Set("period","history");q.Set("detail","true")
+  for id,proof:=range item.Evidence{var p history.QuotaUsageEvidence;if e=json.Unmarshal(proof,&p);e!=nil{t.Fatal(e)};raw,_:=json.Marshal(p.Filter);fields=map[string]any{};decoder=json.NewDecoder(bytes.NewReader(raw));decoder.UseNumber();if e=decoder.Decode(&fields);e!=nil{t.Fatal(e)};q=url.Values{};q.Set("detail","true");for k,v:=range fields{q.Set(k,fmt.Sprint(v))};for _,format:=range []string{"json","csv"}{q.Set("format",format);w:=httptest.NewRecorder();h.quotaUsage(w,httptest.NewRequest("GET","/profiles?"+q.Encode(),nil));if w.Code!=200{t.Fatalf("%s %s: %s",item.Name,id,w.Body.String())};results[item.Name+"/"+id+"/"+format]=w.Body.String()}}
+ }
+ raw,e=json.MarshalIndent(results,"","  ");if e!=nil{t.Fatal(e)};if e=os.WriteFile(filepath.Join(out,"exports.json"),append(raw,'\n'),0600);e!=nil{t.Fatal(e)};t.Logf("%d original controller export responses",len(results))
+}

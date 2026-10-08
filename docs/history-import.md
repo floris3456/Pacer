@@ -5,6 +5,11 @@ archive plus native display metadata**. Completion is `preservation:
 "archival-only"`; it does not establish Usage Quota report parity or authorize
 CPAMP retirement. There is no importer HTTP route or startup backfill.
 
+The follow-up [native frozen-history report adapter](history-reports.md) now
+computes and verifies the active Profile Workspace/Compare/daily/evidence paths.
+Archive publication still denotes preservation; report parity has its own
+explicit scope and acceptance receipts.
+
 ## Ownership and frozen-input contract
 
 Parent owns `internal/pacer`, management authorization, ABI and UI integration.
@@ -222,8 +227,8 @@ checks supplement counts.
 
 Still required before retirement:
 
-1. Extract native Usage Quota calculations/evidence/pagination/exports with saved
-   v2/v3 valuation, identity semantics, revisions, books and source bounds.
+1. Integrate the [native report adapter](history-reports.md), whose active-view
+   extraction is now oracle-verified, and close its listed unported-view gates.
    Connect measurement ingestion without duplicates or lost attribution.
 2. Validate a real approved frozen dataset and external report pins; compare exact
    fixed-interval totals/allocation/evidence (early resets, shared-pool key filters,
