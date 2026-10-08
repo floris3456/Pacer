@@ -63,6 +63,123 @@ type NativeMetadata struct {
 	Dispatched             bool          `json:"dispatched"`
 	BreakpointCount        int           `json:"breakpoint_count"`
 	Diagnostics            []string      `json:"diagnostics,omitempty"`
+	// PrefixSnapshot is optional, validated CPA prefix evidence. It is nil when
+	// absent or invalid (then Diagnostics has prefix_snapshot_invalid). Absent
+	// means omitted, so snapshot-less records keep their existing encoding.
+	PrefixSnapshot *PrefixSnapshot `json:"prefix_snapshot,omitempty"`
+}
+
+// PrefixSnapshot is CPA's keyed fingerprint of the final-wire cacheable prefix
+// for one dispatch. Tags are only comparable within one KeyID; a CPA restart
+// rotates the key. It never contains content, tool names, IDs, or URLs.
+type PrefixSnapshot struct {
+	Version     int              `json:"version"`
+	KeyID       string           `json:"key_id"`
+	SettingsTag string           `json:"settings_tag"`
+	Endpoints   []PrefixEndpoint `json:"endpoints"`
+	Automatic   bool             `json:"automatic"`
+	Shape       string           `json:"shape"`
+	Reasons     []string         `json:"reasons,omitempty"`
+}
+
+// PrefixEndpoint is one explicit cache marker, in tools→system→messages order.
+type PrefixEndpoint struct {
+	Ordinal int    `json:"ordinal"`
+	Section string `json:"section"`
+	TTL     string `json:"ttl"`
+	Tag     string `json:"tag"`
+}
+
+// nativePrefixSnapshot and nativePrefixEndpoint are the decoder's view of the
+// wire member. They are copied into the exported types only after validation,
+// so decoder memory is never aliased by a retained record.
+type nativePrefixSnapshot struct {
+	Version     int                    `json:"version"`
+	KeyID       string                 `json:"key_id"`
+	SettingsTag string                 `json:"settings_tag"`
+	Endpoints   []nativePrefixEndpoint `json:"endpoints"`
+	Automatic   bool                   `json:"automatic"`
+	Shape       string                 `json:"shape"`
+	Reasons     []string               `json:"reasons"`
+}
+type nativePrefixEndpoint struct {
+	Ordinal int    `json:"ordinal"`
+	Section string `json:"section"`
+	TTL     string `json:"ttl"`
+	Tag     string `json:"tag"`
+}
+
+// Fixed vocabularies from CPA's cache_prefix snapshot. Unknown values are
+// invalid, so a future CPA shape is never mistaken for a known one.
+const maxPrefixEndpoints = 4
+
+var prefixSectionRank = map[string]int{"tools": 0, "system": 1, "messages": 2}
+var prefixReasons = map[string]bool{"automatic_marker": true, "typed_tool": true, "hidden_processing": true,
+	"thinking": true, "non_text_content": true, "server_tool": true, "no_endpoint": true, "invalid_marker": true}
+
+// validNativePrefix returns a fresh, fully validated copy of w, or nil if any
+// rule fails. Unknown wire members were already ignored by the decoder.
+func validNativePrefix(w nativePrefixSnapshot) *PrefixSnapshot {
+	if w.Version != 1 || !lowerHex(w.KeyID, 16) || !lowerHex(w.SettingsTag, 64) {
+		return nil
+	}
+	// Non-nil is required: "endpoints" must be present, though it may be empty.
+	if w.Endpoints == nil || len(w.Endpoints) > maxPrefixEndpoints {
+		return nil
+	}
+	if w.Shape != "text_single_pass" && w.Shape != "unsupported" || (w.Shape == "text_single_pass") != (len(w.Reasons) == 0) {
+		return nil
+	}
+	automatic := false
+	for i, reason := range w.Reasons {
+		// Strictly ascending means sorted and unique.
+		if !prefixReasons[reason] || (i > 0 && reason <= w.Reasons[i-1]) {
+			return nil
+		}
+		automatic = automatic || reason == "automatic_marker"
+	}
+	if automatic != w.Automatic {
+		return nil
+	}
+	if hasNoEndpoint := containsString(w.Reasons, "no_endpoint"); hasNoEndpoint != (len(w.Endpoints) == 0) {
+		return nil
+	}
+	endpoints := make([]PrefixEndpoint, len(w.Endpoints))
+	lastRank := 0
+	for i, e := range w.Endpoints {
+		rank, known := prefixSectionRank[e.Section]
+		if e.Ordinal != i || !known || rank < lastRank || (e.TTL != "5m" && e.TTL != "1h") || !lowerHex(e.Tag, 64) {
+			return nil
+		}
+		lastRank = rank
+		endpoints[i] = PrefixEndpoint{Ordinal: e.Ordinal, Section: e.Section, TTL: e.TTL, Tag: e.Tag}
+	}
+	// append onto nil keeps Reasons nil when empty, matching omitempty.
+	return &PrefixSnapshot{Version: w.Version, KeyID: w.KeyID, SettingsTag: w.SettingsTag, Endpoints: endpoints,
+		Automatic: w.Automatic, Shape: w.Shape, Reasons: append([]string(nil), w.Reasons...)}
+}
+
+// lowerHex reports whether s is exactly n lowercase hexadecimal characters.
+func lowerHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // nativeEnvelope intentionally spells out CPA pluginapi.UsageRecord's PascalCase
@@ -110,6 +227,8 @@ type nativePolicyEvidence struct {
 	BreakpointCount   int                   `json:"breakpoint_count"`
 	Dispatched        bool                  `json:"dispatched"`
 	UpstreamStartedAt time.Time             `json:"upstream_started_at"`
+	// Prefix is optional CPA evidence; nil when absent. Validated in FromNative.
+	Prefix *nativePrefixSnapshot `json:"prefix"`
 }
 type nativeSelectedPolicy struct {
 	Protocol int `json:"protocol"`
@@ -223,6 +342,12 @@ func FromNative(rawJSON []byte, credential NativeCredential, sourceID string) (R
 	}
 	if p := n.CachePolicy; p != nil {
 		m.Dispatched, m.BreakpointCount = p.Dispatched, p.BreakpointCount
+		if p.Prefix != nil {
+			// Optional evidence: an invalid snapshot is dropped with a fixed code, never rejects the record.
+			if m.PrefixSnapshot = validNativePrefix(*p.Prefix); m.PrefixSnapshot == nil {
+				m.Diagnostics = append(m.Diagnostics, "prefix_snapshot_invalid")
+			}
+		}
 		r.Policy.EffectiveTTL = TTL(p.EffectiveTTL)
 		if p.Dispatched && !p.UpstreamStartedAt.IsZero() {
 			if !validTime(p.UpstreamStartedAt) || p.UpstreamStartedAt.Before(n.RequestedAt) || p.UpstreamStartedAt.After(end) {
