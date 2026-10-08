@@ -258,16 +258,10 @@ func FromNative(rawJSON []byte, credential NativeCredential, sourceID string) (R
 		m.Diagnostics = append(m.Diagnostics, "unverified_upstream_start")
 	}
 	r.Usage = nativeUsage(n, m)
-	if p := n.CachePolicy; p != nil && p.Selected != nil && knownStart(r) && r.Success && p.BreakpointCount > 0 && r.Kind == p.Selected.Kind && p.EffectiveTTL == p.Selected.TTL && r.Usage.Quality == "complete" {
-		_, valid := normalized(r.Usage)
-		if valid && (r.Usage.CacheRead > 0 || r.Usage.CacheCreate > 0) {
-			r.Activity.PrimaryPrefix = true
-			r.Activity.ProtectionTTL = TTL(p.EffectiveTTL)
-			r.Activity.PrefixRef = "sha256:" + key([]string{r.Attribution.CallerID, r.Attribution.InstallationID, r.Attribution.SessionID, r.Attribution.ProviderRoute, r.Policy.ContextEpoch})
-		}
-	}
-	// Native evidence covers eligible caller/CPA markers, not all relevant/billed
-	// provider prefixes. AllWritesCovered stays false, and warmth stays partial.
+	// Marker TTL and aggregate cache tokens do not identify a cache entry or its
+	// relationship to a reusable primary prefix. Keep the marker observation in
+	// Policy, but Activity has no positive prefix/TTL authority (managed or not).
+	// AllWritesCovered stays false, and the unknown remainder stays partial.
 	m.Diagnostics = unique(append(m.Diagnostics, "native_prefix_coverage_partial"))
 	raw, err := json.Marshal(struct {
 		Detail         *nativeDetail    `json:"Detail"`

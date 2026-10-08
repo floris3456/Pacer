@@ -49,6 +49,12 @@ func protectionTTL(r Record) TTL {
 }
 
 func qualifies(r Record) bool {
+	// Current native metadata has no versioned entry-attribution proof. Persisted
+	// older records may contain scope-hash Activity positives; never trust them,
+	// even when Partial is false. Generic executor entry evidence is independent.
+	if r.Native != nil {
+		return false
+	}
 	_, valid := normalized(r.Usage)
 	return knownStart(r) && r.Final && r.Success && r.Activity.PrimaryPrefix && valid && (r.Usage.CacheRead > 0 || r.Usage.CacheCreate > 0) && (r.Kind == "primary" || r.Kind == "warming")
 }
@@ -57,6 +63,12 @@ func buildStretches(e evidence, q Query) []Stretch {
 	var out []Stretch
 	current := map[string]int{}
 	for _, r := range e.Records {
+		if r.Native != nil {
+			// Projection-local only: retain canonical records and their digests.
+			// Besides qualification, legacy Activity must not name/rebind a prefix,
+			// select a protection TTL, or let a warming call create a primary stretch.
+			r.Activity = Activity{Partial: true}
+		}
 		if r.Kind != "primary" && r.Kind != "warming" {
 			continue
 		}
@@ -94,6 +106,10 @@ func buildStretches(e evidence, q Query) []Stretch {
 			current[id] = idx
 		}
 		st := &out[idx]
+		if r.Native != nil {
+			st.UnknownWarmth = true
+			st.Reasons = append(st.Reasons, "unconfirmed_primary_prefix")
+		}
 		if r.Kind == "primary" && r.Activity.PrefixRef != "" {
 			st.PrefixRef = r.Activity.PrefixRef
 		}

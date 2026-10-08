@@ -156,7 +156,7 @@ func TestNativeCPAJSONShapeNormalizedV2AndPolicySnapshot(t *testing.T) {
 	if !r.StartedAt.Equal(n.CachePolicy.UpstreamStartedAt) || !r.Policy.RequestStartedAt.Equal(r.StartedAt) || r.StartedAt.Equal(n.CachePolicy.AttemptStartedAt) || !r.RequestedAt.Equal(n.RequestedAt) || !r.EndedAt.Equal(n.RequestedAt.Add(n.Latency)) {
 		t.Fatal(r.StartedAt, r.EndedAt, r.Policy)
 	}
-	if !r.Activity.PrimaryPrefix || !r.Activity.Partial || r.Activity.ProtectionTTL != TTL1h {
+	if r.Activity.PrimaryPrefix || !r.Activity.Partial || r.Activity.ProtectionTTL != "" || r.Activity.PrefixRef != "" {
 		t.Fatal(r.Activity)
 	}
 	if r.Usage.NonCacheInput != 100 || r.Usage.CacheRead != 200 || r.Usage.CacheCreate != 1000 || r.Usage.Output != 300 || r.Usage.Reasoning != 100 || counter(r.Usage.Total) != 1600 {
@@ -346,8 +346,8 @@ func TestNativeUnmanagedOrPreDispatchTimesAreExplicitlyUnknown(t *testing.T) {
 	}
 }
 
-func TestNativeActivityRequiresActualSuccessfulManagedPrimaryPrefixEvidence(t *testing.T) {
-	for _, test := range []string{"warming", "failed", "title", "compaction", "no-breakpoints", "mixed-wire", "no-cache", "unmanaged-wire"} {
+func TestNativeActivityUnsupportedWithoutEntryAttribution(t *testing.T) {
+	for _, test := range []string{"primary", "warming", "failed", "title", "compaction", "no-breakpoints", "mixed-wire", "no-cache", "unmanaged-wire"} {
 		t.Run(test, func(t *testing.T) {
 			n, c := nativeFixture()
 			switch test {
@@ -373,7 +373,7 @@ func TestNativeActivityRequiresActualSuccessfulManagedPrimaryPrefixEvidence(t *t
 				n.Detail.CacheCreation = nil
 			}
 			r := convertNative(t, n, c)
-			if r.Activity.PrimaryPrefix != (test == "warming") || !r.Activity.Partial || r.Policy.AllWritesCovered {
+			if r.Activity.PrimaryPrefix || r.Activity.PrefixRef != "" || r.Activity.ProtectionTTL != "" || !r.Activity.Partial || r.Policy.AllWritesCovered {
 				t.Fatal(r.Activity, r.Policy)
 			}
 		})
