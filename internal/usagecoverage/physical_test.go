@@ -554,3 +554,98 @@ func TestPhysicalProducerGapAcrossSinkReloadRevokesEarlierSink(t *testing.T) {
 		t.Fatal("sink reload isolated an origin-wide producer gap")
 	}
 }
+
+func physicalUsageAt(t *testing.T, event, id string, admission, dispatch uint64, requested time.Time) ([]byte, Capture) {
+	t.Helper()
+	raw, capture := rawUsage(event, id, requested)
+	var m map[string]json.RawMessage
+	must(t, json.Unmarshal(raw, &m))
+	var e pluginapi.UsageSourceEvidence
+	must(t, json.Unmarshal(m["SourceEvidence"], &e))
+	e.Physical = &pluginapi.UsagePhysicalDispatch{Version: 1, AdmissionSequence: admission, DispatchSequence: dispatch, StartedAt: e.UpstreamStartedAt.Add(time.Nanosecond)}
+	m["SourceEvidence"], _ = json.Marshal(e)
+	raw, err := json.Marshal(m)
+	must(t, err)
+	return raw, capture
+}
+
+// A consumer that never saw the sink's first cut (for example after a plugin
+// restart inside one CPA incarnation) adopts its own first known through cut
+// as the lower edge. The host's earlier cut is still never borrowed.
+func TestPhysicalKnownWithoutObservedFirstCutAdoptsOwnThroughCut(t *testing.T) {
+	f, m := physicalSetup(t)
+	early, capture := physicalUsageAt(t, "before-edge", "a", 11, 12, epoch.Add(time.Second))
+	_, err := f.c.ObserveUsageWithRecord(ctx, early, capture)
+	must(t, err)
+	r1 := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r1))
+	if selected(t, f, physicalSelection(f, m.ID, r1)).Known {
+		t.Fatal("host lower cut borrowed")
+	}
+	adopted := physicalSelection(f, m.ID, r1).Through
+	if lower, err := f.c.PhysicalLower(ctx, adopted); err != nil || lower == nil || *lower != adopted {
+		t.Fatal("own through cut not adopted as lower edge", lower, err)
+	}
+	inside, capture := physicalUsageAt(t, "after-edge", "a", 21, 22, epoch.Add(2*time.Minute))
+	observed, err := f.c.ObserveUsageWithRecord(ctx, inside, capture)
+	must(t, err)
+	r2 := physicalResponse("a", 30, 10, epoch.Add(3*time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r2))
+	if selected(t, f, physicalSelection(f, m.ID, r2)).Known {
+		t.Fatal("host lower cut borrowed on the second checkpoint")
+	}
+	s := physicalSelection(f, m.ID, r2)
+	s.From = adopted
+	got := selected(t, f, s)
+	if !got.Known || len(got.Facts) != 1 || got.Facts[0].EventID != observed.Record.EventID || got.Facts[0].DispatchSequence != 22 {
+		t.Fatalf("proof from adopted edge: %+v", got)
+	}
+	if lower, err := f.c.PhysicalLower(ctx, s.Through); err != nil || lower == nil || *lower != adopted {
+		t.Fatal("lower edge moved", lower, err)
+	}
+}
+
+// A membership change inside one sink incarnation (CPA verifying the account
+// after a restart) re-keys the epoch. No proof spans the change, earlier
+// proofs become unreadable, and proofs resume from a cut observed afterwards.
+func TestPhysicalMembershipChangeRekeysEpochAndNeverSpansIt(t *testing.T) {
+	f, m1 := physicalSetup(t)
+	beginPhysical(t, f, m1, 10)
+	r1 := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m1.ID, tuple("a"), r1))
+	if !selected(t, f, physicalSelection(f, m1.ID, r1)).Known {
+		t.Fatal("fixture: first membership proof")
+	}
+	m2 := membership("members-a-verified", "a", "a")
+	m2.Revision, m2.Complete, m2.From = 2, false, epoch.Add(90*time.Second)
+	m2.Through = m2.From
+	must(t, f.c.PutMembership(ctx, m2))
+	r2 := physicalResponse("a", 30, 10, epoch.Add(2*time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m2.ID, tuple("a"), r2))
+	if selected(t, f, physicalSelection(f, m2.ID, r2)).Known {
+		t.Fatal("proof spans the membership change")
+	}
+	if selected(t, f, physicalSelection(f, m1.ID, r1)).Known {
+		t.Fatal("proof of the replaced membership still readable")
+	}
+	adopted := physicalSelection(f, m2.ID, r2).Through
+	r3 := physicalResponse("a", 40, 10, epoch.Add(3*time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m2.ID, tuple("a"), r3))
+	s := physicalSelection(f, m2.ID, r3)
+	s.From = adopted
+	if got := selected(t, f, s); !got.Known || len(got.Facts) != 0 {
+		t.Fatalf("proof after the change: %+v", got)
+	}
+	old := physicalSelection(f, m1.ID, r3)
+	old.From = physicalSelection(f, m1.ID, r2).Through
+	if selected(t, f, old).Known {
+		t.Fatal("replaced membership gained a proof")
+	}
+	// An older sequence under the replaced membership is stale and changes nothing.
+	if err := f.c.ApplyCheckpoint(ctx, m1.ID, tuple("a"), physicalResponse("a", 35, 10, epoch.Add(150*time.Second), false)); !errors.Is(err, measurement.ErrStaleSource) {
+		t.Fatal("older sequence accepted", err)
+	}
+	if lower, err := f.c.PhysicalLower(ctx, s.Through); err != nil || lower == nil || *lower != adopted {
+		t.Fatal("stale callback moved the lower edge", lower, err)
+	}
+}

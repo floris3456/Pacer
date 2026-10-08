@@ -56,15 +56,26 @@ func (p *PhysicalProof) Apply(ctx context.Context, in PhysicalCheckpoint) error 
 		var lower []byte
 		err = tx.QueryRowContext(ctx, `SELECT id,consumer_id,active,last_seq,digest,lower_body,last_at FROM measurement_physical_epochs WHERE source_ref=? AND manager_id=? AND sink_id=?`, i.SourceRef, i.ManagerID, i.SinkID).Scan(&id, &owner, &active, &last, &lastDigest, &lower, &at)
 		if err == nil {
-			if owner != p.consumer || id != i.epoch() || !active {
+			if owner != p.consumer || !active || i.Sequence < uint64(last) {
 				refusal = ErrStaleSource
 				return nil
 			}
-			if i.Sequence < uint64(last) {
-				refusal = ErrStaleSource
-				return nil
-			}
-			if i.Sequence == uint64(last) {
+			if id != i.epoch() {
+				// Same consumer and sink, another membership: the tuple's account
+				// membership changed inside this sink incarnation (for example CPA
+				// verified the account after a restart). No proof may span that
+				// change. The epoch is re-keyed and its lower edge dropped, so
+				// earlier proofs become unreadable (missing_epoch) and a later
+				// quiescent cut observed here becomes the new lower edge.
+				if i.Sequence == uint64(last) {
+					refusal = ErrStaleSource
+					return nil
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE measurement_physical_epochs SET id=?,lower_body=NULL,last_at=0 WHERE id=?`, i.epoch(), id); err != nil {
+					return err
+				}
+				id, lower, at = i.epoch(), nil, 0
+			} else if i.Sequence == uint64(last) {
 				if in.Digest != lastDigest {
 					refusal = ErrConflict
 					return gap("equal_sequence_conflict")
@@ -91,6 +102,39 @@ func (p *PhysicalProof) Apply(ctx context.Context, in PhysicalCheckpoint) error 
 		}
 		if in.HasGap || in.Missing {
 			return finish()
+		}
+		var stored *PhysicalCutIdentity
+		if len(lower) > 0 {
+			stored = new(PhysicalCutIdentity)
+			if json.Unmarshal(lower, stored) != nil {
+				return ErrInvalid
+			}
+		}
+		if in.Coverage == "known" && in.From != nil && in.From.valid() && in.From.epoch() == id && !in.From.At.After(p.store.clock()) {
+			switch {
+			case stored == nil:
+				// The host keeps one lower cut per sink and never repeats it. A
+				// lower edge this consumer did not observe is never borrowed:
+				// this checkpoint's own quiescent through cut becomes the lower
+				// edge instead, and only later checkpoints can prove from it.
+				// This covers a consumer that missed the sink's first cut and an
+				// epoch re-keyed by a membership change.
+				t := in.Through
+				if t != nil && t.valid() && t.epoch() == id && t.Sequence == i.Sequence && in.From.Sequence < t.Sequence && !t.At.Before(start) && !t.At.After(p.store.clock()) {
+					lower, _ = json.Marshal(t)
+					at = t.At.UnixNano()
+					if err = putPhysicalCut(ctx, tx, *t); err != nil {
+						return err
+					}
+				}
+				return finish()
+			case in.From.Sequence < stored.Sequence && !in.From.At.After(stored.At):
+				// The host's cut precedes the adopted lower edge, so the host's
+				// known coverage includes [adopted edge, through]. Proofs start at
+				// the adopted edge.
+				adopted := *stored
+				in.From = &adopted
+			}
 		}
 		if in.From != nil && (in.From.epoch() != id || !in.From.valid() || in.From.At.Before(start) || in.From.At.After(p.store.clock())) {
 			if err = gap("invalid_lower_cut"); err != nil {
@@ -253,6 +297,25 @@ func physicalJoin(ctx context.Context, q physicalQuerier, s PhysicalSelection, m
 		}
 	}
 	return facts, "", rows.Err()
+}
+
+// PhysicalLower returns the lower edge stored for the active epoch of cut c,
+// or nil without one. Every proof that epoch can still write starts there,
+// which may be later than the host's own lower cut.
+func (s *Store) PhysicalLower(ctx context.Context, c PhysicalCutIdentity) (*PhysicalCutIdentity, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT lower_body FROM measurement_physical_epochs WHERE id=? AND consumer_id=? AND source_ref=? AND manager_id=? AND sink_id=? AND active=1`, c.epoch(), c.ConsumerID, c.SourceRef, c.ManagerID, c.SinkID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && len(raw) == 0 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var lower PhysicalCutIdentity
+	if json.Unmarshal(raw, &lower) != nil || lower.epoch() != c.epoch() {
+		return nil, ErrInvalid
+	}
+	return &lower, nil
 }
 
 // SelectPhysical reads only an exact durable edge, including historical edges
