@@ -48,6 +48,10 @@ summary:hover{color:#ffffff}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);padding:8px 10px;margin:8px 0}
 .table-wrap{overflow:auto;border:1px solid var(--line);margin:10px 0}
 .table-wrap td{overflow-wrap:anywhere;min-width:96px}
+.hash{display:block;max-width:34ch;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.hash+.hash{margin-top:4px}
+tr.empty td{color:var(--muted)}
+tbody tr.empty:hover td{background:transparent}
 .table-wrap td:first-child,.table-wrap th:first-child{padding-left:12px}
 .table-wrap tr:last-child td{border-bottom:0}
 [hidden]{display:none!important}
@@ -246,6 +250,8 @@ pre,code,kbd,samp{background:var(--field)}
   const stateNames={active:'active',fresh:'active',observed:'active',current:'active',pending:'pending','awaiting-confirmation':'pending',assumed:'assumed',stale:'stale',unknown:'unknown'};
 function cellState(value){if(typeof value!=='string')return '';const parts=value.split(' · ').map(part=>part.trim().toLowerCase());return parts.includes('stale')?'stale':stateNames[parts[0]]||''}
 function row(target, values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value??'Unknown';const state=cellState(value??'Unknown');if(state)td.dataset.state=state;tr.append(td)}el(target).append(tr);return tr}
+function hashCell(td,values){td.replaceChildren(...values.map(value=>{const span=document.createElement('span');span.className='hash';span.textContent=value;return span}))}
+function emptyRow(target,columns){const tr=document.createElement('tr');tr.className='empty';const td=document.createElement('td');td.colSpan=columns;td.textContent='None yet';tr.append(td);el(target).append(tr)}
   function date(value){if(!value||String(value).startsWith('0001-'))return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
   function editModel(model){
     editing=model;
@@ -267,8 +273,10 @@ function row(target, values){const tr=document.createElement('tr');for(const val
   function showMetadata(){
     el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent=metadata.coverage||'';
     el('add-key').disabled=el('add-group').disabled=!metadata.editable;
-    for(const item of metadata.keys||[]){const tr=row('key-rows',[item.alias||'Unnamed key',item.reference,(item.lineage_hashes||[]).join(', ')]);metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]])}
+    for(const item of metadata.keys||[]){const tr=row('key-rows',[item.alias||'Unnamed key',item.reference,'']);hashCell(tr.children[1],[item.reference]);hashCell(tr.children[2],item.lineage_hashes||[]);metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]])}
+    if(!(metadata.keys||[]).length)emptyRow('key-rows',4);
     for(const group of metadata.groups||[]){const names=(group.key_references||[]).map(ref=>metadata.keys.find(k=>k.reference===ref)?.alias||ref);const tr=row('group-rows',[group.name,names.join(', ')]);metadataButtons(tr,[['Edit group',()=>editMetadata('put-group',group)]])}
+    if(!(metadata.groups||[]).length)emptyRow('group-rows',3);
   }
   function editMetadata(action,item){
     const reference=item?.reference||(action==='put-group'?'group:'+Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join(''):'');
