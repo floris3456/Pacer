@@ -61,6 +61,7 @@ func TestEffectiveTTLReadbackRequiresPersistedNativeEvidenceAndAuthorizedGet(t *
 		t.Fatal(err)
 	}
 	usage := map[string]any{"Provider": "claude", "Model": "claude-opus-5-5", "LifecycleRequestID": "logical", "RequestID": "physical", "AuthID": c.ID, "AuthIndex": c.Index, "ExecutorType": "ClaudeExecutor", "SessionID": "pck:independent-affinity-topology", "NodeKind": "primary", "RequestedAt": now.Add(-2 * time.Second), "Latency": int64(time.Second), "Failed": false, "AccountingVersion": 2, "Detail": map[string]any{}, "CachePolicy": map[string]any{"selected": selected, "effective_ttl": "1h", "breakpoint_count": 2, "dispatched": true, "upstream_started_at": now.Add(-1500 * time.Millisecond)}}
+	usage["SourceEvidence"] = map[string]any{"scope": map[string]any{"provider": "claude", "auth_id": c.ID, "auth_index": c.Index, "kind": "cpa.claude.http.first-party", "version": 1}, "manager_incarnation_id": "host-incarnation", "tracked": true, "requested_at": now.Add(-2 * time.Second), "upstream_started_at": now.Add(-1490 * time.Millisecond), "final_usage_at": now.Add(-900 * time.Millisecond)}
 	raw, _ := json.Marshal(usage)
 	if err = p.recordUsage(raw); err != nil {
 		t.Fatal(err)

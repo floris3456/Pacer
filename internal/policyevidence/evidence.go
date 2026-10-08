@@ -104,7 +104,8 @@ func project(r measurement.Record, now time.Time) (event, error) {
 		Scope                                        scope
 		Provider, Client, Model, Account, Credential string
 		Policy                                       measurement.PolicySnapshot
-		Kind, Basis                                  string
+		Kind, Basis, EndBasis                        string
+		SourceRequested, SourceFinalUsage            time.Time
 		Requested, Started, Ended                    time.Time
 		Final, Success, HasNative                    bool
 		Executor, Binding, NodeKind, NativeSession   string
@@ -113,12 +114,15 @@ func project(r measurement.Record, now time.Time) (event, error) {
 		Latency                                      time.Duration
 	}{Event: r.EventID, Source: r.SourceID, Attempt: r.AttemptID, Execution: r.ExecutionID, Logical: r.RequestID,
 		Scope: e.scope, Provider: a.Provider, Client: a.Client, Model: a.Model, Account: a.AccountID, Credential: a.CredentialRef,
-		Policy: p, Kind: r.Kind, Basis: r.StartTimeBasis, Requested: r.RequestedAt.UTC(), Started: r.StartedAt.UTC(), Ended: r.EndedAt.UTC(), Final: r.Final, Success: r.Success, HasNative: r.Native != nil}
+		Policy: p, Kind: r.Kind, Basis: r.StartTimeBasis, EndBasis: r.EndTimeBasis, Requested: r.RequestedAt.UTC(), Started: r.StartedAt.UTC(), Ended: r.EndedAt.UTC(), Final: r.Final, Success: r.Success, HasNative: r.Native != nil}
 	proof.Policy.RequestStartedAt = proof.Policy.RequestStartedAt.UTC()
 	if n := r.Native; n != nil {
 		proof.Executor, proof.Binding, proof.NodeKind = n.ExecutorType, n.CredentialBindingRef, n.NodeKind
 		proof.NativeSession = n.SessionID
 		proof.Dispatched, proof.Compaction, proof.Breakpoints, proof.Latency = n.Dispatched, n.IsCompaction, n.BreakpointCount, n.Latency
+		if source := n.SourceEvidence; source != nil {
+			proof.SourceRequested, proof.SourceFinalUsage = source.RequestedAt.UTC(), source.FinalUsageAt.UTC()
+		}
 	}
 	encoded, err := json.Marshal(proof)
 	if err != nil {
@@ -147,7 +151,13 @@ func project(r measurement.Record, now time.Time) (event, error) {
 	if !r.Final || !r.Success || !n.Dispatched {
 		return ignore("no_successful_dispatch")
 	}
-	if !validTime(now) || r.StartTimeBasis != "upstream" || !validTime(r.StartedAt) || !validTime(r.RequestedAt) || !validTime(r.EndedAt) || !p.RequestStartedAt.Equal(r.StartedAt) || r.RequestedAt.After(r.StartedAt) || r.EndedAt.Before(r.StartedAt) || r.StartedAt.After(now) || r.EndedAt.After(now) || n.Latency < 0 || !r.RequestedAt.Add(n.Latency).Equal(r.EndedAt) {
+	endMatches := r.EndTimeBasis == "" && r.RequestedAt.Add(n.Latency).Equal(r.EndedAt)
+	if source := n.SourceEvidence; source != nil && r.EndTimeBasis == "source_final_usage_observation" {
+		// Source final-usage collection can follow latency capture. It bounds
+		// this observed dispatch; it is not a producer-close or billing clock.
+		endMatches = source.RequestedAt.Equal(r.RequestedAt) && source.FinalUsageAt.Equal(r.EndedAt) && !r.RequestedAt.Add(n.Latency).After(r.EndedAt)
+	}
+	if !validTime(now) || r.StartTimeBasis != "upstream" || !validTime(r.StartedAt) || !validTime(r.RequestedAt) || !validTime(r.EndedAt) || !p.RequestStartedAt.Equal(r.StartedAt) || r.RequestedAt.After(r.StartedAt) || r.EndedAt.Before(r.StartedAt) || r.StartedAt.After(now) || r.EndedAt.After(now) || n.Latency < 0 || !endMatches {
 		return ignore("unverified_dispatch_clock")
 	}
 	e.Ordered = true

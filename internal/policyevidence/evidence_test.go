@@ -241,6 +241,36 @@ func TestNativeAffinityTopologyCannotRebindAuthenticatedPolicyScope(t *testing.T
 	wantTTL(t, s, strings.Repeat("c", 64), state("epoch", "1h", 3), "")
 }
 
+func TestSourceFinalUsageClockIsAnObservationNotAnExactLatencyEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bad  bool
+	}{{"matching-native-source", false}, {"mismatched-source-clock", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _, _ := fixture(t)
+			r := record(tc.name, testTime, measurement.TTL1h)
+			r.EndedAt = r.EndedAt.Add(time.Millisecond)
+			r.EndTimeBasis = "source_final_usage_observation"
+			r.Native.SourceEvidence = &measurement.NativeSource{RequestedAt: r.RequestedAt, FinalUsageAt: r.EndedAt}
+			if tc.bad {
+				r.Native.SourceEvidence.RequestedAt = r.RequestedAt.Add(time.Nanosecond)
+			}
+			result := observe(t, s, r)
+			if tc.bad {
+				if result.Disposition != "ignored" {
+					t.Fatal(result)
+				}
+				wantTTL(t, s, caller, state("epoch", "1h", 3), "")
+			} else {
+				if result.Disposition != "recorded" {
+					t.Fatal(result)
+				}
+				wantTTL(t, s, caller, state("epoch", "1h", 3), "1h")
+			}
+		})
+	}
+}
+
 func TestIgnoredDispatchSourceAndClockEvidenceNeverPromotes(t *testing.T) {
 	tests := map[string]func(*measurement.Record){
 		"failed":                func(r *measurement.Record) { r.Success = false },
