@@ -38,15 +38,17 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
-	ReportPath      string       `yaml:"report_path"`
-	CachePolicy     PolicyConfig `yaml:"cache_policy"`
-	Enabled         bool         `yaml:"enabled"`
-	Priority        int          `yaml:"priority"`
-	StatePath       string       `yaml:"state_path"`
-	HistoryPath     string       `yaml:"history_path"`
-	CompactOnSwitch bool         `yaml:"compact_on_switch"`
-	UsageAuthURL    string       `yaml:"usage_auth_url"`
-	Routing         struct {
+	ForwardReportPath string       `yaml:"forward_report_path" json:"-"`
+	ForwardReportBook string       `yaml:"forward_report_book" json:"-"`
+	ReportPath        string       `yaml:"report_path"`
+	CachePolicy       PolicyConfig `yaml:"cache_policy"`
+	Enabled           bool         `yaml:"enabled"`
+	Priority          int          `yaml:"priority"`
+	StatePath         string       `yaml:"state_path"`
+	HistoryPath       string       `yaml:"history_path"`
+	CompactOnSwitch   bool         `yaml:"compact_on_switch"`
+	UsageAuthURL      string       `yaml:"usage_auth_url"`
+	Routing           struct {
 		Mode      string   `yaml:"mode"`
 		Providers []string `yaml:"providers"`
 	} `yaml:"routing"`
@@ -68,6 +70,8 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	forward            *forwardPublisher
+	forwardOptions     *forwardOptions
 	coverage           *usagecoverage.Consumer
 	coverageGroups     map[string]coverageGroup
 	coverageMu         sync.Mutex
@@ -166,7 +170,13 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.stopped {
+		return nil, errors.New("Pacer is quiesced; create a new instance for reload")
+	}
 	if p.db != nil {
+		if p.cfg.ForwardReportPath != cfg.ForwardReportPath || p.cfg.ForwardReportBook != cfg.ForwardReportBook {
+			return nil, errors.New("forward report configuration changes require idle reload")
+		}
 		if p.cfg.ReportPath != cfg.ReportPath {
 			return nil, errors.New("report_path change requires idle reload")
 		}
@@ -187,6 +197,15 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		p.cfg = cfg
 		return registration(p.policy != nil), nil
 	}
+	forward, err := p.openForward(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if forward != nil && p.forward != forward {
+			forward.close()
+		}
+	}()
 	if err := os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); err != nil {
 		return nil, err
 	}
@@ -274,6 +293,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
 	p.policy = policy
+	p.forward = forward
 	return registration(p.policy != nil), nil
 }
 
@@ -284,6 +304,7 @@ func (p *Plugin) Close() {
 		close(p.workerDone)
 	}
 	p.mu.Unlock()
+	p.stopForward(true)
 	p.workerWait.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -307,6 +328,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if err == nil {
 			p.discover()
 			p.startWorker()
+			p.startForward()
 		}
 		return result, err
 	}
@@ -317,6 +339,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			close(p.workerDone)
 		}
 		p.mu.Unlock()
+		p.stopForward(false)
 		return struct{}{}, nil
 	}
 	p.mu.Lock()
@@ -428,6 +451,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
+		defer p.WakeForward()
 		captured, err := p.recordUsageCaptured(raw)
 		if err != nil {
 			return nil, pluginabi.NewError("pacer_usage_unavailable", "Native usage could not be durably recorded", 503)
