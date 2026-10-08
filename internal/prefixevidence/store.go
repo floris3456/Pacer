@@ -15,6 +15,11 @@ const (
 	pendingAge = 15 * time.Minute
 	// anchorRetention keeps anchors for 2h by primary start: max TTL 1h plus slack.
 	anchorRetention = 2 * time.Hour
+	// dependentWindow bounds which warming attempts one anchor change re-resolves:
+	// those starting in [anchor start, anchor start + dependentWindow]. A warming
+	// attempt starting later keeps the observation it was resolved with; this bounds
+	// the work of a primary settle on a hot key.
+	dependentWindow = 2 * time.Hour
 	// attemptRetention keeps terminal attempts for 7 days by upstream start.
 	attemptRetention = 7 * 24 * time.Hour
 	// retentionCap bounds the rows one sweep() call deletes, across both kinds.
@@ -76,6 +81,24 @@ CREATE TABLE prefix_anchors (
 CREATE INDEX prefix_anchors_attempt ON prefix_anchors(attempt_id);
 `
 
+// indexes serve the pending sweep (open rows, oldest arrival first) and the
+// terminal retention (oldest age first). SQLite appends rowid to every index
+// implicitly, so the ORDER BY ..., rowid tie-break is served without naming it.
+// They are IF NOT EXISTS and run on every Open, so a database created before
+// they existed gains them without a version change.
+const indexes = `
+CREATE INDEX IF NOT EXISTS prefix_attempts_pending ON prefix_attempts(arrived_ns) WHERE closed='';
+CREATE INDEX IF NOT EXISTS prefix_attempts_terminal ON prefix_attempts((CASE WHEN started_ns>0 THEN started_ns ELSE arrived_ns END));
+`
+
+// txn is the statement surface of a write transaction. *sql.Conn carries the
+// BEGIN IMMEDIATE transaction in mutate; *sql.Tx satisfies it for direct sweeps.
+type txn interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // Open creates the empty schema on first use, or validates version 1 on reopen.
 // It infers nothing from other stores' tables.
 func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
@@ -113,6 +136,9 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 			return nil, ErrUnavailable
 		}
 	}
+	if _, err = conn.ExecContext(ctx, indexes); err != nil {
+		return nil, ErrUnavailable
+	}
 	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, ErrUnavailable
 	}
@@ -133,7 +159,7 @@ func (s *Store) Observe(ctx context.Context, f Fact) error {
 	if err != nil {
 		return ErrUnavailable
 	}
-	return s.mutate(ctx, func(tx *sql.Tx, now int64) error {
+	return s.mutate(ctx, func(tx txn, now int64) error {
 		row, err := loadAttempt(ctx, tx, f.AttemptID)
 		if err != nil {
 			return err
@@ -163,7 +189,7 @@ func (s *Store) Settle(ctx context.Context, attemptID string, o Outcome) error {
 	if !identifier(attemptID) || !validOutcome(o) {
 		return ErrInvalidRecord
 	}
-	return s.mutate(ctx, func(tx *sql.Tx, now int64) error {
+	return s.mutate(ctx, func(tx txn, now int64) error {
 		row, err := loadAttempt(ctx, tx, attemptID)
 		if err != nil {
 			return err
@@ -189,31 +215,44 @@ func (s *Store) Settle(ctx context.Context, attemptID string, o Outcome) error {
 // Sweep applies the pending age and overflow bounds. Observe and Settle run it
 // too, before and after their own write.
 func (s *Store) Sweep(ctx context.Context) error {
-	return s.mutate(ctx, func(*sql.Tx, int64) error { return nil })
+	return s.mutate(ctx, func(txn, int64) error { return nil })
 }
 
-// mutate runs one write transaction. ErrConflict is returned after the
-// quarantine it wrote is committed; every other error rolls back.
-func (s *Store) mutate(ctx context.Context, fn func(tx *sql.Tx, now int64) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// mutate runs one write transaction on a single connection. BEGIN IMMEDIATE takes
+// the write lock before the clock is read, as Open does, so the sweep and the
+// write are decided under one lock. ErrConflict is returned after the quarantine
+// it wrote is committed; every other error rolls back.
+func (s *Store) mutate(ctx context.Context, fn func(tx txn, now int64) error) error {
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return dbError(ctx, err)
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return dbError(ctx, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			// Background, not ctx: the rollback must still run after a cancellation.
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
 	now := s.clock().UnixNano()
-	if err := sweep(ctx, tx, now); err != nil {
+	if err := sweep(ctx, conn, now); err != nil {
 		return err
 	}
-	ferr := fn(tx, now)
+	ferr := fn(conn, now)
 	if ferr != nil && !errors.Is(ferr, ErrConflict) {
 		return ferr
 	}
-	if err := sweep(ctx, tx, now); err != nil {
+	if err := sweep(ctx, conn, now); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return dbError(ctx, err)
 	}
+	committed = true
 	return ferr
 }
 
@@ -251,7 +290,7 @@ func loadAttempt(ctx context.Context, q rowQuerier, id string) (attemptRow, erro
 
 // writeFact stores the canonical fact and its indexed copies. observed_ns is
 // the collection clock of this Observe and is the reference clock for qualification.
-func writeFact(ctx context.Context, tx *sql.Tx, f Fact, canonical string, observedNS int64) error {
+func writeFact(ctx context.Context, tx txn, f Fact, canonical string, observedNS int64) error {
 	keyID, settings, tag := "", "", ""
 	if f.Snapshot != nil {
 		keyID, settings = f.Snapshot.KeyID, f.Snapshot.SettingsTag
@@ -273,7 +312,7 @@ func writeFact(ctx context.Context, tx *sql.Tx, f Fact, canonical string, observ
 
 // quarantine marks an attempt whose immutable inputs conflict. Its observation
 // becomes uncertain/conflicting_evidence, and nothing can clear it.
-func quarantine(ctx context.Context, tx *sql.Tx, id string) error {
+func quarantine(ctx context.Context, tx txn, id string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE prefix_attempts SET quarantine=? WHERE attempt_id=?`, reasonConflicting, id); err != nil {
 		return dbError(ctx, err)
 	}
@@ -287,7 +326,7 @@ func quarantine(ctx context.Context, tx *sql.Tx, id string) error {
 // It depends only on those inputs, the collection clock stored at Observe and
 // the current anchors, so the join order cannot change the result. When an
 // attempt's anchors change, the warming attempts that depend on them are resolved again.
-func resolve(ctx context.Context, tx *sql.Tx, id string) error {
+func resolve(ctx context.Context, tx txn, id string) error {
 	row, err := loadAttempt(ctx, tx, id)
 	if err != nil {
 		return err
@@ -380,7 +419,7 @@ func anchorsFor(f Fact, row attemptRow) []anchorKey {
 
 // lookupAnchor finds the latest primary anchor whose start is not later than
 // the warming start, for the exact key. Only a warming fact with one endpoint can match.
-func lookupAnchor(ctx context.Context, tx *sql.Tx, f Fact) (string, bool, error) {
+func lookupAnchor(ctx context.Context, tx txn, f Fact) (string, bool, error) {
 	if f.Kind != KindWarming || f.Snapshot == nil || len(f.Snapshot.Endpoints) != 1 || f.StartedAt.IsZero() {
 		return "", false, nil
 	}
@@ -399,7 +438,7 @@ func lookupAnchor(ctx context.Context, tx *sql.Tx, f Fact) (string, bool, error)
 
 // syncAnchors replaces one primary attempt's anchors, then resolves every
 // warming attempt whose key matched the old or the new anchors.
-func syncAnchors(ctx context.Context, tx *sql.Tx, id string, wanted []anchorKey) error {
+func syncAnchors(ctx context.Context, tx txn, id string, wanted []anchorKey) error {
 	old, err := anchorsOf(ctx, tx, id)
 	if err != nil {
 		return err
@@ -429,8 +468,9 @@ func syncAnchors(ctx context.Context, tx *sql.Tx, id string, wanted []anchorKey)
 	return nil
 }
 
-func anchorsOf(ctx context.Context, tx *sql.Tx, id string) ([]anchorKey, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT account, binding, key_id, settings_tag, caller, installation, session, route, epoch, tag FROM prefix_anchors WHERE attempt_id=?`, id)
+func anchorsOf(ctx context.Context, tx txn, id string) ([]anchorKey, error) {
+	// started_ns is loaded too: dependents bounds its window by the anchor start.
+	rows, err := tx.QueryContext(ctx, `SELECT account, binding, key_id, settings_tag, caller, installation, session, route, epoch, tag, started_ns FROM prefix_anchors WHERE attempt_id=?`, id)
 	if err != nil {
 		return nil, dbError(ctx, err)
 	}
@@ -438,7 +478,7 @@ func anchorsOf(ctx context.Context, tx *sql.Tx, id string) ([]anchorKey, error) 
 	var out []anchorKey
 	for rows.Next() {
 		var k anchorKey
-		if err := rows.Scan(&k.account, &k.binding, &k.keyID, &k.settings, &k.caller, &k.installation, &k.session, &k.route, &k.epoch, &k.tag); err != nil {
+		if err := rows.Scan(&k.account, &k.binding, &k.keyID, &k.settings, &k.caller, &k.installation, &k.session, &k.route, &k.epoch, &k.tag, &k.startedNS); err != nil {
 			return nil, dbError(ctx, err)
 		}
 		out = append(out, k)
@@ -449,12 +489,14 @@ func anchorsOf(ctx context.Context, tx *sql.Tx, id string) ([]anchorKey, error) 
 	return out, nil
 }
 
-// dependents returns the warming attempts that match an anchor key. The ids are
-// collected before any write, because the single transaction connection cannot
-// run a write while a result set is open.
-func dependents(ctx context.Context, tx *sql.Tx, k anchorKey) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT attempt_id FROM prefix_attempts WHERE kind=? AND outcome<>'' AND fact<>'' AND account=? AND binding=? AND key_id=? AND settings_tag=? AND caller=? AND installation=? AND session=? AND route=? AND epoch=? AND tag=?`,
-		KindWarming, k.account, k.binding, k.keyID, k.settings, k.caller, k.installation, k.session, k.route, k.epoch, k.tag)
+// dependents returns the settled warming attempts that match an anchor key and
+// start within dependentWindow of the anchor start (the same lower bound as
+// lookupAnchor). The ids are collected before any write, because the single
+// transaction connection cannot run a write while a result set is open.
+func dependents(ctx context.Context, tx txn, k anchorKey) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT attempt_id FROM prefix_attempts WHERE kind=? AND outcome<>'' AND fact<>'' AND account=? AND binding=? AND key_id=? AND settings_tag=? AND caller=? AND installation=? AND session=? AND route=? AND epoch=? AND tag=? AND started_ns>=? AND started_ns<=?`,
+		KindWarming, k.account, k.binding, k.keyID, k.settings, k.caller, k.installation, k.session, k.route, k.epoch, k.tag,
+		k.startedNS, k.startedNS+int64(dependentWindow))
 	if err != nil {
 		return nil, dbError(ctx, err)
 	}
@@ -478,7 +520,7 @@ func dependents(ctx context.Context, tx *sql.Tx, k anchorKey) ([]string, error) 
 // is recorded but never promotes them. It then deletes retired rows, at most
 // retentionCap in total: anchors first, then terminal attempts. Pending rows are
 // never retired.
-func sweep(ctx context.Context, tx *sql.Tx, now int64) error {
+func sweep(ctx context.Context, tx txn, now int64) error {
 	aged, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) AND arrived_ns<=? ORDER BY arrived_ns, rowid`, now-int64(pendingAge))
 	if err != nil {
 		return err
@@ -520,7 +562,7 @@ func sweep(ctx context.Context, tx *sql.Tx, now int64) error {
 // deleteAnchors removes up to limit anchors whose primary start is before cutoff,
 // oldest first. A warming attempt that arrives later finds no anchor and gets
 // no_primary_anchor, which is the conservative outcome.
-func deleteAnchors(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (int, error) {
+func deleteAnchors(ctx context.Context, tx txn, cutoff int64, limit int) (int, error) {
 	res, err := tx.ExecContext(ctx, `DELETE FROM prefix_anchors WHERE rowid IN (SELECT rowid FROM prefix_anchors WHERE started_ns<? ORDER BY started_ns, rowid LIMIT ?)`, cutoff, limit)
 	if err != nil {
 		return 0, dbError(ctx, err)
@@ -536,7 +578,7 @@ func deleteAnchors(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (in
 // closed) whose age is before cutoff, oldest first. Age is the upstream start, or
 // the arrival time for a settlement without a fact. The newest attempt of each
 // (scope, epoch) is always kept so readback still has its last observation.
-func deleteTerminal(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (int, error) {
+func deleteTerminal(ctx context.Context, tx txn, cutoff int64, limit int) (int, error) {
 	const age = `(CASE WHEN started_ns>0 THEN started_ns ELSE arrived_ns END)`
 	ids, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts
  WHERE (closed<>'' OR (fact<>'' AND outcome<>'')) AND `+age+`<?
@@ -559,7 +601,7 @@ func deleteTerminal(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (i
 
 // idsOf collects the ids of a query before any write, because the single
 // transaction connection cannot run a write while a result set is open.
-func idsOf(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+func idsOf(ctx context.Context, tx txn, query string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, dbError(ctx, err)
@@ -579,7 +621,7 @@ func idsOf(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string
 	return ids, nil
 }
 
-func closeAttempt(ctx context.Context, tx *sql.Tx, id, reason string) error {
+func closeAttempt(ctx context.Context, tx txn, id, reason string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE prefix_attempts SET closed=? WHERE attempt_id=?`, reason, id); err != nil {
 		return dbError(ctx, err)
 	}
