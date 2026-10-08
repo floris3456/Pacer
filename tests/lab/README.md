@@ -21,3 +21,12 @@ Verify the host build metadata and run `check-host.py` (including actual Pacer
 registration/state) before inference tests or delegating an exclusive client window.
 The isolated CPAMP server uses a separate pure-Go SQLite implementation and may
 still be built with CGO disabled; these are different artifact requirements.
+
+`check-history.py` compares the native historical management routes with the
+checked-in original CPAMP oracles (53 domain results; 67 byte-exact exports and
+37 encoded-row-exact legacy CSVs). It requires `PACER_HISTORY_READY=1`, an explicit
+`PACER_EVIDENCE` directory, the extended synthetic 240-event/65-observation artifact,
+and a serialized parent acceptance window. It also checks authorization, absent
+public aliases, pin/cursor/input refusals and unchanged fake-provider call counts.
+Do not run it while a client/browser worker owns the lab. `test_history_checker.py`
+tests only the offline comparison logic and never contacts the lab.
