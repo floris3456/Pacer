@@ -70,6 +70,8 @@ type ConfigField struct {
 
 // Capabilities groups the optional host integration interfaces exposed by a plugin.
 type Capabilities struct {
+	// CachePolicy is the narrow inference-authenticated Pacer policy capability (schema 7).
+	CachePolicy CachePolicyProvider
 	// ModelRegistrar contributes development-time model metadata to the host registry.
 	ModelRegistrar ModelRegistrar
 	// ModelProvider contributes provider-native static and per-auth model metadata.
@@ -1466,6 +1468,18 @@ type ManagementResponse struct {
 
 // UsageRecord describes request usage and billing metadata.
 type UsageRecord struct {
+	LifecycleRequestID string
+	CachePolicy        *CachePolicyEvidence
+	AccountingVersion  int
+	TokenBreakdown     UsageTokenBreakdown
+	ClientIP           string
+	ResolvedClientIP   string
+	XForwardedFor      string
+	UserAgent          string
+	NodeKind           string
+	IsFork             bool
+	IsCompaction       bool
+	AccessTokenSHA256  string
 	// RequestID uniquely identifies this specific model execution instance (UUID v4).
 	RequestID string
 	// TraceID identifies the parent inbound HTTP request when available (8-character hex).
@@ -1521,6 +1535,8 @@ type UsageRecord struct {
 	Detail UsageDetail
 	// ResponseHeaders contains selected upstream response headers.
 	ResponseHeaders http.Header
+	// ResponseHeadersObservedAt carries per-header transport/event observation clocks.
+	ResponseHeadersObservedAt map[string]time.Time
 }
 
 // UsageFailure describes an upstream or executor failure.
@@ -1533,6 +1549,7 @@ type UsageFailure struct {
 
 // UsageDetail contains token accounting counters.
 type UsageDetail struct {
+	CacheCreation *CacheCreationUsage
 	// InputTokens is the prompt or input token count.
 	InputTokens int64
 	// OutputTokens is the completion or output token count.
