@@ -1,6 +1,6 @@
 # Pacer Phase 1+2 on CT104
 
-`phase1.py` swaps CT104 from quota-handoff 0.1.5-local.1 to Pacer `37bd732` in routing `dry-run` on the
+`phase1.py` swaps CT104 from quota-handoff 0.1.5-local.1 to Pacer `55fa5ac` in routing `dry-run` on the
 pacer-boundary CPA host `bb27d121`. `dry-run-daily.py` archives Pacer's authoritative daily report route
 (`GET /v0/management/plugins/pacer/dry-run-report`, see `docs/dry-run-report.md`) verbatim. `rehearse.sh`
 proves both against a local replica. Evidence: `pacer/evidence/implementation/phase1-rehearsal/`.
@@ -8,9 +8,9 @@ proves both against a local replica. Evidence: `pacer/evidence/implementation/ph
 ## Operator sequence (from the Mac, in this worktree; `<pve>` is the Proxmox host)
 
 ```sh
-P=/Users/bliss/Agent/homeserverr/pacer; B=$P/.cache/phase1-release; R=/opt/cliproxyapi/releases/pacer-phase1-37bd732-bb27d121
+P=/Users/bliss/Agent/homeserverr/pacer; B=$P/.cache/phase1-release; R=/opt/cliproxyapi/releases/pacer-phase1-55fa5ac-bb27d121
 python3 -B scripts/production/phase1.py bundle --out "$B" --cpa-binary "$P/.cache/native/cpa-bb27d121-cgo-linux-amd64" \
-  --pacer-dist "$P/.cache/native/src-pacer-37bd732-1/dist/linux_amd64" \
+  --pacer-dist "$P/.cache/native/src-pacer-55fa5ac-1/dist/linux_amd64" \
   --qh-lib "$P/../quota-switch-compaction/artifacts/release-0.1.5-local.1/quota-handoff-v0.1.5-local.1.so"
 COPYFILE_DISABLE=1 tar -C "$B" -cf - . | ssh <pve> "pct exec 104 -- sh -c 'umask 077 && mkdir -p $R && tar --no-same-owner -C $R -xf -'"
 ssh <pve> 'pct exec 104 -- python3 -B - recon' < scripts/production/phase1.py   # read-only; review edit_plan, layout, pyyaml
