@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/capacity"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/dryrun"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
@@ -92,6 +93,8 @@ type Plugin struct {
 	capacityStore      *capacity.Store
 	capacityDB         *sql.DB
 	capacityViews      map[string]capacityState
+	dryRun             *dryrun.Ledger
+	dryRunDB           *sql.DB
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
 	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -688,7 +691,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
-					p.recordDecision(t, c, e.Code)
+					p.recordDecision(req.RequestID, t, c, e.Code)
 					return refuse(e.Code, e.Message)
 				}
 				return refuse("quota_state_unavailable", "Pacer binding state is unavailable")
@@ -697,7 +700,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			t.Key, t.Auth, t.Binding = key, auth, b
 			p.requests[req.RequestID] = t
 			p.mu.Unlock()
-			p.recordDecision(t, c, "admitted")
+			p.recordDecision(req.RequestID, t, c, "admitted")
 		}
 	}
 	clear := []string{controlHeader, requestHeader, "X-Quota-Binding", "X-Quota-Protocol"}

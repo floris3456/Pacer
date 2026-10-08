@@ -8,13 +8,18 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 )
 
+// RequestID and ActualAccount are additive JSON fields inside the existing body
+// column; the pacer_decisions DDL is unchanged. They let the dry-run report
+// join a decision to its priced usage and compare billing accounts, not aliases.
 type decisionEntry struct {
 	At              time.Time        `json:"at"`
 	Chat            string           `json:"chat"`
+	RequestID       string           `json:"request_id,omitempty"`
 	Provider        string           `json:"provider"`
 	Model           string           `json:"model"`
 	PreviousAccount string           `json:"previous_account,omitempty"`
 	ActualAuth      string           `json:"actual_auth"`
+	ActualAccount   string           `json:"actual_account,omitempty"`
 	Proposed        routing.Decision `json:"proposed"`
 	Outcome         string           `json:"outcome"`
 }
@@ -24,7 +29,7 @@ func openDecisions(db *sql.DB) error {
 	return err
 }
 
-func (p *Plugin) recordDecision(t attempt, c credential, outcome string) {
+func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome string) {
 	p.mu.Lock()
 	enabled := p.cfg.Routing.Mode == "dry-run"
 	p.mu.Unlock()
