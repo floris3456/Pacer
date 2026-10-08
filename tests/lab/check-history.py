@@ -55,6 +55,13 @@ def load_oracles():
     return (*result, provenance)
 
 
+def analytics_calls(http, origin):
+    with http.open(origin + "/_test/analytics", timeout=3) as response:
+        data = json.load(response)
+    assert isinstance(data.get("calls"), int) and data["calls"] >= 0, "Invalid fixture analytics counter"
+    return data
+
+
 def main():
     if os.environ.get("PACER_HISTORY_READY") != "1":
         raise SystemExit("Parent must load the extended artifact and grant an exclusive history window first")
@@ -90,8 +97,7 @@ def main():
         return json.loads(raw)
 
     def stats():
-        with http.open(UPSTREAM + "/_test/stats", timeout=3) as response:
-            return json.load(response)
+        return analytics_calls(http, UPSTREAM)
 
     try:
         cases, exports, provenance = load_oracles()
