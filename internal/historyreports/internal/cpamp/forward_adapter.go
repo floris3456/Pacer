@@ -10,6 +10,7 @@ import (
 )
 
 func ForwardValue(e Event, book ComparisonPriceBook) APIValue { return valueEvent(e, book) }
+func ForwardCategories(e Event) (ValueTokens, bool)           { return billableTokens(e) }
 func ForwardAdd(a *APIValue, b APIValue)                      { a.add(b) }
 func ForwardContains(c ProfileConfig, p Profile, account string, at int64) bool {
 	return quotaProfileContains(c, p, account, at)

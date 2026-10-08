@@ -82,17 +82,21 @@ func convertForward(entry measurement.ReportFeedEntry) ForwardEvent {
 			f.Issues = append(f.Issues, "key_unattributed")
 		}
 	}
-	if e.ServiceTier == "auto" {
+	if normalizedForwardTier(e.ServiceTier) == "auto" {
 		f.Issues = append(f.Issues, "charged_tier_unknown")
 	}
 	if r.Native != nil && r.Native.RequestedServiceTier != "" && r.Native.ResponseServiceTier == "" && r.Native.RequestedServiceTier != "standard" && r.Native.RequestedServiceTier != "default" {
 		f.Issues = append(f.Issues, "charged_tier_unknown")
+	}
+	if r.Native != nil {
+		e.Streaming = r.Native.Stream
 	}
 	if r.CapturedCostNanoUSD != nil && *r.CapturedCostNanoUSD < 0 {
 		f.Issues = append(f.Issues, "invalid_captured_cost")
 		e.CostNano = nil
 	}
 	f.Event = e
+	f.RawInputBasis = "derived_uncached_input"
 	f.Usage = &u
 	f.Native = r.Native
 	return f

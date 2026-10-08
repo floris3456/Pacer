@@ -46,6 +46,11 @@ func TestReportFeedAtomicFailureAndRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	forged := h
+	forged.Through = h.BootstrapThrough - 1
+	if _, err = s.ReadReportFeed(ctx, forged, 0, ReportBudget{}); !errors.Is(err, ErrConflict) {
+		t.Fatal("pre-bootstrap head accepted", err)
+	}
 	p, err := s.ReadReportFeed(ctx, h, 0, ReportBudget{Rows: 1})
 	if err != nil || p.Done || len(p.Entries) != 1 || len(p.Entries[0].RawUsage) != 0 {
 		t.Fatal(p, err)

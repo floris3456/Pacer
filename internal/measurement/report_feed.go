@@ -16,7 +16,7 @@ CREATE TABLE measurement_report_meta (
  feed_id TEXT NOT NULL, started INTEGER NOT NULL DEFAULT 0,
  high_event TEXT NOT NULL DEFAULT '', high_revision INTEGER NOT NULL DEFAULT 0,
  after_event TEXT NOT NULL DEFAULT '', after_revision INTEGER NOT NULL DEFAULT 0,
- complete INTEGER NOT NULL DEFAULT 0);
+ complete INTEGER NOT NULL DEFAULT 0, complete_through INTEGER NOT NULL DEFAULT 0);
 INSERT INTO measurement_report_meta(id,version,feed_id) VALUES(1,1,lower(hex(randomblob(32))));
 CREATE TABLE measurement_report_feed (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,6 +80,7 @@ type ReportFeedHead struct {
 	ID                string `json:"id"`
 	Through           int64  `json:"through,string"`
 	BootstrapComplete bool   `json:"bootstrap_complete"`
+	BootstrapThrough  int64  `json:"bootstrap_through,string"`
 }
 
 type ReportFeedEntry struct {
@@ -97,7 +98,7 @@ type ReportFeedPage struct {
 }
 
 func (s *Store) ReportFeedHead(ctx context.Context) (h ReportFeedHead, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT feed_id,complete,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&h.ID, &h.BootstrapComplete, &h.Through)
+	err = s.db.QueryRowContext(ctx, `SELECT feed_id,complete,complete_through,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&h.ID, &h.BootstrapComplete, &h.BootstrapThrough, &h.Through)
 	return
 }
 
@@ -175,7 +176,7 @@ func (s *Store) BootstrapReportFeed(ctx context.Context, budget ReportBudget) (b
 			after, ar = r.id, r.rev
 		}
 		done = hi == "" || after == hi && ar == hr
-		_, err = tx.ExecContext(ctx, `UPDATE measurement_report_meta SET after_event=?,after_revision=?,complete=? WHERE id=1`, after, ar, done)
+		_, err = tx.ExecContext(ctx, `UPDATE measurement_report_meta SET after_event=?,after_revision=?,complete=?,complete_through=CASE WHEN ? THEN coalesce((SELECT max(sequence) FROM measurement_report_feed),0) ELSE 0 END WHERE id=1`, after, ar, done, done)
 		return err
 	})
 	return done, err
@@ -198,11 +199,11 @@ func (s *Store) ReadReportFeed(ctx context.Context, head ReportFeedHead, after i
 	defer tx.Rollback()
 	var id string
 	var complete bool
-	var maxSeq int64
-	if err = tx.QueryRowContext(ctx, `SELECT feed_id,complete,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&id, &complete, &maxSeq); err != nil {
+	var maxSeq, bootstrapThrough int64
+	if err = tx.QueryRowContext(ctx, `SELECT feed_id,complete,complete_through,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&id, &complete, &bootstrapThrough, &maxSeq); err != nil {
 		return page, err
 	}
-	if id != head.ID || !complete || head.Through > maxSeq {
+	if id != head.ID || !complete || head.Through > maxSeq || head.BootstrapThrough != bootstrapThrough || head.Through < bootstrapThrough {
 		return page, ErrConflict
 	}
 	page.Entries = []ReportFeedEntry{}

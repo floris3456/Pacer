@@ -17,6 +17,11 @@ func TestForwardConverterCategoriesTiersAndQualifications(t *testing.T) {
 		return convertForward(measurement.ReportFeedEntry{StoredRecord: measurement.StoredRecord{Record: r, ReceivedAt: at}})
 	}
 	f := convert()
+	r.Native = &measurement.NativeMetadata{Stream: true}
+	if !convert().Event.Streaming {
+		t.Fatal("stream evidence lost")
+	}
+	r.Native = nil
 	v, issues := valueForward(f, book)
 	if v == nil || len(issues) != 0 || v.Low != 13690000 || v.High != 13690000 || f.Event.Tokens.Input != 1300 || f.Event.Tokens.Output != 300 || *f.Event.SourceTokens.Output != 300 {
 		t.Fatal(f, v, issues)

@@ -45,6 +45,7 @@ type ForwardOriginCertificate struct {
 	EvidenceRef, ProducerVersion, ParserVersion                           string
 }
 type ForwardOrigins struct {
+	BaseDigest   string                     `json:"base_digest"`
 	Certificates []ForwardOriginCertificate `json:"certificates"`
 }
 
@@ -57,34 +58,36 @@ type ForwardBase struct {
 // ForwardEvent is a sanitized projection. Raw usage/headers/transport metadata
 // stay in their original stores. Event is the exact calculation input, not raw CPA.
 type ForwardEvent struct {
-	ID          string                      `json:"id"`
-	Origin      string                      `json:"origin"`
-	SourceID    string                      `json:"source_id"`
-	PhysicalKey string                      `json:"physical_key"`
-	AttemptID   string                      `json:"attempt_id"`
-	LifecycleID string                      `json:"lifecycle_id,omitempty"`
-	Revision    int64                       `json:"revision,string"`
-	Sequence    int64                       `json:"sequence,string"`
-	StartedAt   time.Time                   `json:"started_at"`
-	EndedAt     time.Time                   `json:"ended_at"`
-	ReceivedAt  time.Time                   `json:"received_at"`
-	StartBasis  string                      `json:"start_basis"`
-	Final       bool                        `json:"final"`
-	Accounting  string                      `json:"accounting"`
-	Quality     string                      `json:"quality"`
-	Attribution measurement.Attribution     `json:"attribution"`
-	Policy      measurement.PolicySnapshot  `json:"policy"`
-	Usage       *measurement.Usage          `json:"normalized_source_usage,omitempty"`
-	Native      *measurement.NativeMetadata `json:"native_provenance,omitempty"`
-	Event       cpamp.Event                 `json:"event"`
-	BodyDigest  string                      `json:"body_digest"`
-	RawDigest   string                      `json:"raw_digest,omitempty"`
-	Issues      []string                    `json:"issues"`
+	ID            string                      `json:"id"`
+	Origin        string                      `json:"origin"`
+	SourceID      string                      `json:"source_id"`
+	PhysicalKey   string                      `json:"physical_key"`
+	AttemptID     string                      `json:"attempt_id"`
+	LifecycleID   string                      `json:"lifecycle_id,omitempty"`
+	Revision      int64                       `json:"revision,string"`
+	Sequence      int64                       `json:"sequence,string"`
+	StartedAt     time.Time                   `json:"started_at"`
+	EndedAt       time.Time                   `json:"ended_at"`
+	ReceivedAt    time.Time                   `json:"received_at"`
+	StartBasis    string                      `json:"start_basis"`
+	Final         bool                        `json:"final"`
+	Accounting    string                      `json:"accounting"`
+	RawInputBasis string                      `json:"raw_input_basis"`
+	Quality       string                      `json:"quality"`
+	Attribution   measurement.Attribution     `json:"attribution"`
+	Policy        measurement.PolicySnapshot  `json:"policy"`
+	Usage         *measurement.Usage          `json:"normalized_source_usage,omitempty"`
+	Native        *measurement.NativeMetadata `json:"native_provenance,omitempty"`
+	Event         cpamp.Event                 `json:"event"`
+	BodyDigest    string                      `json:"body_digest"`
+	RawDigest     string                      `json:"raw_digest,omitempty"`
+	Issues        []string                    `json:"issues"`
 }
 
 type ForwardProvenance struct {
-	Snapshots []measurement.SourceSnapshot `json:"snapshots,omitempty"`
-	Reasons   []string                     `json:"reasons"`
+	ConsumerID string                       `json:"consumer_id,omitempty"`
+	Snapshots  []measurement.SourceSnapshot `json:"snapshots,omitempty"`
+	Reasons    []string                     `json:"reasons"`
 }
 type ForwardSeal struct {
 	Head                                 measurement.ReportFeedHead
@@ -121,34 +124,48 @@ type ForwardPin struct {
 	Filter     ForwardFilter `json:"filter"`
 }
 type ForwardTotals struct {
-	SourceRecords    int64            `json:"source_record_count"`
-	Rows             int64            `json:"canonical_rows"`
-	UniqueAttempts   *int64           `json:"unique_attempts"`
-	ValuedCount      int64            `json:"valued_count"`
-	ValuedSubset     ForwardValue     `json:"valued_subset"`
-	SelectionValue   *ForwardValue    `json:"selection_value"`
-	CapturedCostNano int64            `json:"captured_cost_subset_nano_usd"`
-	CapturedCount    int64            `json:"captured_count"`
-	Reasons          map[string]int64 `json:"reason_counts"`
+	SourceRecords     int64            `json:"source_record_count"`
+	Rows              int64            `json:"canonical_rows"`
+	UniqueAttempts    *int64           `json:"unique_attempts"`
+	ValuedCount       int64            `json:"valued_count"`
+	ValuedSubset      ForwardValue     `json:"valued_subset"`
+	SelectionValue    *ForwardValue    `json:"selection_value"`
+	CapturedCostNano  int64            `json:"captured_cost_subset_nano_usd"`
+	CapturedCount     int64            `json:"captured_count"`
+	CapturedMissing   int64            `json:"captured_cost_unavailable_count"`
+	CapturedSelection *int64           `json:"captured_cost_selection_nano_usd"`
+	Reasons           map[string]int64 `json:"reason_counts"`
+	CoverageReasons   map[string]int64 `json:"coverage_reason_counts"`
 }
 type ForwardReport struct {
-	Pin      ForwardPin               `json:"pin"`
-	Manifest forwardManifest          `json:"manifest"`
-	Totals   ForwardTotals            `json:"totals"`
-	Daily    map[string]ForwardTotals `json:"daily"`
-	Models   map[string]ForwardTotals `json:"models"`
-	Accounts map[string]ForwardTotals `json:"accounts"`
-	Profiles map[string]ForwardTotals `json:"profiles"`
-	Capacity string                   `json:"capacity"`
+	Pin       ForwardPin               `json:"pin"`
+	Manifest  forwardManifest          `json:"manifest"`
+	Base      *ForwardBase             `json:"base,omitempty"`
+	PriceBook ForwardBook              `json:"price_book"`
+	Totals    ForwardTotals            `json:"totals"`
+	Daily     map[string]ForwardTotals `json:"daily"`
+	Models    map[string]ForwardTotals `json:"models"`
+	Accounts  map[string]ForwardTotals `json:"accounts"`
+	Profiles  map[string]ForwardTotals `json:"profiles"`
+	Capacity  string                   `json:"capacity"`
 }
 type ForwardEvidence struct {
-	Pin              ForwardPin     `json:"pin"`
-	ID               string         `json:"id"`
-	Account          string         `json:"account"`
-	Origins          []ForwardEvent `json:"origins"`
-	Value            *ForwardValue  `json:"value"`
-	IdentityResolved bool           `json:"identity_resolved"`
-	Issues           []string       `json:"issues"`
+	Pin               ForwardPin     `json:"pin"`
+	Valuation         string         `json:"valuation"`
+	PriceBookID       string         `json:"price_book_id"`
+	PriceBookDigest   string         `json:"price_book_digest"`
+	ProvenanceDigest  string         `json:"provenance_digest"`
+	HistoricalHMS     int64          `json:"historical_h_ms,omitempty"`
+	Capacity          string         `json:"capacity"`
+	ID                string         `json:"id"`
+	Account           string         `json:"account"`
+	Origins           []ForwardEvent `json:"origins"`
+	Value             *ForwardValue  `json:"value"`
+	CapturedCost      *int64         `json:"captured_cost_nano_usd"`
+	CapturedCostBasis string         `json:"captured_cost_basis"`
+	IdentityResolved  bool           `json:"identity_resolved"`
+	Issues            []string       `json:"issues"`
+	CoverageReasons   []string       `json:"coverage_reasons"`
 }
 type ForwardPage struct {
 	Pin  ForwardPin        `json:"pin"`
