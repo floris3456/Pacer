@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -253,6 +254,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 	}
 	meta, e := json.MarshalIndent(map[string]any{
 		"source_commit": os.Getenv("PACER_REAL_SOURCE_SHA"),
+		"goarch":        runtime.GOARCH,
 		"pin":           base,
 		"cases":         len(cases),
 		"case_counts":   counts,

@@ -13,6 +13,7 @@ client. Missing policy state never means empty history.
 - [Passive observation](docs/observation-contract.md)
 - [Native usage and conservative measurement](internal/measurement/README.md)
 - [Capacity lower bound (never a known size)](docs/capacity-lower-bound.md)
+- [Daily dry-run report](docs/dry-run-report.md)
 - [Frozen history preservation](docs/history-import.md)
 
 The `tests/lab/` scripts test an isolated CPA + fake TLS upstream, not real provider

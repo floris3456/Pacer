@@ -36,5 +36,6 @@ func (p *Plugin) setMode(mode string) error {
 		return err
 	}
 	p.cfg.Routing.Mode = mode
+	p.dryRunMarkLocked()
 	return nil
 }

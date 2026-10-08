@@ -8,13 +8,18 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 )
 
+// RequestID and ActualAccount are additive JSON fields inside the existing body
+// column; the pacer_decisions DDL is unchanged. They let the dry-run report
+// join a decision to its priced usage and compare billing accounts, not aliases.
 type decisionEntry struct {
 	At              time.Time        `json:"at"`
 	Chat            string           `json:"chat"`
+	RequestID       string           `json:"request_id,omitempty"`
 	Provider        string           `json:"provider"`
 	Model           string           `json:"model"`
 	PreviousAccount string           `json:"previous_account,omitempty"`
 	ActualAuth      string           `json:"actual_auth"`
+	ActualAccount   string           `json:"actual_account,omitempty"`
 	Proposed        routing.Decision `json:"proposed"`
 	Outcome         string           `json:"outcome"`
 }
@@ -24,14 +29,14 @@ func openDecisions(db *sql.DB) error {
 	return err
 }
 
-func (p *Plugin) recordDecision(t attempt, c credential, outcome string) {
+func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome string) {
 	p.mu.Lock()
 	enabled := p.cfg.Routing.Mode == "dry-run"
 	p.mu.Unlock()
 	if !enabled || t.Key == "" || t.Decision.Reason == "" {
 		return
 	}
-	entry := decisionEntry{At: p.now(), Chat: t.Key, Provider: c.Provider, Model: t.Model, PreviousAccount: t.PreviousAccount, ActualAuth: c.ID, Proposed: t.Decision, Outcome: outcome}
+	entry := decisionEntry{At: p.now(), Chat: t.Key, RequestID: request, Provider: c.Provider, Model: t.Model, PreviousAccount: t.PreviousAccount, ActualAuth: c.ID, ActualAccount: c.Account, Proposed: t.Decision, Outcome: outcome}
 	body, err := json.Marshal(entry)
 	if err != nil {
 		return

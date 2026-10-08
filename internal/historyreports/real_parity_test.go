@@ -17,12 +17,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp/exports"
 )
 
 // realParityFailure is one mismatching comparison. A case can produce up to three
@@ -56,12 +59,14 @@ type realCoverage struct {
 	Kept  int `json:"kept"`
 }
 
-// realBoundary is the part of real-boundary.json the parity gate reads.
+// realBoundary is the part of real-boundary.json the parity gate reads. GoArch
+// is the GOARCH the original code ran under.
 type realBoundary struct {
 	Cases      int                     `json:"cases"`
 	CaseCounts map[string]int          `json:"case_counts"`
 	Caps       map[string]int          `json:"caps"`
 	Coverage   map[string]realCoverage `json:"coverage"`
+	GoArch     string                  `json:"goarch"`
 }
 
 // realParityGate lists every reason the run cannot count as a pass. A green run
@@ -85,6 +90,11 @@ func realParityGate(cases []historicalCase, report realParityReport, b realBound
 	}
 	if !reflect.DeepEqual(counts, b.CaseCounts) {
 		reasons = append(reasons, "per-view case counts differ from boundary")
+	}
+	// The compiler fuses x*y+z on arm64 but not on amd64, so float outputs are
+	// only comparable when the oracle and this replay share one GOARCH.
+	if b.GoArch != runtime.GOARCH {
+		reasons = append(reasons, fmt.Sprintf("oracle ran under GOARCH %q, replay under %q", b.GoArch, runtime.GOARCH))
 	}
 	views := make([]string, 0, len(b.Caps))
 	for view := range b.Caps {
@@ -286,7 +296,8 @@ func realCompareCase(ctx context.Context, r *Reader, tc historicalCase, exports 
 }
 
 // realDomainDiff compares the domain value exactly as exactJSON does: marshal the
-// Pacer value and compare with the compacted original bytes.
+// Pacer value and compare with the compacted original bytes. A history report is
+// compared up to the order the original leaves undefined (realHistoryJSON).
 func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 	b, e := json.Marshal(got)
 	if e != nil {
@@ -296,10 +307,14 @@ func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 	if json.Compact(&compact, want) != nil {
 		return "/oracle-invalid", true
 	}
-	if bytes.Equal(b, compact.Bytes()) {
+	w := compact.Bytes()
+	if _, ok := got.(LegacyHistoryReport); ok {
+		b, w = realHistoryOrder(b, w, realHistoryJSON)
+	}
+	if bytes.Equal(b, w) {
 		return "", false
 	}
-	if p, ok := realJSONPointer(b, compact.Bytes()); ok {
+	if p, ok := realJSONPointer(b, w); ok {
 		return p, true
 	}
 	// Bytes differ but the documents are structurally equal (formatting only).
@@ -308,8 +323,16 @@ func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 
 // realExportDiff compares export bodies bytewise, except for CSV views the
 // historical test already compares as row multisets (the original Go map
-// iteration order is not a semantic difference there).
+// iteration order is not a semantic difference there), and history exports,
+// compared up to the order the original leaves undefined.
 func realExportDiff(format, view string, got, want []byte) (string, bool) {
+	if view == "history" {
+		canonical := realHistoryJSON
+		if format == "csv" {
+			canonical = realHistoryCSV
+		}
+		got, want = realHistoryOrder(got, want, canonical)
+	}
 	if format == "json" {
 		if bytes.Equal(got, want) {
 			return "", false
@@ -364,6 +387,137 @@ func realCSVRows(b []byte) ([]string, error) {
 		sort.Strings(out[1:])
 	}
 	return out, nil
+}
+
+// realHistoryTie is what fixes a window's place in an original history report.
+// Derive ranges over a map and sorts one account's windows by reset_ms with
+// sort.Slice; Report appends current_pools in that order and stable-sorts
+// windows by current-first, then reset_ms. Adjacent windows of one account that
+// agree on reset_ms and on being current therefore have no defined order.
+type realHistoryTie struct {
+	Account string `json:"account"`
+	Status  string `json:"status"`
+	Reset   int64  `json:"reset_ms"`
+}
+
+func (a realHistoryTie) same(b realHistoryTie) bool {
+	return a.Account == b.Account && a.Reset == b.Reset && (a.Status == "current") == (b.Status == "current")
+}
+
+// realSortTies sorts, by bytes, each run of adjacent items whose ties are the
+// same. Nothing moves across a run boundary.
+func realSortTies(items [][]byte, ties []realHistoryTie) {
+	for i := 0; i < len(items); {
+		j := i + 1
+		for j < len(items) && ties[j].same(ties[i]) {
+			j++
+		}
+		run := items[i:j]
+		sort.Slice(run, func(x, y int) bool { return bytes.Compare(run[x], run[y]) < 0 })
+		i = j
+	}
+}
+
+// realHistoryOrder canonicalizes both sides, or neither when either side cannot
+// be, so a malformed body still meets the exact comparison.
+func realHistoryOrder(got, want []byte, canonical func([]byte) ([]byte, bool)) ([]byte, []byte) {
+	g, okGot := canonical(got)
+	w, okWant := canonical(want)
+	if !okGot || !okWant {
+		return got, want
+	}
+	return g, w
+}
+
+// realHistoryJSON returns a history report document with the tie runs of
+// windows and current_pools sorted. Every other byte is kept: ok is false unless
+// rebuilding doc without sorting reproduces it exactly.
+func realHistoryJSON(doc []byte) ([]byte, bool) {
+	d := json.NewDecoder(bytes.NewReader(doc))
+	if t, e := d.Token(); e != nil || t != json.Delim('{') {
+		return nil, false
+	}
+	array := func(items [][]byte) []byte {
+		return append(append([]byte{'['}, bytes.Join(items, []byte{','})...), ']')
+	}
+	var same, sorted bytes.Buffer
+	same.WriteByte('{')
+	sorted.WriteByte('{')
+	for first := true; d.More(); first = false {
+		t, e := d.Token()
+		key, isKey := t.(string)
+		var value json.RawMessage
+		if e != nil || !isKey || d.Decode(&value) != nil {
+			return nil, false
+		}
+		name, _ := json.Marshal(key)
+		if !first {
+			name = append([]byte{','}, name...)
+		}
+		name = append(name, ':')
+		same.Write(name)
+		sorted.Write(name)
+		if key != "windows" && key != "current_pools" {
+			same.Write(value)
+			sorted.Write(value)
+			continue
+		}
+		var raw []json.RawMessage
+		if json.Unmarshal(value, &raw) != nil {
+			return nil, false
+		}
+		items := make([][]byte, len(raw))
+		ties := make([]realHistoryTie, len(raw))
+		for i, item := range raw {
+			if json.Unmarshal(item, &ties[i]) != nil {
+				return nil, false
+			}
+			items[i] = item
+		}
+		same.Write(array(items))
+		realSortTies(items, ties)
+		sorted.Write(array(items))
+	}
+	if t, e := d.Token(); e != nil || t != json.Delim('}') {
+		return nil, false
+	}
+	rest := doc[d.InputOffset():]
+	same.WriteByte('}')
+	same.Write(rest)
+	sorted.WriteByte('}')
+	sorted.Write(rest)
+	if !bytes.Equal(same.Bytes(), doc) {
+		return nil, false
+	}
+	return sorted.Bytes(), true
+}
+
+// realHistoryCSV is realHistoryJSON for the history CSV export, whose rows list
+// windows and end in the window's JSON. The header row stays first.
+func realHistoryCSV(doc []byte) ([]byte, bool) {
+	rows, e := csv.NewReader(bytes.NewReader(doc)).ReadAll()
+	if e != nil || len(rows) == 0 {
+		return nil, false
+	}
+	items := make([][]byte, len(rows))
+	ties := make([]realHistoryTie, len(rows))
+	for i, row := range rows {
+		var b bytes.Buffer
+		w := csv.NewWriter(&b)
+		if w.Write(row) != nil {
+			return nil, false
+		}
+		w.Flush()
+		items[i] = b.Bytes()
+		if i > 0 && json.Unmarshal([]byte(row[len(row)-1]), &ties[i]) != nil {
+			return nil, false
+		}
+	}
+	if !bytes.Equal(bytes.Join(items, nil), doc) {
+		return nil, false
+	}
+	realSortTies(items[1:], ties[1:])
+	return bytes.Join(items, nil), true
 }
 
 // realJSONPointer returns the first differing RFC 6901 pointer. Object keys are
@@ -500,12 +654,23 @@ func TestPrepareRealSmokeArtifact(t *testing.T) {
 // is a distinct way a green result could hide missing or capped evidence.
 func TestRealParityGate(t *testing.T) {
 	two := []historicalCase{{View: "profiles"}, {View: "history"}}
-	clean := realBoundary{
-		Cases:      2,
-		CaseCounts: map[string]int{"profiles": 1, "history": 1},
-		Caps:       map[string]int{"profiles": 20},
-		Coverage:   map[string]realCoverage{"profiles": {Found: 3, Kept: 3}},
+	// Boundaries are decoded from JSON, the way real-boundary.json is read.
+	boundary := func(goarch string) realBoundary {
+		arch := ""
+		if goarch != "" {
+			arch = `,"goarch":"` + goarch + `"`
+		}
+		var b realBoundary
+		if e := json.Unmarshal([]byte(`{"cases":2,"case_counts":{"profiles":1,"history":1},"caps":{"profiles":20},"coverage":{"profiles":{"found":3,"kept":3}}`+arch+`}`), &b); e != nil {
+			t.Fatal(e)
+		}
+		return b
 	}
+	other := "amd64"
+	if runtime.GOARCH == other {
+		other = "arm64"
+	}
+	clean := boundary(runtime.GOARCH)
 	okReport := realParityReport{Cases: 2, Passed: 2, Failed: []realParityFailure{}}
 	for _, tc := range []struct {
 		name     string
@@ -520,6 +685,11 @@ func TestRealParityGate(t *testing.T) {
 		{"boundary case total mismatch fails", two, okReport, withCases(clean, 3), true},
 		{"per-view case count mismatch fails", two, okReport, withCounts(clean, map[string]int{"profiles": 2}), true},
 		{"capped view without coverage fails", two, okReport, withCaps(clean, map[string]int{"profiles": 20, "accounts": 20}), true},
+		// arm64 contracts x*y+z into fused multiply-add and amd64 (v1) does not, so
+		// the same original code yields different last bits; such an oracle is not
+		// comparable with this replay.
+		{"oracle under another GOARCH fails", two, okReport, boundary(other), true},
+		{"oracle without recorded GOARCH fails", two, okReport, boundary(""), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reasons := realParityGate(tc.cases, tc.report, tc.boundary)
@@ -579,5 +749,85 @@ func TestRealForecastPagesAgree(t *testing.T) {
 		if one[i].Forecast.ID != paged[i].Forecast.ID {
 			t.Fatalf("forecast %d differs between page sizes", i)
 		}
+	}
+}
+
+// TestRealHistoryTieOrder: CPAMP leaves the order of one account's history
+// windows with equal reset_ms undefined. Derive ranges over a Go map and then
+// sorts by reset_ms alone with sort.Slice, and Report keeps that relative order
+// (SliceStable on current-first, reset_ms) in windows and in current_pools. Two
+// original runs on one scratch copy list such windows differently. The
+// comparator must accept exactly that permutation in the domain value and both
+// exports, and still reject every wider one.
+func TestRealHistoryTieOrder(t *testing.T) {
+	w := func(id, account, status string, reset, end int64) cpamp.Window {
+		return cpamp.Window{ID: id, Account: account, Status: status, Kind: "5h", Scope: "scope-" + id, Reset: reset, AttributionEnd: end, ObservationIDs: []string{"obs-" + id}, Notes: []string{}}
+	}
+	a1 := w("a1", "acct-a", "current", 2000, 2000)
+	a2 := w("a2", "acct-a", "current", 2000, 1500)
+	b1 := w("b1", "acct-b", "current", 2000, 2000)
+	b2 := w("b2", "acct-b", "superseded", 2000, 1800)
+	a3 := w("a3", "acct-a", "closed", 1000, 1000)
+	a4 := w("a4", "acct-a", "superseded", 1000, 900)
+	report := func(pools, windows []cpamp.Window) LegacyHistoryReport {
+		return LegacyHistoryReport{Version: "synthetic", APIKeys: []cpamp.APIKey{}, Accounts: []cpamp.Account{}, ManualQuotaProviders: []string{"meta"}, CurrentPools: pools, Windows: windows}
+	}
+	// Original order: accounts a then b; current first; reset_ms descending.
+	oracle := report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, b2, a3, a4})
+	changed := a2
+	changed.AttributionEnd = 1600
+	// csvEqual differs from wantEqual only where current_pools alone changed:
+	// the CSV export lists windows and nothing else.
+	for _, tc := range []struct {
+		name      string
+		got       LegacyHistoryReport
+		wantEqual bool
+		csvEqual  bool
+	}{
+		{"same order", oracle, true, true},
+		{"same-account equal-reset windows swapped", report([]cpamp.Window{a2, a1, b1}, []cpamp.Window{a2, a1, b1, b2, a4, a3}), true, true},
+		{"accounts interleaved", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, b1, a2, b2, a3, a4}), false, false},
+		{"current pool moved to another account", report([]cpamp.Window{a1, b1, a2}, []cpamp.Window{a1, a2, b1, b2, a3, a4}), false, true},
+		{"current and non-current of one reset swapped", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b2, b1, a3, a4}), false, false},
+		{"reset order broken", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, a3, b2, a4}), false, false},
+		{"value changed inside a tie", report([]cpamp.Window{changed, a1, b1}, []cpamp.Window{changed, a1, b1, b2, a4, a3}), false, false},
+		{"tie member duplicated", report([]cpamp.Window{a1, a1, b1}, []cpamp.Window{a1, a1, b1, b2, a3, a4}), false, false},
+		{"tie member dropped", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, b2, a3}), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, _ := json.Marshal(oracle)
+			if _, differ := realDomainDiff(tc.got, want); differ == tc.wantEqual {
+				t.Errorf("domain: differ=%t, want %t", differ, !tc.wantEqual)
+			}
+			var gotJSON, wantJSON, gotCSV, wantCSV bytes.Buffer
+			_ = json.NewEncoder(&gotJSON).Encode(tc.got)
+			_ = json.NewEncoder(&wantJSON).Encode(oracle)
+			for _, x := range []struct {
+				v   LegacyHistoryReport
+				out *bytes.Buffer
+			}{{tc.got, &gotCSV}, {oracle, &wantCSV}} {
+				c := csv.NewWriter(x.out)
+				exports.WriteHistoryReport(c, x.v)
+				c.Flush()
+			}
+			if _, differ := realExportDiff("json", "history", gotJSON.Bytes(), wantJSON.Bytes()); differ == tc.wantEqual {
+				t.Errorf("json export: differ=%t, want %t", differ, !tc.wantEqual)
+			}
+			if _, differ := realExportDiff("csv", "history", gotCSV.Bytes(), wantCSV.Bytes()); differ == tc.csvEqual {
+				t.Errorf("csv export: differ=%t, want %t", differ, !tc.csvEqual)
+			}
+			// Views whose original order is fully defined stay strictly ordered.
+			if !tc.wantEqual || tc.name == "same order" {
+				return
+			}
+			for _, view := range []string{"profiles", "history-proof", "quota"} {
+				if _, differ := realExportDiff("json", view, gotJSON.Bytes(), wantJSON.Bytes()); !differ {
+					t.Errorf("%s json export accepted a reordering", view)
+				}
+			}
+			if _, differ := realExportDiff("csv", "quota", gotCSV.Bytes(), wantCSV.Bytes()); !differ {
+				t.Error("quota csv export accepted a reordering")
+			}
+		})
 	}
 }
