@@ -58,6 +58,12 @@ func (s *Store) NewPhysicalProof(ctx context.Context, consumer string) (*Physica
 			if _, err = tx.ExecContext(ctx, physicalSchema); err != nil {
 				return err
 			}
+			// Store.write checked the previous feed cookie before this compiled,
+			// additive DDL. No other writer can interleave. Advance only here;
+			// never bless a pre-existing schema change or recreate a lost feed.
+			if _, err = tx.ExecContext(ctx, `UPDATE measurement_report_meta SET schema_cookie=(SELECT schema_version FROM pragma_schema_version) WHERE id=1 AND version=2`); err != nil {
+				return err
+			}
 		} else if exists != len(physicalTables) {
 			return errors.New("measurement: partial physical schema")
 		}

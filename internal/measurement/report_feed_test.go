@@ -10,9 +10,9 @@ import (
 func TestReportFeedAtomicFailureAndRevisions(t *testing.T) {
 	s, db := fixture(t)
 	r := record("feed-attempt", base, 1)
-	if _, err := db.Exec(`CREATE TRIGGER reject_feed BEFORE INSERT ON measurement_report_feed BEGIN SELECT RAISE(ABORT,'synthetic feed failure'); END`); err != nil {
-		t.Fatal(err)
-	}
+	// Reject the actual feed INSERT without changing the schema epoch. DDL
+	// loss/recreation is separately tested as a permanent integrity refusal.
+	auditRejectFeedInsert(t, db, true)
 	if _, err := s.PutRecord(ctx, r); err == nil {
 		t.Fatal("feed failure acknowledged")
 	}
@@ -22,9 +22,7 @@ func TestReportFeedAtomicFailureAndRevisions(t *testing.T) {
 			t.Fatal(table, n, err)
 		}
 	}
-	if _, err := db.Exec(`DROP TRIGGER reject_feed`); err != nil {
-		t.Fatal(err)
-	}
+	auditRejectFeedInsert(t, db, false)
 	put(t, s, r)
 	r.Revision = 2
 	r.Usage.CacheCreate = 9
@@ -71,7 +69,8 @@ func TestReportFeedFiniteBootstrapConcurrentAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"b", "d", "z"} {
-		put(t, s, record(id, base, 1))
+		// A pre-extension/older writer has no new in-process integrity guard.
+		auditOldRevision(t, db, record(id, base, 1))
 	}
 	var err error
 	s, err = Open(ctx, db, Options{})

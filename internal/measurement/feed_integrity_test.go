@@ -2,8 +2,36 @@ package measurement
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
+
+	"github.com/mattn/go-sqlite3"
 )
+
+func auditRejectFeedInsert(t *testing.T, db *sql.DB, reject bool) {
+	t.Helper()
+	c, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err = c.Raw(func(raw any) error {
+		driver := raw.(*sqlite3.SQLiteConn)
+		if !reject {
+			driver.RegisterAuthorizer(nil)
+			return nil
+		}
+		driver.RegisterAuthorizer(func(op int, table, column, database string) int {
+			if op == sqlite3.SQLITE_INSERT && table == "measurement_report_feed" {
+				return sqlite3.SQLITE_DENY
+			}
+			return sqlite3.SQLITE_OK
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // This intentionally models an older compatible writer: it knows the immutable
 // revision schema, but executes none of the new application's feed guards.
@@ -152,5 +180,48 @@ func TestAuditFeedPhysicalInitializationCompatible(t *testing.T) {
 	page, err := s.ReadReportFeed(ctx, h, 0, ReportBudget{})
 	if err != nil || !page.Done || len(page.Entries) != 1 {
 		t.Fatal(page, err)
+	}
+}
+
+func TestAuditFeedOlderWriterStillJournaled(t *testing.T) {
+	s, db := fixture(t)
+	auditOldRevision(t, db, record("older-writer", base, 1))
+	if done, err := s.BootstrapReportFeed(ctx, ReportBudget{}); err != nil || !done {
+		t.Fatal(done, err)
+	}
+	h, err := s.ReportFeedHead(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ReadReportFeed(ctx, h, 0, ReportBudget{})
+	if err != nil || !page.Done || len(page.Entries) != 1 || page.Entries[0].EventID != "older-writer" {
+		t.Fatal(page, err)
+	}
+	if _, err = Open(ctx, db, Options{}); err != nil {
+		t.Fatal("unchanged schema must survive reopen", err)
+	}
+}
+
+func TestAuditFeedUnknownSchemaChangesStayUnavailable(t *testing.T) {
+	for _, mode := range []string{"unrelated-index", "unguarded-version"} {
+		t.Run(mode, func(t *testing.T) {
+			s, db := fixture(t)
+			command := `CREATE INDEX audit_untrusted_index ON measurement_records(account_id)`
+			if mode == "unguarded-version" {
+				command = `UPDATE measurement_report_meta SET version=1`
+			}
+			if _, err := db.Exec(command); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ReportFeedHead(ctx); !errors.Is(err, ErrReportFeedIntegrity) {
+				t.Fatalf("expected integrity unavailable, got %v", err)
+			}
+			if _, err := Open(ctx, db, Options{}); !errors.Is(err, ErrReportFeedIntegrity) {
+				t.Fatalf("reopen blessed unknown schema/version: %v", err)
+			}
+			if _, err := s.PutRecord(ctx, record("refused", base, 1)); !errors.Is(err, ErrReportFeedIntegrity) {
+				t.Fatalf("expected write refusal, got %v", err)
+			}
+		})
 	}
 }

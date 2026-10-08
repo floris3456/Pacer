@@ -7,17 +7,23 @@ import (
 	"errors"
 )
 
+// An unrecognized schema transition may have bypassed the journaling trigger,
+// including through an older compatible writer. Recreating the trigger does
+// not establish a new complete boundary. No online repair/reset is provided.
+var ErrReportFeedIntegrity = errors.New("measurement: report feed integrity unavailable")
+
 // The trigger is compiled application schema, never imported SQL. A feed write
 // failure aborts the revision INSERT and hence the enclosing PutRecord commit.
 // Referencing immutable revision rows also journals older compatible writers.
 const reportFeedSchema = `
 CREATE TABLE measurement_report_meta (
  id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL,
+ schema_cookie INTEGER NOT NULL DEFAULT 0,
  feed_id TEXT NOT NULL, started INTEGER NOT NULL DEFAULT 0,
  high_event TEXT NOT NULL DEFAULT '', high_revision INTEGER NOT NULL DEFAULT 0,
  after_event TEXT NOT NULL DEFAULT '', after_revision INTEGER NOT NULL DEFAULT 0,
  complete INTEGER NOT NULL DEFAULT 0, complete_through INTEGER NOT NULL DEFAULT 0);
-INSERT INTO measurement_report_meta(id,version,feed_id) VALUES(1,1,lower(hex(randomblob(32))));
+INSERT INTO measurement_report_meta(id,version,feed_id) VALUES(1,2,lower(hex(randomblob(32))));
 CREATE TABLE measurement_report_feed (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
  event_id TEXT NOT NULL, revision INTEGER NOT NULL, received_at INTEGER NOT NULL,
@@ -35,15 +41,20 @@ func openReportFeed(ctx context.Context, c *sql.Conn) error {
 		return err
 	}
 	if exists == 0 {
-		_, err := c.ExecContext(ctx, reportFeedSchema)
+		if _, err := c.ExecContext(ctx, reportFeedSchema); err != nil {
+			return err
+		}
+		// Captured only after installing this compiled schema in the same
+		// startup transaction. This is not an upgrade of an unguarded v1 feed.
+		_, err := c.ExecContext(ctx, `UPDATE measurement_report_meta SET schema_cookie=(SELECT schema_version FROM pragma_schema_version) WHERE id=1`)
 		return err
 	}
 	var version int
 	if err := c.QueryRowContext(ctx, `SELECT version FROM measurement_report_meta WHERE id=1`).Scan(&version); err != nil {
 		return err
 	}
-	if version != 1 {
-		return ErrInvalid
+	if version != 2 {
+		return ErrReportFeedIntegrity
 	}
 	for _, name := range []string{"measurement_report_feed", "measurement_report_revision_insert"} {
 		if err := c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name=?`, name).Scan(&exists); err != nil {
@@ -52,6 +63,28 @@ func openReportFeed(ctx context.Context, c *sql.Conn) error {
 		if exists != 1 {
 			return ErrConflict
 		}
+	}
+	return checkReportFeed(ctx, c, "")
+}
+
+type reportFeedQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// Read only metadata, in the caller's transaction/snapshot. Schema cookies are
+// durable SQLite DDL generations, not connection/open counters. Even identical
+// DROP/CREATE changes the cookie. Explicit writable_schema/schema_version
+// tampering is outside this trusted-local-store fault contract.
+func checkReportFeed(ctx context.Context, q reportFeedQuerier, expectedID string) error {
+	var version int
+	var saved, current int64
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT version,schema_cookie,feed_id,(SELECT schema_version FROM pragma_schema_version) FROM measurement_report_meta WHERE id=1`).Scan(&version, &saved, &id, &current)
+	if err != nil || version != 2 || saved != current || id == "" || expectedID != "" && id != expectedID {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return ErrReportFeedIntegrity
 	}
 	return nil
 }
@@ -98,8 +131,22 @@ type ReportFeedPage struct {
 }
 
 func (s *Store) ReportFeedHead(ctx context.Context) (h ReportFeedHead, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT feed_id,complete,complete_through,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&h.ID, &h.BootstrapComplete, &h.BootstrapThrough, &h.Through)
-	return
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return h, err
+	}
+	defer tx.Rollback()
+	if err = checkReportFeed(ctx, tx, s.reportFeedID); err != nil {
+		return ReportFeedHead{}, err
+	}
+	err = tx.QueryRowContext(ctx, `SELECT feed_id,complete,complete_through,coalesce((SELECT max(sequence) FROM measurement_report_feed),0) FROM measurement_report_meta WHERE id=1`).Scan(&h.ID, &h.BootstrapComplete, &h.BootstrapThrough, &h.Through)
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		return ReportFeedHead{}, err
+	}
+	return h, nil
 }
 
 // BootstrapReportFeed adopts at most one bounded batch. The first invocation
@@ -179,7 +226,10 @@ func (s *Store) BootstrapReportFeed(ctx context.Context, budget ReportBudget) (b
 		_, err = tx.ExecContext(ctx, `UPDATE measurement_report_meta SET after_event=?,after_revision=?,complete=?,complete_through=CASE WHEN ? THEN coalesce((SELECT max(sequence) FROM measurement_report_feed),0) ELSE 0 END WHERE id=1`, after, ar, done, done)
 		return err
 	})
-	return done, err
+	if err != nil {
+		return false, err
+	}
+	return done, nil
 }
 
 // ReadReportFeed reads one fixed head using an indexed keyset and closes its
@@ -197,6 +247,9 @@ func (s *Store) ReadReportFeed(ctx context.Context, head ReportFeedHead, after i
 		return page, err
 	}
 	defer tx.Rollback()
+	if err = checkReportFeed(ctx, tx, s.reportFeedID); err != nil {
+		return page, err
+	}
 	var id string
 	var complete bool
 	var maxSeq, bootstrapThrough int64

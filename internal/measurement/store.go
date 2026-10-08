@@ -17,8 +17,9 @@ import (
 // busy_timeout, WAL/durability, and Close. All queries inside a transaction use
 // that transaction, including with db.SetMaxOpenConns(1).
 type Store struct {
-	db    *sql.DB
-	clock func() time.Time
+	db           *sql.DB
+	clock        func() time.Time
+	reportFeedID string
 }
 
 type Options struct{ Clock func() time.Time }
@@ -98,6 +99,9 @@ func Open(ctx context.Context, db *sql.DB, opts Options) (*Store, error) {
 	if err = openReportFeed(ctx, c); err != nil {
 		return nil, fmt.Errorf("measurement report feed schema: %w", err)
 	}
+	if err = c.QueryRowContext(ctx, `SELECT feed_id FROM measurement_report_meta WHERE id=1`).Scan(&s.reportFeedID); err != nil {
+		return nil, err
+	}
 	// Fail closed for partial/lost schema without scanning any evidence tables.
 	for _, name := range append([]string{"measurement_books", "measurement_records", "measurement_record_revisions", "measurement_observations", "measurement_closures", "measurement_delivery_runs", "measurement_gaps"}, sourceTables...) {
 		if err = c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&exists); err != nil {
@@ -131,7 +135,13 @@ func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
 	if n != 1 {
 		return errors.New("measurement: schema unavailable")
 	}
+	if err = checkReportFeed(ctx, tx, s.reportFeedID); err != nil {
+		return err
+	}
 	if err = fn(tx); err != nil {
+		return err
+	}
+	if err = checkReportFeed(ctx, tx, s.reportFeedID); err != nil {
 		return err
 	}
 	return tx.Commit()
