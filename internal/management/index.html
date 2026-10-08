@@ -7,6 +7,7 @@
 body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,code,kbd,samp{color:inherit}thead,th{background:#292a2d}pre,code,kbd,samp{background:#252629}
 #legacy-advanced caption{text-align:left;color:#bfc0c5;margin:14px 0 6px}#legacy-advanced .table-wrap{margin:12px 0}#legacy-advanced input,#legacy-advanced select{max-width:100%}#legacy-proof-dialog{max-width:1000px}#legacy-advanced td{overflow-wrap:anywhere;min-width:125px}
 .toolbar>label{min-width:0;max-width:100%;flex-wrap:wrap}.toolbar>label>input,.toolbar>label>select{min-width:0;max-width:100%}
+#forward{border:1px solid #626368;border-radius:8px;padding:18px;margin:28px 0;min-width:0}#forward input,#forward select,#forward textarea{max-width:100%;min-width:0}#forward .table-wrap{max-width:100%}#forward td{overflow-wrap:anywhere;min-width:120px}#forward pre,#forward-status,#forward-summary,#forward-loaded{overflow-wrap:anywhere}#forward h3{margin-top:0}#forward label{flex-wrap:wrap}#forward .membership{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid #626368;padding:12px 0}#forward .membership label{flex:1 1 180px}#forward .membership input{width:100%}#forward-evidence-dialog{max-width:1000px;max-height:90vh;overflow:auto}#forward-evidence-body{max-height:60vh;overflow:auto}#forward-coverage{border-color:#bfc0c5;color:#ededee}#forward :focus-visible{outline:2px solid #d8d9dc;outline-offset:2px}@media(max-width:680px){#forward{padding:12px}#forward .toolbar,#forward form{align-items:stretch}#forward .toolbar>label{width:100%}#forward .toolbar>label>input,#forward .toolbar>label>select{width:100%}}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
@@ -15,6 +16,36 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p><div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div><details><summary>History and valuation coverage</summary><pre id="history"></pre></details>
+<section id="forward" aria-labelledby="forward-title">
+<h3 id="forward-title">Forward recorded usage</h3>
+<p>Native recorded attempts at a sealed checkpoint. Load captures one generation and selection; editing controls or refreshing status does not change that pin.</p>
+<p id="forward-coverage" class="status">Capacity and physical coverage are unknown. Recorded usage is not complete billing, provider quota, cache warmth or a forecast. API-equivalent value uses the pinned original calculation, not your provider bill.</p>
+<div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
+<form id="forward-form" class="toolbar">
+<label>Native profile <select id="forward-profile"><option value="">All native recorded usage</option><option value="unassigned">Unassigned native usage</option></select></label>
+<label>From UTC (inclusive) <input id="forward-from" type="date"></label><label>Before UTC (exclusive) <input id="forward-to" type="date"></label>
+<label>Model <input id="forward-model" maxlength="256" placeholder="Exact captured model"></label><label>Account reference <input id="forward-account" maxlength="1024" placeholder="native-account:…"></label>
+<label>Provider <input id="forward-provider" maxlength="256" placeholder="Exact provider"></label><label>Key fingerprint <input id="forward-key-hash" maxlength="64" placeholder="Optional SHA-256; never a key"></label>
+<button id="forward-load">Load new pinned report</button></form>
+<p class="muted">Blank start includes retained native origins; blank end uses the saved report horizon T. Dates select request starts in [from, min(to, T)), at UTC midnight. Cumulative revisions do not prove physical consumption within that interval. Accounts use native references, not legacy profile/key certificates.</p>
+<p id="forward-loaded" role="status">No forward pin loaded.</p><p id="forward-summary"></p><p id="forward-reasons"></p>
+<div class="toolbar"><button id="forward-json" type="button" disabled>Download pinned summary JSON</button><button id="forward-csv" type="button" disabled>Download request CSV page</button><button id="forward-csv-next" type="button" disabled>Download next CSV page</button><span id="forward-download-status" role="status"></span></div>
+<p class="muted">CSV downloads contain at most 50 rows per page, each with its own header. They are not a whole-ledger export. JSON is the bounded pinned summary; oversized results are reported as errors.</p>
+<details><summary>CSV continuation at this pin</summary><pre id="forward-csv-cursor"></pre></details>
+<div class="toolbar"><button id="forward-first" type="button" disabled>First request page</button><button id="forward-next" type="button" disabled>Next 50 requests</button><span id="forward-page"></span></div>
+<div class="table-wrap"><table><caption>Recorded requests · immutable selection</caption><thead><tr><th>Started UTC / record</th><th>Source / account / model</th><th>API-equivalent value</th><th>Actual writes</th><th>Selected / effective policy</th><th>Quality / coverage</th><th>Evidence</th></tr></thead><tbody id="forward-requests"></tbody></table></div>
+<details><summary>Exact forward pin and publication provenance</summary><pre id="forward-pin"></pre><pre id="forward-provenance"></pre></details>
+<details id="forward-profile-editor"><summary>Advanced · dated native profiles</summary>
+<p>These account memberships select recorded usage by UTC dates. Display key groups are separate metadata, not dated billing proof. Archived profiles remain selectable. Books, pricing, origin authority and coverage cannot be edited here.</p>
+<form id="forward-profile-read" class="toolbar"><label>Exact profile revision <input id="forward-profile-revision" inputmode="numeric" pattern="0|[1-9][0-9]*" maxlength="19" required></label><button id="forward-profile-load">Read this revision</button></form>
+<p id="forward-profile-status" role="status">Load a report to discover its retained profile revision, or enter an exact known revision.</p>
+<div class="table-wrap"><table><thead><tr><th>ID / name</th><th>Provider / state</th><th>Dated selection</th><th></th></tr></thead><tbody id="forward-profile-rows"></tbody></table></div>
+<form id="forward-profile-form" style="display:block"><p id="forward-profile-cas">No profile table revision loaded.</p><div class="toolbar"><label>Profile ID <input id="forward-edit-id" maxlength="256" required></label><label>Name <input id="forward-edit-name" maxlength="256" required></label><label>Provider <input id="forward-edit-provider" maxlength="256" required></label><label><input type="checkbox" id="forward-edit-selection">Independent selection profile</label></div>
+<fieldset><legend>Explicit dated memberships · zero rows saves an empty selection</legend><div id="forward-memberships"></div><button id="forward-membership-add" type="button">Add membership</button></fieldset>
+<p class="muted">Start/end are canonical UTC instants with millisecond precision, for example 2026-10-08T00:00:00Z. Start is inclusive; end is exclusive or blank for open-ended. An absent legacy membership list is not silently converted: enter the desired dated selection explicitly.</p>
+<div class="toolbar"><button id="forward-profile-save" disabled>Save explicit memberships</button><button id="forward-profile-new" type="button">Clear editor for a new profile</button></div></form>
+<details><summary>Retained bindings and profile metadata</summary><pre id="forward-profile-metadata"></pre></details>
+</details></section>
 <h3>Frozen history &amp; profile comparison</h3><div id="report-status" class="status">Load a prepared historical snapshot. This is separate from current native observations.</div>
 <form id="report-form" class="toolbar"><label>Profile <select id="report-profile"><option value="">All history</option><option value="unassigned">Unassigned history</option></select></label><label>From UTC <input type="date" id="report-from"></label><label>Before UTC <input type="date" id="report-to"></label><label>Model <input id="report-model" maxlength="256" placeholder="All models"></label><label>Key fingerprints <input id="report-keys" maxlength="6499" placeholder="Optional SHA-256 list"></label><button id="report-load">Load report</button></form>
 <p class="muted">Dates are start-inclusive and end-exclusive for requests. Overlapping whole quota windows retain their original attribution. Dated account profiles are not display groups. Missing prices, assumptions and boundary uncertainty remain visible.</p>
@@ -64,6 +95,7 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
 <dialog id="metadata-dialog"><form id="metadata-form" style="display:block"><h2 id="metadata-title">Edit label</h2><label id="metadata-name-label">Display name <input id="metadata-name" maxlength="120"></label><label id="metadata-hash-label">Key SHA-256 fingerprint <input id="metadata-hash" pattern="[a-f0-9]{64}" maxlength="64"></label><p class="muted">Never enter a key or token. Labels and lineage do not create, rotate or authorize a CPA credential.</p><fieldset id="metadata-members"><legend>Group members</legend><div id="member-options"></div></fieldset><div id="metadata-error" role="alert"></div><div class="toolbar"><button>Save metadata</button><button type="button" id="metadata-delete">Delete display group</button><button type="button" id="metadata-cancel">Cancel</button></div></form></dialog>
 <dialog id="evidence-dialog"><h2>Quota-window evidence</h2><p class="muted">Selected, shared and boundary contributions overlap; they are not additive spend. Values retain the saved price book and completion provenance.</p><div class="toolbar"><button id="evidence-json">Download JSON</button><button id="evidence-csv">Download CSV</button><button id="evidence-close">Close</button></div><pre id="evidence-body"></pre></dialog>
 <dialog id="legacy-proof-dialog"><h2>Frozen legacy proof</h2><p id="legacy-proof-summary"></p><p class="muted">Selected, shared and boundary rows overlap; do not add them together. Forecasts describe the whole source-account window.</p><div class="table-wrap"><table><thead><tr><th>Contribution</th><th>Requests</th><th>Captured cost</th><th>Missing price rows</th></tr></thead><tbody id="legacy-proof-totals"></tbody></table></div><div class="table-wrap"><table><thead><tr><th>Observation / source</th><th>Observed UTC</th><th>Observed use</th><th>Boundary evidence</th></tr></thead><tbody id="legacy-proof-observations"></tbody></table></div><div class="toolbar"><button id="legacy-proof-json" data-legacy-action>Download proof JSON</button><button id="legacy-proof-csv" data-legacy-action>Download proof CSV</button><button id="legacy-proof-close">Close</button></div><details><summary>Exact proof, price book, forecast revisions and bounds</summary><pre id="legacy-proof-body"></pre></details></dialog>
+<dialog id="forward-evidence-dialog"><h2>Forward recorded evidence</h2><p>Sanitized retained facts for the loaded pin. Unknown coverage and unresolved write evidence remain unknown.</p><button id="forward-evidence-close" type="button">Close evidence</button><pre id="forward-evidence-body"></pre></dialog>
 <script>
 (() => {
   'use strict';
@@ -74,15 +106,17 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
   let legacyEpoch=0, legacyBusy=false, legacyDefaultPin=null, legacyLoaded=null, legacyProof=null, legacyForecast=null;
   const legacyDownloads=new Set();
   const root = '/v0/management/plugins/pacer';
+  const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
   allowed.add('GET '+root+'/history/profiles');for(const op of ['report','windows','evidence','export'])allowed.add('POST '+root+'/history/'+op);
   allowed.add('GET '+root+'/history/legacy/status');for(const op of ['profiles','profile-proof','history','history-proof','forecasts','quota','export','quota-export'])allowed.add('POST '+root+'/history/legacy/'+op);
+  allowed.add('GET '+forwardRoot+'/status');allowed.add('PATCH '+forwardRoot+'/profiles');for(const op of ['pin','report','requests','evidence','export-json','export-csv'])allowed.add('POST '+forwardRoot+'/'+op);
   function bridgeCall(path,method,body){
     if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
     return new Promise((resolve,reject)=>{
       const id='p'+Date.now().toString(36)+'_'+(++sequence);
-      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/history/')?35000:15000);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/history/')||path.startsWith(forwardRoot+'/')?35000:15000);
       pending.set(id,{resolve,reject,timer});
       window.parent.postMessage({type:'pacer:request',version:1,id,method,path,...(body===undefined?{}:{body})},location.origin);
     });
@@ -90,17 +124,19 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
   window.addEventListener('message',event=>{
     if(window.parent===window||event.source!==window.parent||event.origin!==location.origin)return;
     const data=event.data;if(!data||data.version!==1)return;
+    if(data.type==='pacer:bridge-disconnected'&&bridge){disconnect();return}
     if(data.type==='pacer:bridge-ready'&&allowBridge&&!key&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
     if(data.type!=='pacer:response'||typeof data.id!=='string')return;
     const call=pending.get(data.id);if(!call)return;pending.delete(data.id);clearTimeout(call.timer);
-    if(data.ok===true)call.resolve(data.data);else call.reject(Error(typeof data.error==='string'?data.error.slice(0,500):'Management request failed'));
+    if(data.ok===true)call.resolve(data.data);else call.reject(Object.assign(Error(typeof data.error==='string'?data.error.slice(0,500):'Management request failed'),{status:data.status}));
   });
-  async function api(path, method='GET', body) {
-    if (!allowed.has(method+' '+path)) throw Error('Management operation is not allowed');
+  async function api(path, method='GET', body, signal) {
+    const profilePrefix=forwardRoot+'/profiles?revision=';
+    if (!allowed.has(method+' '+path)&&!(method==='GET'&&body===undefined&&path.startsWith(profilePrefix)&&forwardDecimal(path.slice(profilePrefix.length)))) throw Error('Management operation is not allowed');
     const startedGeneration=generation;
     if(bridge){const data=await bridgeCall(path,method,body);if(startedGeneration!==generation)throw Error('Management connection changed');return data}
-    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.')}
+    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',signal,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Object.assign(Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.'),{status:response.status})}
     const data=await response.json();if(startedGeneration!==generation)throw Error('Management connection changed');return data;
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
@@ -314,14 +350,161 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
     const a=document.createElement('a');a.href=url;a.download=data.filename;a.click();
     setTimeout(()=>{URL.revokeObjectURL(url);legacyDownloads.delete(url)},1000);
   })}
-  async function refresh(){message('');try{
+  // Forward UI owns only captured selection state. All values/proof remain native.
+  const forwardVersion='pacer-forward-ledger-v1',forwardLimit=50;
+  let forwardEpoch=0,forwardBusy=false,forwardLoaded=null,forwardProfiles=null,forwardPageCursor='',forwardNextCursor='',forwardCSVNext='',forwardPageNumber=0;
+  const forwardControllers=new Set(),forwardDownloads=new Set();
+  const forwardDecimal=v=>typeof v==='string'&&/^(0|[1-9][0-9]{0,18})$/.test(v)&&BigInt(v)<=9223372036854775807n;
+  const forwardText=(v,max=4096)=>typeof v==='string'&&new TextEncoder().encode(v).length<=max&&!/[\u0000-\u001f\u007f]/.test(v);
+  const forwardHash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+  const forwardCount=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?String(v):'Unknown';
+  function forwardUTC(value){
+    if(typeof value!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{0,8}[1-9])?Z$/.test(value))throw Error('Use a canonical UTC timestamp');
+    const seconds=value.slice(0,19),ms=Date.parse(seconds+'Z');
+    if(!Number.isSafeInteger(ms)||new Date(ms).toISOString().slice(0,19)!==seconds)throw Error('Invalid UTC date');
+    const ns=BigInt(ms)*1000000n+BigInt((value.split('.')[1]?.slice(0,-1)||'').padEnd(9,'0'));
+    if(ns<=0n||ns>9223372036854775807n)throw Error('UTC date is outside the supported native range');return ns;
+  }
+  const forwardDate=v=>{try{forwardUTC(v);return v.replace('T',' ').replace('Z',' UTC')}catch{return 'Unknown'}};
+  function forwardMS(value){const ns=forwardUTC(value);if(ns%1000000n!==0n)throw Error('Membership dates require exact millisecond precision');return String(ns/1000000n)}
+  function forwardMoney(value){if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0)return 'Unknown';const n=BigInt(value),fraction=String(n%1000000000n).padStart(9,'0').replace(/0+$/,'').padEnd(2,'0');return '$'+String(n/1000000000n)+'.'+fraction}
+  function forwardValue(value){if(!value)return 'Unknown';const low=forwardMoney(value.low_nano_usd),high=forwardMoney(value.high_nano_usd);return low===high?low:low+' – '+high}
+  function forwardReasons(value){return Object.entries(value||{}).map(([reason,count])=>reason.replaceAll('_',' ')+' ('+forwardCount(count)+')').join(' · ')||'No additional recorded reasons'}
+  function forwardSafe(value,depth=0){
+    if(depth>40)throw Error('Unsupported forward response depth');
+    if(typeof value==='number'&&(!Number.isFinite(value)||Number.isInteger(value)&&!Number.isSafeInteger(value)))throw Error('Unsupported numeric precision in forward response; no rounded value is displayed');
+    if(value&&typeof value==='object')for(const v of Object.values(value))forwardSafe(v,depth+1);
+    return value;
+  }
+  function forwardPinCheck(pin){
+    if(!pin||pin.version!==forwardVersion||!forwardHash(pin.generation)||!pin.filter||!['native','baseline','combined'].includes(pin.filter.domain))throw Error('Unsupported forward pin');
+    if(Object.keys(pin).some(k=>!['version','generation','filter'].includes(k))||Object.keys(pin.filter).some(k=>!['domain','from','to','profile','account','provider','model','key_hash'].includes(k)))throw Error('Unsupported pin fields');
+    for(const [k,v] of Object.entries(pin.filter)){if(['from','to'].includes(k)){forwardUTC(v)}else if(!forwardText(v,k==='account'?1024:256))throw Error('Invalid forward filter')}
+    if(pin.filter.key_hash&&!forwardHash(pin.filter.key_hash))throw Error('Invalid key fingerprint');return pin;
+  }
+  const forwardCanonical=v=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,forwardCanonical(v[k])])):Array.isArray(v)?v.map(forwardCanonical):v;
+  function forwardSamePin(received,expected){forwardPinCheck(received);if(JSON.stringify(forwardCanonical(received))!==JSON.stringify(forwardCanonical(expected)))throw Error('Response changed the captured pin');}
+  const forwardCurrent=t=>connected&&t.generation===generation&&t.epoch===forwardEpoch;
+  function forwardControls(){
+    el('forward-status-load').disabled=el('forward-load').disabled=el('forward-profile-load').disabled=forwardBusy||!connected;
+    for(const id of ['forward-json','forward-csv','forward-first'])el(id).disabled=forwardBusy||!forwardLoaded||!connected;
+    el('forward-next').disabled=forwardBusy||!forwardNextCursor||!forwardLoaded||!connected;
+    el('forward-csv-next').disabled=forwardBusy||!forwardCSVNext||!forwardLoaded||!connected;
+    el('forward-profile-save').disabled=forwardBusy||!forwardProfiles||!connected;
+    el('forward-profile-rows').querySelectorAll('button').forEach(b=>b.disabled=forwardBusy||!connected);
+  }
+  function forwardInvalidate(){forwardEpoch++;for(const c of forwardControllers)c.abort();forwardControllers.clear();for(const url of forwardDownloads)URL.revokeObjectURL(url);forwardDownloads.clear();forwardBusy=false;}
+  function clearForwardPin(){
+    forwardLoaded=null;forwardPageCursor='';forwardNextCursor='';forwardCSVNext='';forwardPageNumber=0;
+    for(const id of ['forward-summary','forward-reasons','forward-pin','forward-provenance','forward-requests','forward-page','forward-download-status','forward-csv-cursor','forward-evidence-body'])el(id).replaceChildren();
+    el('forward-loaded').textContent='No forward pin loaded.';el('forward-evidence-dialog').close();
+  }
+  function clearForward(){forwardInvalidate();clearForwardPin();forwardProfiles=null;el('forward-form').reset();el('forward-profile-read').reset();el('forward-profile-form').reset();el('forward-profile-rows').replaceChildren();el('forward-memberships').replaceChildren();el('forward-profile-metadata').textContent='';el('forward-profile-cas').textContent='No profile table revision loaded.';el('forward-profile-status').textContent='Read an exact profile revision before editing.';el('forward-status').textContent='Disconnected.';while(el('forward-profile').options.length>2)el('forward-profile').remove(2);forwardControls()}
+  function forwardError(error){return ({404:'Forward v8 reporting is unsupported or the saved reference is unavailable. No fallback was requested.',401:'Management authorization required.',403:'Management authorization required.',409:'Pin/cursor or profile revision conflict. Keep the saved pin; read the intended revision before retrying.',413:'Forward input or output is too large. No partial download was created.',503:'Forward reporting is unavailable, busy or pending publication. Refresh status manually.'})[error.status]||(error.name==='AbortError'?'Forward request cancelled.':error.message||'Forward request failed');}
+  async function forwardTask(work,target='forward-loaded'){
+    if(forwardBusy||!connected)return;const ticket={generation,epoch:++forwardEpoch};forwardBusy=true;forwardControls();
+    try{await work(ticket)}catch(error){if(forwardCurrent(ticket))el(target).textContent=forwardError(error)}finally{if(forwardCurrent(ticket)){forwardBusy=false;forwardControls()}}
+  }
+  async function forwardCall(op,body,ticket,method='POST'){
+    if(!forwardCurrent(ticket))throw Error('Forward selection changed');
+    const controller=new AbortController();forwardControllers.add(controller);const timeout=setTimeout(()=>controller.abort(),35000);
+    try{const data=await api(forwardRoot+'/'+op,method,body,controller.signal);if(!forwardCurrent(ticket))throw Error('Forward selection changed');if(new TextEncoder().encode(JSON.stringify(data)).length>8*1024*1024)throw Error('Forward response exceeds the bounded envelope');return op==='status'?data:forwardSafe(data)}finally{clearTimeout(timeout);forwardControllers.delete(controller)}
+  }
+  async function forwardStatus(ticket){
+    const data=await forwardCall('status',undefined,ticket,'GET');if(!data||typeof data!=='object')throw Error('Unsupported forward status schema');const s=data.status||data,r=data.runtime||{};
+    if((s.version||data.version)!==forwardVersion||!forwardDecimal(s.projected_through)||!forwardDecimal(s.bootstrap_through)||typeof s.latest_generation!=='string'||s.latest_generation&&!forwardHash(s.latest_generation))throw Error('Unsupported forward status schema; no counters were rounded');
+    const states={unknown:'Unknown',unready:'Initializing / unready',initializing:'Initializing',ready:'Ready · sealed recorded snapshot',lagging:'Lagging',lag:'Lagging',error:'Error',disabled:'Disabled',paused:'Paused',stopped:'Paused / stopped'};
+    const target=r.target_through===undefined?'Unknown':forwardDecimal(r.target_through)?r.target_through:'Unknown (unsupported precision)';
+    el('forward-status').textContent=(states[r.state]||'Unknown runtime state')+' · projected '+s.projected_through+' · bootstrap '+s.bootstrap_through+' · observed source head '+(forwardDecimal(r.source_head)?r.source_head:'Unknown')+' · target head '+target+' · latest '+(s.latest_generation||'None')+(r.report_at?' · report T '+forwardDate(r.report_at):'')+(r.target_at?' · target T '+forwardDate(r.target_at):'')+(forwardText(r.phase,64)?' · phase '+r.phase:'');
+  }
+  function forwardFilterInput(){
+    const filter={domain:'native'};for(const [id,k] of [['profile','profile'],['model','model'],['account','account'],['provider','provider'],['key-hash','key_hash']]){const value=el('forward-'+id).value.trim();if(value)filter[k]=value}
+    for(const k of ['from','to'])if(el('forward-'+k).value){filter[k]=el('forward-'+k).value+'T00:00:00Z';forwardUTC(filter[k])}
+    if(filter.from&&filter.to&&forwardUTC(filter.from)>=forwardUTC(filter.to))throw Error('Before UTC must be later than From UTC');
+    forwardPinCheck({version:forwardVersion,generation:'0'.repeat(64),filter});return filter;
+  }
+  function forwardShowReport(data,pin){
+    forwardSamePin(data.pin,pin);const m=data.manifest,t=data.totals;if(!m||m.version!==forwardVersion||!forwardDecimal(m.profile_revision)||!t)throw Error('Unsupported forward report schema');forwardUTC(m.report_at);
+    forwardLoaded={pin:JSON.parse(JSON.stringify(pin)),report:data};
+    el('forward-loaded').textContent='Pinned '+pin.generation+' · report T '+forwardDate(m.report_at)+' · native selection. Editable filters do not change this report.';
+    const unvalued=Number.isSafeInteger(t.canonical_rows)&&Number.isSafeInteger(t.valued_count)&&t.canonical_rows>=t.valued_count?String(BigInt(t.canonical_rows)-BigInt(t.valued_count)):'Unknown';
+    const tokens=t.valued_subset?.tokens||{};
+    el('forward-summary').textContent='Recorded '+forwardCount(t.canonical_rows)+' · unique attempts '+forwardCount(t.unique_attempts)+' · valued '+forwardCount(t.valued_count)+' · unvalued '+unvalued+' · selected API-equivalent '+forwardValue(t.selection_value)+' · valued subset '+forwardValue(t.valued_subset)+'. Valued subset writes only: actual 5m '+forwardCount(tokens.cache_write_5m)+' · actual 1h '+forwardCount(tokens.cache_write_1h)+' · unresolved '+forwardCount(tokens.cache_write_unknown)+' · historical assumed 5m '+forwardCount(tokens.cache_write_assumed_5m??0)+'. Captured provider cost remains a separate fact.';
+    el('forward-reasons').textContent=forwardReasons(t.reason_counts)+' · Coverage: '+forwardReasons(t.coverage_reason_counts);
+    el('forward-pin').textContent=JSON.stringify(pin,null,2);el('forward-provenance').textContent=JSON.stringify(m,null,2);
+    el('forward-profile-revision').value=m.profile_revision;
+  }
+  async function forwardLoad(){
+    forwardInvalidate();clearForwardPin();forwardControls();
+    return forwardTask(async ticket=>{const filter=forwardFilterInput();const pin=forwardPinCheck(await forwardCall('pin',{filter},ticket));if(JSON.stringify(forwardCanonical(pin.filter))!==JSON.stringify(forwardCanonical(filter)))throw Error('Pin changed the requested selection');const report=await forwardCall('report',{pin},ticket);forwardShowReport(report,pin);await forwardPage('',ticket,1);await forwardReadProfiles(report.manifest.profile_revision,ticket)},'forward-loaded');
+  }
+  function forwardWrites(origin){const u=origin.normalized_source_usage;if(!u)return 'Unknown · no native split';const known=[u.cache_create_5m,u.cache_create_1h];const unknown=Number.isSafeInteger(u.cache_create)&&u.cache_create>=0&&known.every(v=>v===undefined||Number.isSafeInteger(v)&&v>=0)?BigInt(u.cache_create)-BigInt(known[0]??0)-BigInt(known[1]??0):null;return 'Actual 5m '+forwardCount(known[0])+' · 1h '+forwardCount(known[1])+' · unresolved '+(unknown!==null&&unknown>=0n?String(unknown):'Unknown')}
+  async function forwardPage(cursor,ticket,page){
+    const pin=forwardLoaded.pin,data=await forwardCall('requests',{pin,limit:forwardLimit,cursor},ticket);forwardSamePin(data.pin,pin);
+    if(!Array.isArray(data.rows)||data.rows.length>forwardLimit||!forwardText(data.next_cursor||''))throw Error('Invalid request page');
+    for(const item of data.rows){forwardSamePin(item.pin,pin);if(!forwardText(item.id,2048)||!Array.isArray(item.origins)||item.origins.length>2)throw Error('Invalid request evidence');for(const origin of item.origins)if(!forwardDecimal(origin.revision)||!forwardDecimal(origin.sequence))throw Error('Invalid quoted record revision')}
+    el('forward-requests').replaceChildren();for(const item of data.rows){
+      const origins=item.origins,first=origins[0]||{},policy=first.policy||{};
+      const tr=row('forward-requests',[forwardDate(first.started_at)+' · '+item.id+' · revision '+(first.revision||'Unknown'),origins.map(o=>(o.source_id||'Unknown')+' / '+item.account+' / '+(o.attribution?.model||'Unknown')).join(' ; '),forwardValue(item.value),origins.map(forwardWrites).join(' ; '),'Selected '+(policy.selected_ttl||'Unknown')+' · effective '+(policy.effective_ttl||'Unknown')+' · historical attempt receipt; current chat marker unavailable',[...(item.issues||[]),...(item.coverage_reasons||[])].map(v=>String(v).replaceAll('_',' ')).join(' · ')||'Recorded evidence; capacity unknown']);
+      const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.textContent='Evidence';button.dataset.forwardEvidence=item.id;button.onclick=()=>forwardTask(async t=>{const data=await forwardCall('evidence',{pin:forwardLoaded.pin,id:item.id},t);forwardSamePin(data.pin,forwardLoaded.pin);if(data.id!==item.id)throw Error('Evidence identity changed');el('forward-evidence-body').textContent=JSON.stringify(data,null,2);el('forward-evidence-dialog').showModal()});td.append(button);tr.append(td);
+    }
+    forwardPageCursor=cursor;forwardNextCursor=data.next_cursor||'';forwardPageNumber=page;el('forward-page').textContent='Page '+page+' · '+data.rows.length+' rows · fixed limit 50';
+  }
+  function forwardDecodeDownload(data,format){
+    if(!data||data.filename!=='pacer-forward.'+format||data.media_type!==(format==='json'?'application/json':'text/csv')||data.encoding!=='base64'||typeof data.content!=='string'||data.content.length>8*1024*1024||data.content.length%4!==0||/[^A-Za-z0-9+/=]/.test(data.content)||!forwardText(data.next_cursor||''))throw Error('Invalid forward download envelope');
+    const raw=atob(data.content);if(btoa(raw)!==data.content)throw Error('Invalid base64 padding');return Uint8Array.from(raw,c=>c.charCodeAt(0));
+  }
+  function forwardDownload(format,next=false){return forwardTask(async ticket=>{
+    const pin=forwardLoaded.pin,cursor=next?forwardCSVNext:forwardPageCursor;
+    const data=await forwardCall('export-'+format,{pin,...(format==='csv'?{limit:forwardLimit,cursor}:{})},ticket),bytes=forwardDecodeDownload(data,format);
+    if(!forwardCurrent(ticket))return;const url=URL.createObjectURL(new Blob([bytes],{type:data.media_type}));forwardDownloads.add(url);
+    try{if(!forwardCurrent(ticket))return;const a=document.createElement('a');a.href=url;a.download=data.filename;a.click();if(format==='csv'){forwardCSVNext=data.next_cursor||'';el('forward-csv-cursor').textContent=forwardCSVNext||'End of this CSV selection';}el('forward-download-status').textContent=format==='csv'?'CSV page downloaded · at most 50 rows; '+(forwardCSVNext?'more pages available':'end of pinned selection'):'Pinned summary JSON downloaded';}finally{setTimeout(()=>{URL.revokeObjectURL(url);forwardDownloads.delete(url)},1000)}
+  },'forward-download-status')}
+  function forwardNewProfile(){el('forward-profile-form').reset();el('forward-edit-id').readOnly=false;el('forward-edit-provider').readOnly=false;el('forward-memberships').replaceChildren()}
+  function forwardMembership(value={}){
+    if(el('forward-memberships').children.length>=100)throw Error('At most 100 memberships');const group=document.createElement('div');group.className='membership';
+    for(const [field,label] of [['account','Native account reference'],['start_ms','Start UTC inclusive'],['end_ms','End UTC exclusive (optional)']]){const wrap=document.createElement('label'),input=document.createElement('input');wrap.append(document.createTextNode(label));input.dataset.field=field;input.required=field!=='end_ms';input.maxLength=field==='account'?1024:30;input.value=field==='account'?(value.account||''):value[field]?new Date(value[field]).toISOString().replace('.000Z','Z'):'';wrap.append(input);group.append(wrap)}
+    const remove=document.createElement('button');remove.type='button';remove.textContent='Remove membership';remove.onclick=()=>group.remove();group.append(remove);el('forward-memberships').append(group);
+  }
+  function forwardEdit(profile){forwardNewProfile();el('forward-edit-id').value=profile.id;el('forward-edit-id').readOnly=true;el('forward-edit-name').value=profile.name;el('forward-edit-provider').value=profile.provider;el('forward-edit-provider').readOnly=true;el('forward-edit-selection').checked=!!profile.selection;for(const m of profile.memberships||[])forwardMembership(m);el('forward-profile-status').textContent=Object.hasOwn(profile,'memberships')?'Editing explicit dated memberships at table revision '+forwardProfiles.revision:'Legacy membership list is absent. Enter the intended dated selection explicitly; saving zero rows clears selection.'}
+  async function forwardReadProfiles(revision,ticket){
+    if(!forwardDecimal(revision))throw Error('Profile revision must be a canonical quoted int64');const data=await forwardCall('profiles?revision='+revision,undefined,ticket,'GET');
+    if(data.revision!==revision||!forwardDecimal(data.config?.revision)||!forwardHash(data.digest)||!Array.isArray(data.config.profiles))throw Error('Invalid exact profile revision response');
+    for(const p of data.config.profiles){if(!forwardText(p.id,256)||!forwardText(p.name,256)||!forwardText(p.provider,256)||Object.hasOwn(p,'memberships')&&(!Array.isArray(p.memberships)||p.memberships.length>100))throw Error('Unsupported profile membership schema');for(const m of p.memberships||[])if(!forwardText(m.account,1024)||!Number.isSafeInteger(m.start_ms)||m.start_ms<0||m.start_ms>9223372036854||m.end_ms!==undefined&&(!Number.isSafeInteger(m.end_ms)||m.end_ms<0||m.end_ms>9223372036854))throw Error('Unsupported membership date precision')}
+    forwardNewProfile();forwardProfiles=data;el('forward-profile-cas').textContent='Save uses loaded table CAS revision '+revision+'. Editing the revision input does not change this guard.';el('forward-profile-status').textContent='Loaded profile revision '+revision+' · report pin unchanged. Editor cleared for this table revision.';
+    el('forward-profile-rows').replaceChildren();const selected=el('forward-profile').value;while(el('forward-profile').options.length>2)el('forward-profile').remove(2);
+    for(const p of data.config.profiles){const opt=document.createElement('option');opt.value=p.id;opt.textContent=p.name+(p.archived?' · archived':'');el('forward-profile').append(opt);const tr=row('forward-profile-rows',[p.id+' / '+p.name,p.provider+' · '+(p.archived?'Archived':'Retained'),Object.hasOwn(p,'memberships')?(p.memberships?.length||0)+' explicit memberships':'Legacy memberships absent']);const td=document.createElement('td'),edit=document.createElement('button');edit.type='button';edit.textContent='Edit dated selection';edit.onclick=()=>forwardEdit(p);td.append(edit);if(!p.archived){const archive=document.createElement('button');archive.type='button';archive.textContent='Archive profile';archive.onclick=()=>forwardSaveProfile(p.id);td.append(archive)}tr.append(td)}
+    if(selected&&!Array.from(el('forward-profile').options).some(o=>o.value===selected)){const opt=document.createElement('option');opt.value=selected;opt.textContent=selected+' · not in this revision';el('forward-profile').append(opt)}el('forward-profile').value=selected;
+    el('forward-profile-metadata').textContent=JSON.stringify(data,null,2);
+  }
+  function forwardSaveProfile(archiveID){return forwardTask(async ticket=>{
+    const expected=forwardProfiles.revision;let body={expected_revision:expected};
+    if(archiveID)body.archive_id=archiveID;else{
+      const profile={id:el('forward-edit-id').value,name:el('forward-edit-name').value,provider:el('forward-edit-provider').value,selection:el('forward-edit-selection').checked,memberships:[]};
+      for(const k of ['id','name','provider'])if(!profile[k]||!forwardText(profile[k],256))throw Error('Profile ID, name and provider are required bounded text');
+      for(const group of el('forward-memberships').children){const inputs=Object.fromEntries(Array.from(group.querySelectorAll('input')).map(i=>[i.dataset.field,i.value]));if(!inputs.account||!forwardText(inputs.account,1024))throw Error('Each membership needs a native account reference');const m={account:inputs.account,start_ms:forwardMS(inputs.start_ms)};if(inputs.end_ms){m.end_ms=forwardMS(inputs.end_ms);if(BigInt(m.end_ms)<=BigInt(m.start_ms))throw Error('Membership end must follow start')}profile.memberships.push(m)}body.profile=profile;
+    }
+    if(new TextEncoder().encode(JSON.stringify(body)).length>65536)throw Error('Profile request is too large');
+    const result=await forwardCall('profiles',body,ticket,'PATCH');if(!forwardDecimal(result.revision)||result.publication!=='pending')throw Error('Uncertain profile save response. Read the exact revision before retrying.');
+    const notice='Committed profile revision '+result.revision+' · publication pending. Loaded report pin is unchanged. Load a new report after publication.';
+    el('forward-profile-status').textContent=notice;el('forward-profile-revision').value=result.revision;forwardProfiles=null;el('forward-profile-cas').textContent='Read committed revision '+result.revision+' before another edit.';
+  },'forward-profile-status')}
+  el('forward-status-load').onclick=()=>forwardTask(forwardStatus,'forward-status');
+  el('forward-form').onsubmit=event=>{event.preventDefault();return forwardLoad()};
+  el('forward-first').onclick=()=>forwardTask(t=>forwardPage('',t,1));el('forward-next').onclick=()=>forwardTask(t=>forwardPage(forwardNextCursor,t,forwardPageNumber+1));
+  el('forward-json').onclick=()=>forwardDownload('json');el('forward-csv').onclick=()=>forwardDownload('csv');el('forward-csv-next').onclick=()=>forwardDownload('csv',true);
+  el('forward-evidence-close').onclick=()=>el('forward-evidence-dialog').close();
+  el('forward-profile-read').onsubmit=event=>{event.preventDefault();return forwardTask(t=>forwardReadProfiles(el('forward-profile-revision').value,t),'forward-profile-status')};
+  el('forward-profile-form').onsubmit=event=>{event.preventDefault();return forwardSaveProfile()};el('forward-profile-new').onclick=forwardNewProfile;el('forward-membership-add').onclick=()=>{try{forwardMembership()}catch(e){el('forward-profile-status').textContent=e.message}};
+  async function refresh(){message('');forwardControls();try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
     else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.'}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
+  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
+  el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
