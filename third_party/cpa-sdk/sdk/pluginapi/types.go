@@ -695,6 +695,8 @@ type HostModelExecutionRequest struct {
 	// ProxyURL optionally overrides the outbound proxy for this model execution only.
 	// Supported schemes are http, https, socks5, and socks5h.
 	ProxyURL string `json:"proxy_url,omitempty"`
+	// Path optionally specifies or overrides the request path (e.g. "/v1/images/generations" or "/v1/images/edits").
+	Path string `json:"path,omitempty"`
 }
 
 // HostModelExecutionResponse describes a non-streaming host model execution response.
@@ -882,6 +884,20 @@ type HostAffinityLookupResponse struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// Unavailable reports whether the bound credential is currently unavailable.
 	Unavailable bool `json:"unavailable,omitempty"`
+}
+
+// HostRoutingResetCooldownRequest asks the host to clear quota and cooldown routing state for one credential.
+type HostRoutingResetCooldownRequest struct {
+	// AuthIndex identifies the credential index.
+	AuthIndex string `json:"auth_index"`
+}
+
+// HostRoutingResetCooldownResponse reports the credential whose quota and cooldown state was cleared.
+type HostRoutingResetCooldownResponse struct {
+	// AuthIndex identifies the credential index.
+	AuthIndex string `json:"auth_index"`
+	// Models lists the model keys whose routing state was reset.
+	Models []string `json:"models,omitempty"`
 }
 
 // HTTPWireProfile configures transport-level wire representation for plugin HTTP requests.
@@ -1139,6 +1155,8 @@ type RequestInterceptRequest struct {
 
 // RequestInterceptResponse returns request modifications.
 type RequestInterceptResponse struct {
+	// Path optionally overrides the target request path (e.g. "/v1/images/generations").
+	Path string `json:"path,omitempty"`
 	// Headers replaces matching current request headers and preserves headers not mentioned here.
 	Headers http.Header
 	// Body replaces the current request body only when non-empty.
@@ -1395,10 +1413,14 @@ type ManagementAPI interface {
 type ManagementRegistrationRequest struct {
 	// Plugin is the metadata of the plugin being registered.
 	Plugin Metadata
-	// BasePath is the only Management API prefix plugins may register under.
+	// BasePath is the legacy Management API prefix for relative and v0 routes.
 	BasePath string
 	// ResourceBasePath is the plugin resource prefix for browser-navigable resources.
 	ResourceBasePath string
+	// PluginManagementBasePath advertises optional schema-7 scoped v8 management.
+	// When nonempty, plugins may declare full literal paths beneath this prefix.
+	// It is absent on older hosts; never infer support from SchemaVersion alone.
+	PluginManagementBasePath string `json:"PluginManagementBasePath,omitempty"`
 }
 
 // ManagementRegistrationResponse lists plugin-owned Management API and resource routes.
@@ -1414,6 +1436,8 @@ type ManagementRoute struct {
 	// Method is the HTTP method, for example GET or POST.
 	Method string
 	// Path is an exact path under /v0/management/. Relative paths are resolved under that prefix.
+	// Explicit v8 routes must be beneath the advertised PluginManagementBasePath;
+	// they require schema 7, a standard read/write method and an empty Menu.
 	Path string
 	// Menu is a legacy resource menu label. GET routes with Menu are registered under /v0/resource/plugins/<pluginID>/.
 	Menu string

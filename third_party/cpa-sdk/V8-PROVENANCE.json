@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/floris3456/CLIProxyAPI",
+  "commit": "9af81eadc59475eba69de16f586b4fb555791515",
+  "host_feature_commit": "3e106895aa56487a70346025249df5b1ff8d0d44",
+  "date": "2026-10-08",
+  "abi": 1,
+  "schema": 7,
+  "schema_scope": "Upstream CPA snapshot and v8 plugin registration requirement; retained sdk/pluginabi/types.go still has its historical SchemaVersion=6 constant and is not replaced",
+  "scope": "Exact single-file replacement; mixed vendor snapshot, not a new whole-SDK provenance manifest",
+  "files": {
+    "sdk/pluginapi/types.go": "1c72f5459f04d9d9f81c25686999e7022b7d9935731259f4cb2e9ada2d5ac2de"
+  },
+  "previous_vendored_sha256": "214eacb24f0a0348bcd48c4a2f2838c7a946b9773593d4fff02ae3f602dd8898",
+  "additions": "Optional PluginManagementBasePath and preexisting upstream Path/reset type declarations only; no implementations or operation invocations",
+  "preserved_manifests": {
+    "PROVENANCE.json": "893f5d014755475cd259f1cea2a6f8fa24cd70ef1c59736e901c77d2a5c2c775",
+    "PHYSICAL-PROVENANCE.json": "633083e071257a111ae0a9b62745c26291cc576dfaf6d709305bec309d1a656a"
+  }
+}
