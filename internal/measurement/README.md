@@ -4,6 +4,21 @@ Independent package for Pacer `PLAN.md §3.1` and `CACHE-TTL.md §§2,6`.
 It uses the caller's SQLite `*sql.DB`; no CPA ABI, provider calls, CPAMP queue,
 router mutation, or historical migration is inside this package.
 
+## Scoped CPA source consumer (schema 2)
+
+Native integration must use the [usagecoverage parent-hook contract](../usagecoverage/README.md).
+It adds immutable account membership, scoped request-start proof, incarnation/sequence tracking,
+durable invalidations and `Query.RequireSourceCoverage` / `SourceConsumerID` / `AccountScopes`.
+Scoped proofs never feed the global `Checkpoint` below. Native records force scoped query mode
+defensively; explicit native queries must use the consumer hook even when no records exist.
+
+`Store.SourceSnapshot` describes request-domain proof, not a measurement watermark. Physical
+carry-in remains unproven, so native capacity/stretch/burn coverage stays unknown even when that
+snapshot is known. There is no manual trust override. Source clocks now allow unmanaged actual
+dispatch; final usage is labelled `source_final_usage_observation`, not physical close. The
+schema-1→2 upgrade adds empty source tables without scanning/repricing historical evidence.
+The following global APIs remain for existing synthetic/historical callers and tests.
+
 ## Integration API
 
 ```go
@@ -29,8 +44,8 @@ expected := report.Expected(chatRef, measurement.TTL1h)
 runway := report.WarmBurn.Runway(availableUSD, now, verifiedReset)
 ```
 
-Check every error. `Open` creates only an empty schema once, validates version 1
-on reopen, and does not acknowledge delivery. It does not close/reconfigure the
+Check every error. `Open` creates an empty schema, upgrades version 1 additively,
+validates version 2 on reopen, and does not acknowledge delivery. It does not close/reconfigure the
 database. Use the owner's durable SQLite configuration (e.g. WAL, FULL synchronous,
 busy timeout); the package works with `SetMaxOpenConns(1)` shared with other stores.
 All transaction queries use that transaction; rows are closed before subsequent

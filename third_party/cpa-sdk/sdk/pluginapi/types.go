@@ -1468,6 +1468,7 @@ type ManagementResponse struct {
 
 // UsageRecord describes request usage and billing metadata.
 type UsageRecord struct {
+	SourceEvidence     *UsageSourceEvidence `json:"SourceEvidence,omitempty"`
 	LifecycleRequestID string
 	CachePolicy        *CachePolicyEvidence
 	AccountingVersion  int

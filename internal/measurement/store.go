@@ -23,7 +23,7 @@ type Store struct {
 
 type Options struct{ Clock func() time.Time }
 
-const schemaVersion = 1
+const schemaVersion = 2
 const schema = `
 CREATE TABLE measurement_meta (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);
 INSERT INTO measurement_meta VALUES(1,1);
@@ -86,11 +86,17 @@ func Open(ctx context.Context, db *sql.DB, opts Options) (*Store, error) {
 	if err = c.QueryRowContext(ctx, `SELECT version FROM measurement_meta WHERE id=1`).Scan(&version); err != nil {
 		return nil, err
 	}
+	if version == 1 {
+		if _, err = c.ExecContext(ctx, sourceSchema); err != nil {
+			return nil, fmt.Errorf("measurement source schema: %w", err)
+		}
+		version = 2
+	}
 	if version != schemaVersion {
 		return nil, fmt.Errorf("measurement: unsupported schema version %d", version)
 	}
 	// Fail closed for partial/lost schema without scanning any evidence tables.
-	for _, name := range []string{"measurement_books", "measurement_records", "measurement_record_revisions", "measurement_observations", "measurement_closures", "measurement_delivery_runs", "measurement_gaps"} {
+	for _, name := range append([]string{"measurement_books", "measurement_records", "measurement_record_revisions", "measurement_observations", "measurement_closures", "measurement_delivery_runs", "measurement_gaps"}, sourceTables...) {
 		if err = c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&exists); err != nil {
 			return nil, err
 		}

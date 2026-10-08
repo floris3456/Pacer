@@ -122,6 +122,7 @@ type Record struct {
 	RequestedAt         time.Time       `json:"requested_at,omitempty,omitzero"`
 	StartTimeBasis      string          `json:"start_time_basis,omitempty"` // Empty/upstream = actual; requested_at_unverified cannot measure an interval.
 	EndedAt             time.Time       `json:"ended_at"`
+	EndTimeBasis        string          `json:"end_time_basis,omitempty"`
 	Final               bool            `json:"final"`
 	Success             bool            `json:"success"`
 	Usage               Usage           `json:"usage"`
@@ -203,13 +204,18 @@ type Coverage struct {
 // path and cache the resulting immutable report. Since bounds work and history;
 // a truncated first stretch cannot become population evidence.
 type Query struct {
-	Provider   string
-	AccountID  string
-	Scope      string
-	BookID     string
-	Since      time.Time
-	AsOf       time.Time
-	MaxRecords int // 0 = 100000; over the limit fails, never silently truncates.
+	// Native consumers MUST select scoped coverage. AccountScopes maps immutable
+	// billing AccountID to a persisted membership snapshot ID, never to an alias.
+	RequireSourceCoverage bool
+	SourceConsumerID      string
+	AccountScopes         map[string]string
+	Provider              string
+	AccountID             string
+	Scope                 string
+	BookID                string
+	Since                 time.Time
+	AsOf                  time.Time
+	MaxRecords            int // 0 = 100000; over the limit fails, never silently truncates.
 }
 
 type ChatRef struct {

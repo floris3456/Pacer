@@ -9,12 +9,14 @@ import (
 )
 
 type evidence struct {
-	Book         PriceBook
-	Records      []Record
-	Observations []Observation
-	Closures     map[string]Closure
-	Runs         []DeliveryRun
-	Gaps         []Gap
+	RequireSourceCoverage bool
+	Sources               map[string]SourceSnapshot
+	Book                  PriceBook
+	Records               []Record
+	Observations          []Observation
+	Closures              map[string]Closure
+	Runs                  []DeliveryRun
+	Gaps                  []Gap
 }
 
 // Measure is read-only, with a consistent SQLite snapshot. AsOf is an event-time
@@ -37,7 +39,7 @@ func (s *Store) Measure(ctx context.Context, q Query) (Report, error) {
 		return out, err
 	}
 	defer tx.Rollback()
-	e := evidence{Closures: map[string]Closure{}}
+	e := evidence{Closures: map[string]Closure{}, RequireSourceCoverage: q.RequireSourceCoverage, Sources: map[string]SourceSnapshot{}}
 	var raw []byte
 	if err = tx.QueryRowContext(ctx, `SELECT body FROM measurement_books WHERE id=?`, q.BookID).Scan(&raw); err != nil {
 		return out, err
@@ -54,6 +56,11 @@ func (s *Store) Measure(ctx context.Context, q Query) (Report, error) {
 			return err
 		}
 		e.Records = append(e.Records, r)
+		// Defense in depth: native records can never borrow synthetic legacy runs
+		// even when a caller forgets to use the scoped-query hook.
+		if r.Native != nil {
+			e.RequireSourceCoverage = true
+		}
 		if len(e.Records) > q.MaxRecords {
 			return ErrLimit
 		}
@@ -92,28 +99,41 @@ func (s *Store) Measure(ctx context.Context, q Query) (Report, error) {
 		}
 		e.Closures[id] = c
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,started_at,through_at,closed FROM measurement_delivery_runs WHERE started_at<=? AND through_at>=? ORDER BY started_at,id LIMIT ?`, q.AsOf.UnixNano(), lookback.UnixNano(), q.MaxRecords+1)
-	if err != nil {
-		return out, err
-	}
-	for rows.Next() {
-		var r DeliveryRun
-		var start, through int64
-		if err = rows.Scan(&r.ID, &start, &through, &r.Closed); err != nil {
-			rows.Close()
-			return out, err
-		}
-		r.StartedAt, r.Through = stamp(start), stamp(through)
-		e.Runs = append(e.Runs, r)
-		if len(e.Runs) > q.MaxRecords {
-			rows.Close()
+	if e.RequireSourceCoverage {
+		if len(q.AccountScopes) > MaxSourceMembers {
 			return out, ErrLimit
 		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
+		for account, id := range q.AccountScopes {
+			v, err := readSourceSnapshot(ctx, tx, q.SourceConsumerID, id, q.Provider, account)
+			if err != nil {
+				return out, err
+			}
+			e.Sources[account] = v
+		}
+	} else {
+		rows, err := tx.QueryContext(ctx, `SELECT id,started_at,through_at,closed FROM measurement_delivery_runs WHERE started_at<=? AND through_at>=? ORDER BY started_at,id LIMIT ?`, q.AsOf.UnixNano(), lookback.UnixNano(), q.MaxRecords+1)
+		if err != nil {
+			return out, err
+		}
+		for rows.Next() {
+			var r DeliveryRun
+			var start, through int64
+			if err = rows.Scan(&r.ID, &start, &through, &r.Closed); err != nil {
+				rows.Close()
+				return out, err
+			}
+			r.StartedAt, r.Through = stamp(start), stamp(through)
+			e.Runs = append(e.Runs, r)
+			if len(e.Runs) > q.MaxRecords {
+				rows.Close()
+				return out, ErrLimit
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return out, err
+		}
 	}
 	if err = readBodies(ctx, tx, `SELECT body FROM measurement_gaps WHERE from_at<=? AND to_at>=? ORDER BY from_at,id LIMIT ?`, []any{q.AsOf.UnixNano(), lookback.UnixNano(), q.MaxRecords + 1}, func(raw []byte) error {
 		var g Gap
@@ -157,6 +177,9 @@ func readBodies(ctx context.Context, tx *sql.Tx, query string, args []any, visit
 }
 
 func coverage(e evidence, account string, from, to time.Time) Coverage {
+	if e.RequireSourceCoverage {
+		return scopedCoverage(e, account, from, to)
+	}
 	c := Coverage{Delivery: "native-in-memory-best-effort"}
 	if to.Before(from) {
 		c.Reasons = []string{"invalid_interval"}

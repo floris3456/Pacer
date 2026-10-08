@@ -36,30 +36,33 @@ type NativeCredential struct {
 // retains topology and provenance, not addresses, URLs, user agents, raw AuthID,
 // native Source (which may itself contain a key), headers, or failure bodies.
 type NativeMetadata struct {
-	AccountingVersion    int           `json:"accounting_version"`
-	BreakdownVersion     int           `json:"breakdown_version"`
-	CacheCreationQuality string        `json:"cache_creation_quality,omitempty"`
-	CredentialBindingRef string        `json:"credential_binding_ref"`
-	AccessTokenRef       string        `json:"access_token_ref,omitempty"`
-	AuthIndex            string        `json:"auth_index,omitempty"`
-	AuthType             string        `json:"auth_type,omitempty"`
-	ExecutorType         string        `json:"executor_type,omitempty"`
-	ParentSessionID      string        `json:"parent_session_id,omitempty"`
-	SessionID            string        `json:"session_id,omitempty"`
-	NodeKind             string        `json:"node_kind,omitempty"`
-	IsFork               bool          `json:"is_fork"`
-	IsCompaction         bool          `json:"is_compaction"`
-	Generate             bool          `json:"generate"`
-	Stream               bool          `json:"stream"`
-	Latency              time.Duration `json:"latency"`
-	TTFT                 time.Duration `json:"ttft"`
-	RequestedServiceTier string        `json:"requested_service_tier,omitempty"`
-	ResponseServiceTier  string        `json:"response_service_tier,omitempty"`
-	ExecutionModel       string        `json:"execution_model,omitempty"`
-	ResponseModel        string        `json:"response_model,omitempty"`
-	Dispatched           bool          `json:"dispatched"`
-	BreakpointCount      int           `json:"breakpoint_count"`
-	Diagnostics          []string      `json:"diagnostics,omitempty"`
+	SourceMembershipID     string        `json:"source_membership_id,omitempty"`
+	BillingMappingVerified bool          `json:"billing_mapping_verified,omitempty"`
+	SourceEvidence         *NativeSource `json:"source_evidence,omitempty"`
+	AccountingVersion      int           `json:"accounting_version"`
+	BreakdownVersion       int           `json:"breakdown_version"`
+	CacheCreationQuality   string        `json:"cache_creation_quality,omitempty"`
+	CredentialBindingRef   string        `json:"credential_binding_ref"`
+	AccessTokenRef         string        `json:"access_token_ref,omitempty"`
+	AuthIndex              string        `json:"auth_index,omitempty"`
+	AuthType               string        `json:"auth_type,omitempty"`
+	ExecutorType           string        `json:"executor_type,omitempty"`
+	ParentSessionID        string        `json:"parent_session_id,omitempty"`
+	SessionID              string        `json:"session_id,omitempty"`
+	NodeKind               string        `json:"node_kind,omitempty"`
+	IsFork                 bool          `json:"is_fork"`
+	IsCompaction           bool          `json:"is_compaction"`
+	Generate               bool          `json:"generate"`
+	Stream                 bool          `json:"stream"`
+	Latency                time.Duration `json:"latency"`
+	TTFT                   time.Duration `json:"ttft"`
+	RequestedServiceTier   string        `json:"requested_service_tier,omitempty"`
+	ResponseServiceTier    string        `json:"response_service_tier,omitempty"`
+	ExecutionModel         string        `json:"execution_model,omitempty"`
+	ResponseModel          string        `json:"response_model,omitempty"`
+	Dispatched             bool          `json:"dispatched"`
+	BreakpointCount        int           `json:"breakpoint_count"`
+	Diagnostics            []string      `json:"diagnostics,omitempty"`
 }
 
 // nativeEnvelope intentionally spells out CPA pluginapi.UsageRecord's PascalCase
@@ -67,6 +70,7 @@ type NativeMetadata struct {
 // are not decoded. Nested accounting/cache-policy contracts use snake_case tags.
 // Pointer counters distinguish malformed/missing data from legitimate zeros.
 type nativeEnvelope struct {
+	SourceEvidence      *nativeSourceEvidence `json:"SourceEvidence"`
 	LifecycleRequestID  string                `json:"LifecycleRequestID"`
 	RequestID           string                `json:"RequestID"`
 	TraceID             string                `json:"TraceID"`
@@ -246,6 +250,9 @@ func FromNative(rawJSON []byte, credential NativeCredential, sourceID string) (R
 				m.Diagnostics = append(m.Diagnostics, "auxiliary_kind_conflicts_with_selected")
 			}
 		}
+	}
+	if err := applyNativeSource(&r, n, credential, sourceID); err != nil {
+		return Record{}, err
 	}
 	if !knownStart(r) {
 		m.Diagnostics = append(m.Diagnostics, "unverified_upstream_start")
