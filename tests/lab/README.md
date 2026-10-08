@@ -77,3 +77,14 @@ Set `PACER_CHECK_LEGACY_MARKERS=1` for a lab retaining pre-fix native Activity:
 the opt-in selector additionally checks public `Measure` readback before and
 after the alleged expiry, requiring unknown warmth and no protection or prefix
 authority, while retaining old canonical body digests byte-for-byte.
+
+`check-forward.py` requires explicit `PACER_FORWARD_READY=1` and `PACER_EVIDENCE`.
+It tests actual native ingestion, pinned reports/evidence and exact old export
+replay, with one dummy request. Default `PACER_FORWARD_EXPECT_TIER=unknown` requires
+an unvalued response; `standard` additionally requires observed response-tier
+provenance and independently checks the qualified $0.000945 fixture value.
+`PACER_FORWARD_STREAM=1` requires a complete Messages SSE stream; truncation fails.
+Only the original fixture URL or the separately owned `pacer-upstream-tier` URL
+is allowed via `PACER_FIXTURE_UPSTREAM`. These are distinct attempt/counter domains.
+Never restart/reset the original fixture to load new source. Scope, preparation,
+ownership, version checks and temporary routing cleanup stay the caller's duty.

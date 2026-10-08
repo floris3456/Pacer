@@ -100,13 +100,38 @@ def check_value(added, before, after, expected_tier):
     return expected
 
 
+def response_usage(raw, stream):
+    if not stream:
+        return json.loads(raw)["usage"]
+    usage, started, stopped = {}, False, False
+    for line in raw.decode().splitlines():
+        if not line.startswith("data: "):
+            continue
+        event = json.loads(line[6:])
+        if event.get("type") == "message_start":
+            assert not started and not stopped
+            started = True
+            usage.update(event["message"]["usage"])
+        elif event.get("type") == "message_delta":
+            assert started and not stopped
+            usage.update(event.get("usage", {}))
+        elif event.get("type") == "message_stop":
+            assert started and not stopped
+            stopped = True
+    assert started and stopped, "a truncated fixture stream cannot satisfy acceptance"
+    return usage
+
+
 def main():
     if os.environ.get("PACER_FORWARD_READY") != "1":
         raise SystemExit("Parent must authorize a ready exclusive forward lab window")
     out = pathlib.Path(os.environ["PACER_EVIDENCE"])
     expected_tier = os.environ.get("PACER_FORWARD_EXPECT_TIER", "unknown")
     assert expected_tier in ("unknown", "standard")
-    receipt = {"pass": False, "expected_response_tier": expected_tier, "scope": "isolated native-only forward publication; no complete billing/capacity claim"}
+    stream = os.environ.get("PACER_FORWARD_STREAM", "0")
+    assert stream in ("0", "1")
+    stream = stream == "1"
+    receipt = {"pass": False, "stream": stream, "fixture_origin": UPSTREAM, "expected_response_tier": expected_tier, "scope": "isolated native-only forward publication; no complete billing/capacity claim"}
     before = fixture("attempts")
     assert fixture("activity")["active_messages"] == 0
     receipt["attempts_before"] = len(before)
@@ -139,12 +164,14 @@ def main():
         receipt["old_pin"] = pin
         receipt["old_export_sha256"] = {"json": hashlib.sha256(old_json).hexdigest(), "csv_page": hashlib.sha256(old_csv).hexdigest()}
         receipt["phase"] = "dummy-inference"
-        status, raw, _ = call("/v1/messages", {
-            "model": "claude-opus-5-5", "max_tokens": 64,
+        status, raw, headers = call("/v1/messages", {
+            "model": "claude-opus-5-5", "max_tokens": 64, "stream": stream,
             "messages": [{"role": "user", "content": "Native forward fixture " + uuid.uuid4().hex + ". No reasoning."}],
         }, key="pacer-test-inference")
         assert status == 200, status
-        usage = json.loads(raw)["usage"]
+        if stream:
+            assert "text/event-stream" in headers.get("Content-Type", "")
+        usage = response_usage(raw, stream)
         assert usage["input_tokens"] == 10 and usage["output_tokens"] == 4
         assert usage["cache_creation"]["ephemeral_5m_input_tokens"] == 25
         assert usage["cache_creation"]["ephemeral_1h_input_tokens"] == 75
