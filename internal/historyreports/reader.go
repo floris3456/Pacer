@@ -31,6 +31,31 @@ var (
 	ErrLimit    = errors.New("history reports: preparation limits exceeded")
 )
 
+// Preparation ceilings. Input above any of them fails with ErrLimit; totals are
+// never truncated. Observations and events were raised on 2026-10-08 because a
+// real 5-week CPAMP backup (278,399 observations) exceeded the earlier 100,000
+// observation ceiling. Values are pinned by prepare_limits_test.go.
+const (
+	maxEvents           = 2000000
+	maxObservations     = 2000000
+	maxAccounts         = 1000
+	maxProfileRevisions = 10000
+	maxForecasts        = 100000
+	maxForecastResults  = 200000
+	maxLatestProfiles   = 1000
+)
+
+// preparationCeilings maps each row-counted table to its ceiling. Production code
+// only reads it; tests lower entries to exercise the boundary and restore them.
+var preparationCeilings = map[string]int64{
+	"analytics_events":            maxEvents,
+	"analytics_observations":      maxObservations,
+	"analytics_accounts":          maxAccounts,
+	"analytics_profile_revisions": maxProfileRevisions,
+	"analytics_forecasts":         maxForecasts,
+	"analytics_forecast_results":  maxForecastResults,
+}
+
 type Pin = cpamp.ProfileWorkspaceFilter
 type Workspace = cpamp.ProfileWorkspaceReport
 type Window = cpamp.QuotaUsageWindow
@@ -101,15 +126,12 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 	// Fixed resource ceilings fail explicitly rather than truncating totals.
-	for _, limit := range []struct {
-		table string
-		max   int64
-	}{{"analytics_events", 500000}, {"analytics_observations", 100000}, {"analytics_accounts", 1000}, {"analytics_profile_revisions", 10000}, {"analytics_forecasts", 100000}, {"analytics_forecast_results", 200000}} {
+	for table, max := range preparationCeilings {
 		var n int64
-		if db.QueryRowContext(ctx, "SELECT count(*) FROM "+limit.table).Scan(&n) != nil {
+		if db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&n) != nil {
 			return nil, ErrSource
 		}
-		if n > limit.max {
+		if n > max {
 			return nil, ErrLimit
 		}
 	}
@@ -123,7 +145,7 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 	if e != nil {
 		return nil, ErrSource
 	}
-	if len(config.Profiles) > 1000 {
+	if len(config.Profiles) > maxLatestProfiles {
 		return nil, ErrLimit
 	}
 	m := prepared{Version: Version, Boundary: b, CursorKey: make([]byte, 32), PollIntervalSeconds: interval}

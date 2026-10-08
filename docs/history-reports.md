@@ -104,10 +104,12 @@ Other mutable metadata is the frozen archive's state: unavailable older alias or
 inventory snapshots cannot be reconstructed from a report pin alone.
 
 Preparation and first aggregate computation scale with retained history and must
-run outside routing/startup critical paths. Explicit ceilings are 500,000 events,
-100,000 observations, 1,000 accounts, 10,000 profile revisions and 1,000 latest
+run outside routing/startup critical paths. Explicit ceilings are 2,000,000 events,
+2,000,000 observations, 1,000 accounts, 10,000 profile revisions and 1,000 latest
 profiles; the added forecast/result limits are 100,000/200,000 rows. Oversize input
-fails instead of returning truncated totals. No expensive
+fails instead of returning truncated totals. Raised 2026-10-08 after a real 5-week
+backup exceeded the observation ceiling; preparation of that backup is measured in
+the migration evidence, not an SLA. No expensive
 work is hidden in `Open`. New report calls carry a cooperative 30-second context
 deadline; the inherited pure calculations are not a hard-preemptible worker.
 Fixed filters share a 16-entry immutable-report cache; pages read their own
@@ -116,7 +118,7 @@ Fixed filters share a 16-entry immutable-report cache; pages read their own
 The extension computes the four default historical aggregates during **offline
 Prepare**: legacy profiles, raw history, current quota and historical quota. They
 are stored inside the prepared artifact, so the first default request decodes a
-result instead of recalculating up to 500,000 events. Filtered cold reads/proofs
+result instead of recalculating up to 2,000,000 events. Filtered cold reads/proofs
 still use CPAMP's full algorithms; preparation ceilings are not a latency SLA or
 a hard CPU deadline. A separate 16-entry/**32 MiB** serialized-result memory cache
 shares repeated historical reads safely. Forecast proof arrays can still scale
