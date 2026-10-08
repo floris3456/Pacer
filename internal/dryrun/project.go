@@ -75,25 +75,29 @@ func (b *builder) index() {
 	}
 }
 
+// Reset is when the cycle ended and on what evidence. ok is false when neither
+// a provider deadline nor an observed closure is known.
+func (c Cycle) Reset() (at time.Time, basis string, ok bool) {
+	switch {
+	case c.Closed.IsZero() && c.Scheduled.IsZero():
+		return time.Time{}, "", false
+	case c.Scheduled.IsZero():
+		at, basis = c.Closed, "observed"
+	case c.Closed.IsZero():
+		at, basis = c.Scheduled, "scheduled_unconfirmed"
+	case c.Closed.Before(c.Scheduled):
+		at, basis = c.Closed, "observed_early"
+	default:
+		at, basis = c.Scheduled, "scheduled"
+	}
+	return at.UTC(), basis, true
+}
+
 func (b *builder) resets() []Reset {
 	out := []Reset{}
 	for _, c := range b.in.Cycles {
-		var at time.Time
-		var basis string
-		switch {
-		case c.Closed.IsZero() && c.Scheduled.IsZero():
-			continue
-		case c.Scheduled.IsZero():
-			at, basis = c.Closed, "observed"
-		case c.Closed.IsZero():
-			at, basis = c.Scheduled, "scheduled_unconfirmed"
-		case c.Closed.Before(c.Scheduled):
-			at, basis = c.Closed, "observed_early"
-		default:
-			at, basis = c.Scheduled, "scheduled"
-		}
-		at = at.UTC()
-		if !b.inDay(at) || at.After(b.in.Now) {
+		at, basis, ok := c.Reset()
+		if !ok || !b.inDay(at) || at.After(b.in.Now) {
 			continue
 		}
 		r := Reset{Provider: c.Provider, Account: c.Account, Scope: c.Scope, WindowSeconds: c.Seconds, CycleID: c.CycleID, ResetAt: at, ResetBasis: basis}
