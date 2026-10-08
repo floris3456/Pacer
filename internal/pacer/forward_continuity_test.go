@@ -201,25 +201,28 @@ func TestForwardRuntimeAcceptsPreparedCutoverAcrossRestart(t *testing.T) {
 		t.Error("status route omitted cutover", string(statusBody.Body))
 	}
 	// Seeded profile IDs are forward copies: the management route changes and
-	// archives them as forward revisions; old pins replay unchanged.
-	patch := func(body map[string]any, expected string) {
+	// archives them as forward revisions, each published as a new generation;
+	// old pins replay unchanged.
+	patch := func(body map[string]any, revision int64) historyreports.ForwardReport {
 		t.Helper()
-		body["expected_revision"] = expected
+		body["expected_revision"] = strconv.FormatInt(revision-1, 10)
 		req := forwardWiringRequest(t, "profiles", body)
 		req.Method = "PATCH"
 		forwardWiringCall(t, p, req, 202)
+		v := forwardWait(t, p, func(v ForwardRuntimeStatus) bool {
+			return v.State == "ready" && !v.Active && forwardReportAt(t, p, v.Latest).Manifest.ProfileRevision == revision
+		})
+		return forwardReportAt(t, p, v.Latest)
 	}
 	membership := []map[string]string{{"account": "a", "start_ms": strconv.FormatInt(continuityRuntimeN0, 10)}}
 	exportRequest := forwardWiringRequest(t, "export-json", map[string]any{"pin": lr.Pin})
 	saved := forwardWiringCall(t, p, exportRequest, 200)
-	patch(map[string]any{"profile": map[string]any{"id": seeded[0], "name": "rewritten", "provider": "claude", "memberships": membership}}, "1")
-	patch(map[string]any{"archive_id": seeded[1]}, "2")
-	patch(map[string]any{"profile": map[string]any{"id": "forward-live", "name": "Forward", "provider": "claude", "memberships": membership}}, "3")
-	edited := forwardWait(t, p, func(v ForwardRuntimeStatus) bool {
-		return v.State == "ready" && !v.Active && v.Latest != live.Latest && forwardReportAt(t, p, v.Latest).Manifest.ProfileRevision == 4
-	})
-	if got := forwardReportAt(t, p, edited.Latest); got.Profiles["forward-live"].Rows < 1 || got.Profiles[seeded[0]].Rows < 1 || got.Cutover == nil || got.Cutover.ForwardCutover != want {
-		t.Error("forward profile revision not published", got.Profiles["forward-live"], got.Profiles[seeded[0]], got.Cutover)
+	if got := patch(map[string]any{"profile": map[string]any{"id": seeded[0], "name": "rewritten", "provider": "claude", "memberships": membership}}, 2); got.Profiles[seeded[0]].Rows < 1 || got.Cutover == nil || got.Cutover.ForwardCutover != want {
+		t.Error("seeded profile edit not published", got.Profiles[seeded[0]], got.Cutover)
+	}
+	patch(map[string]any{"archive_id": seeded[1]}, 3)
+	if got := patch(map[string]any{"profile": map[string]any{"id": "forward-live", "name": "Forward", "provider": "claude", "memberships": membership}}, 4); got.Profiles["forward-live"].Rows < 1 || got.Cutover == nil || got.Cutover.ForwardCutover != want {
+		t.Error("forward profile revision not published", got.Profiles["forward-live"], got.Cutover)
 	}
 	// Restart re-runs the gate after the edits and preserves the accepted
 	// cutover, its basis, old pins and the recorded status.
