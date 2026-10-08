@@ -88,6 +88,7 @@ type ForwardCutover struct {
 	EventsThrough       int64               `json:"events_through"`
 	ObservationsThrough int64               `json:"observations_through"`
 	N0MS                int64               `json:"n0_ms"`
+	N0Basis             string              `json:"n0_basis"`
 	CoverageGap         *ForwardCoverageGap `json:"coverage_gap,omitempty"`
 }
 

@@ -27,8 +27,9 @@ import (
 // Contract §5 runtime gate (forward-continuity-contract.md §3) through the real
 // plugin registration, management wiring and restart.
 const (
-	continuityRuntimeH  = int64(1790812800000) // frozen fixture H
-	continuityRuntimeN0 = int64(1790726400000) // overlap [N0,H) holds 45 of 80 events
+	continuityRuntimeH     = int64(1790812800000) // frozen fixture H
+	continuityRuntimeN0    = int64(1790726400000) // overlap [N0,H) holds 45 of 80 events
+	continuityRuntimeBasis = "measurement store first certified source checkpoint (synthetic runtime)"
 )
 
 // The retained historical fixture with synthetic CPAMP request IDs, so the
@@ -89,8 +90,9 @@ func continuityFrozenReader(t *testing.T) *historyreports.Reader {
 }
 
 // Offline preparation only (never a runtime path): base copy, frozen profile
-// seed, partitioned origin certificates [0,n0),[n0,∞) per legacy account.
-func continuityRuntimeBaseline(t *testing.T, f forwardFixture, n0 int64) (origin, frozenProfile string) {
+// seed, one origin certificate [0,∞) per legacy account covering the whole
+// baseline. Certificates never define N0.
+func continuityRuntimeBaseline(t *testing.T, f forwardFixture) (origin string, seeded []string) {
 	t.Helper()
 	ctx := context.Background()
 	r := continuityFrozenReader(t)
@@ -107,8 +109,11 @@ func continuityRuntimeBaseline(t *testing.T, f forwardFixture, n0 int64) (origin
 		t.Fatal(err)
 	}
 	_, frozen, err := r.ForwardMetadata(ctx)
-	if err != nil || len(frozen.Profiles) == 0 {
+	if err != nil || len(frozen.Profiles) < 2 {
 		t.Fatal("frozen profiles", err)
+	}
+	for _, p := range frozen.Profiles {
+		seeded = append(seeded, p.ID)
 	}
 	origins := historyreports.ForwardOrigins{BaseDigest: base}
 	seen := map[string]bool{}
@@ -122,9 +127,7 @@ func continuityRuntimeBaseline(t *testing.T, f forwardFixture, n0 int64) (origin
 				continue
 			}
 			seen[e.Event.Account] = true
-			for _, window := range [][2]int64{{0, n0}, {n0, 0}} {
-				origins.Certificates = append(origins.Certificates, historyreports.ForwardOriginCertificate{LegacyAccount: e.Event.Account, Provider: e.Event.Provider, SourceID: f.source, NativeAccount: "native-" + e.Event.Account, NativeCredentialRef: "credential", StartMS: window[0], EndMS: window[1], EvidenceRef: "synthetic-continuity-v1", ProducerVersion: "synthetic-cpa-v1", ParserVersion: "synthetic-cpamp-physical-id-v1"})
-			}
+			origins.Certificates = append(origins.Certificates, historyreports.ForwardOriginCertificate{LegacyAccount: e.Event.Account, Provider: e.Event.Provider, SourceID: f.source, NativeAccount: "native-" + e.Event.Account, NativeCredentialRef: "credential", StartMS: 0, EndMS: 0, EvidenceRef: "synthetic-continuity-v1", ProducerVersion: "synthetic-cpa-v1", ParserVersion: "synthetic-cpamp-physical-id-v1"})
 		}
 		after = page.Next
 		if page.Done {
@@ -134,17 +137,17 @@ func continuityRuntimeBaseline(t *testing.T, f forwardFixture, n0 int64) (origin
 	if origin, err = s.RegisterForwardOrigins(ctx, origins); err != nil {
 		t.Fatal(err)
 	}
-	return origin, frozen.Profiles[0].ID
+	return origin, seeded
 }
 
-func continuityRuntimeCutover(t *testing.T, f forwardFixture, origin string, declare bool) error {
+func continuityRuntimeCutover(t *testing.T, f forwardFixture, origin string, n0 int64, declare bool) error {
 	t.Helper()
 	s, err := historyreports.OpenForward(context.Background(), f.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, err = s.PrepareForwardCutover(context.Background(), origin, declare)
+	_, err = s.PrepareForwardCutover(context.Background(), origin, n0, continuityRuntimeBasis, declare)
 	return err
 }
 
@@ -160,14 +163,15 @@ func continuityRuntimeRefuses(t *testing.T, f forwardFixture, why string) {
 func TestForwardRuntimeAcceptsPreparedCutoverAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	f := preparedRuntime(t)
-	origin, frozenProfile := continuityRuntimeBaseline(t, f, continuityRuntimeN0)
+	origin, seeded := continuityRuntimeBaseline(t, f)
 	continuityRuntimeRefuses(t, f, "no recorded H/N0 cutover")
-	if err := continuityRuntimeCutover(t, f, origin, false); err != nil {
+	if err := continuityRuntimeCutover(t, f, origin, continuityRuntimeN0, false); err != nil {
 		t.Fatal(err)
 	}
 	p := forwardWiringOpen(t, f, nil, nil)
 	forwardWiringRegister(t, p, hookRaw(t, forwardWiringRegistration()))
-	want := historyreports.ForwardCutover{HMS: continuityRuntimeH, EventsThrough: 240, ObservationsThrough: 65, N0MS: continuityRuntimeN0}
+	want := historyreports.ForwardCutover{HMS: continuityRuntimeH, EventsThrough: 240, ObservationsThrough: 65, N0MS: continuityRuntimeN0, N0Basis: continuityRuntimeBasis}
+	wiredBasis := []byte(`"n0_basis":"` + continuityRuntimeBasis + `"`)
 	first := forwardWait(t, p, func(v ForwardRuntimeStatus) bool { return v.State == "ready" && !v.Active && v.Latest != "" })
 	if first.Cutover == nil || first.Cutover.ForwardCutover != want {
 		t.Errorf("runtime status cutover %+v", first.Cutover)
@@ -193,28 +197,32 @@ func TestForwardRuntimeAcceptsPreparedCutoverAcrossRestart(t *testing.T) {
 	}
 	statusBody := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
 	var wired forwardWiredStatus
-	if json.Unmarshal(statusBody.Body, &wired) != nil || wired.Publisher.Cutover == nil || wired.Publisher.Cutover.ForwardCutover != want {
+	if json.Unmarshal(statusBody.Body, &wired) != nil || wired.Publisher.Cutover == nil || wired.Publisher.Cutover.ForwardCutover != want || !bytes.Contains(statusBody.Body, wiredBasis) {
 		t.Error("status route omitted cutover", string(statusBody.Body))
 	}
-	// Frozen profiles refuse edits through the management route; forward ones do not.
-	patch := func(body map[string]any, status int) {
+	// Seeded profile IDs are forward copies: the management route changes and
+	// archives them as forward revisions; old pins replay unchanged.
+	patch := func(body map[string]any, expected string) {
 		t.Helper()
-		body["expected_revision"] = "1"
+		body["expected_revision"] = expected
 		req := forwardWiringRequest(t, "profiles", body)
 		req.Method = "PATCH"
-		forwardWiringCall(t, p, req, status)
+		forwardWiringCall(t, p, req, 202)
 	}
 	membership := []map[string]string{{"account": "a", "start_ms": strconv.FormatInt(continuityRuntimeN0, 10)}}
-	patch(map[string]any{"profile": map[string]any{"id": frozenProfile, "name": "rewritten", "provider": "claude", "memberships": membership}}, 409)
-	patch(map[string]any{"archive_id": frozenProfile}, 409)
 	exportRequest := forwardWiringRequest(t, "export-json", map[string]any{"pin": lr.Pin})
 	saved := forwardWiringCall(t, p, exportRequest, 200)
-	patch(map[string]any{"profile": map[string]any{"id": "forward-live", "name": "Forward", "provider": "claude", "memberships": membership}}, 202)
-	edited := forwardWait(t, p, func(v ForwardRuntimeStatus) bool { return v.State == "ready" && !v.Active && v.Latest != live.Latest })
-	if got := forwardReportAt(t, p, edited.Latest); got.Profiles["forward-live"].Rows < 1 || got.Cutover == nil {
-		t.Error("forward profile revision not published", got.Profiles["forward-live"])
+	patch(map[string]any{"profile": map[string]any{"id": seeded[0], "name": "rewritten", "provider": "claude", "memberships": membership}}, "1")
+	patch(map[string]any{"archive_id": seeded[1]}, "2")
+	patch(map[string]any{"profile": map[string]any{"id": "forward-live", "name": "Forward", "provider": "claude", "memberships": membership}}, "3")
+	edited := forwardWait(t, p, func(v ForwardRuntimeStatus) bool {
+		return v.State == "ready" && !v.Active && v.Latest != live.Latest && forwardReportAt(t, p, v.Latest).Manifest.ProfileRevision == 4
+	})
+	if got := forwardReportAt(t, p, edited.Latest); got.Profiles["forward-live"].Rows < 1 || got.Profiles[seeded[0]].Rows < 1 || got.Cutover == nil || got.Cutover.ForwardCutover != want {
+		t.Error("forward profile revision not published", got.Profiles["forward-live"], got.Profiles[seeded[0]], got.Cutover)
 	}
-	// Restart preserves the accepted cutover, old pins and the recorded status.
+	// Restart re-runs the gate after the edits and preserves the accepted
+	// cutover, its basis, old pins and the recorded status.
 	invoke(t, p, pluginabi.MethodPluginShutdown, struct{}{})
 	p.Close()
 	p = forwardWiringOpen(t, f, nil, nil)
@@ -225,26 +233,31 @@ func TestForwardRuntimeAcceptsPreparedCutoverAcrossRestart(t *testing.T) {
 	if again.Cutover == nil || again.Cutover.ForwardCutover != want {
 		t.Errorf("restart lost cutover %+v", again.Cutover)
 	}
+	if body := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200).Body; !bytes.Contains(body, wiredBasis) {
+		t.Error("status route lost n0_basis across restart", string(body))
+	}
 	if replay := forwardWiringCall(t, p, exportRequest, 200); !bytes.Equal(replay.Body, saved.Body) {
 		t.Error("cutover pin changed across restart")
 	}
 }
 
+// Certificates [0,∞) cover the whole baseline; a declared N0 one day after H is
+// a real gap that a certificate-derived N0 (0) would have hidden.
 func TestForwardRuntimeCoverageGapRequiresDeclaration(t *testing.T) {
 	f := preparedRuntime(t)
 	n0 := continuityRuntimeH + 24*3600000
-	origin, _ := continuityRuntimeBaseline(t, f, n0)
-	if err := continuityRuntimeCutover(t, f, origin, false); !errors.Is(err, historyreports.ErrForwardCoverageGap) {
+	origin, _ := continuityRuntimeBaseline(t, f)
+	if err := continuityRuntimeCutover(t, f, origin, n0, false); !errors.Is(err, historyreports.ErrForwardCoverageGap) {
 		t.Error("N0 > H prepared without declaration", err)
 	}
 	continuityRuntimeRefuses(t, f, "N0 > H without a coverage_gap declaration")
-	if err := continuityRuntimeCutover(t, f, origin, true); err != nil {
+	if err := continuityRuntimeCutover(t, f, origin, n0, true); err != nil {
 		t.Fatal(err)
 	}
 	p := f.open(t, nil)
 	ready := forwardWait(t, p, func(v ForwardRuntimeStatus) bool { return v.State == "ready" && !v.Active && v.Latest != "" })
 	gap := &historyreports.ForwardCoverageGap{FromMS: continuityRuntimeH, ToMS: n0, Accounts: []string{"a", "b", "c", "d", "forecast", "gap"}}
-	if ready.Cutover == nil || !reflect.DeepEqual(ready.Cutover.CoverageGap, gap) {
+	if ready.Cutover == nil || !reflect.DeepEqual(ready.Cutover.CoverageGap, gap) || ready.Cutover.N0MS != n0 || ready.Cutover.N0Basis != continuityRuntimeBasis {
 		t.Errorf("status coverage gap %+v", ready.Cutover)
 	}
 	if r := forwardReportAt(t, p, ready.Latest); r.Cutover == nil || !reflect.DeepEqual(r.Cutover.CoverageGap, gap) {

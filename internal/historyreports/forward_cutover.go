@@ -51,7 +51,7 @@ func (s *ForwardStore) SeedFrozenForwardProfiles(ctx context.Context, r *Reader,
 // PrepareForwardCutover records H (the base boundary) and N0 (the latest origin
 // certificate StartMS). N0 > H refuses unless the coverage gap is declared; a
 // declared gap is recorded, never filled.
-func (s *ForwardStore) PrepareForwardCutover(ctx context.Context, originDigest string, declareCoverageGap bool) (ForwardCutover, error) {
+func (s *ForwardStore) PrepareForwardCutover(ctx context.Context, originDigest string, n0MS int64, n0Basis string, declareCoverageGap bool) (ForwardCutover, error) {
 	if !validHash(originDigest) {
 		return ForwardCutover{}, ErrInput
 	}

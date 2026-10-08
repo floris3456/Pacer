@@ -6,8 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,14 +22,16 @@ import (
 // events_through=240, observations_through=65 and 80 admitted events, 45 of
 // them on 2026-09-30.
 const (
-	continuityH  = int64(1790812800000)
-	continuityN0 = int64(1790726400000) // 2026-09-30T00:00Z: overlap [N0,H) is one day
+	continuityH     = int64(1790812800000)
+	continuityN0    = int64(1790726400000) // 2026-09-30T00:00Z: overlap [N0,H) is one day
+	continuityBasis = "measurement store first certified source checkpoint (synthetic fixture)"
 )
 
 type continuityPlan struct {
-	n0        int64
+	n0        int64  // classifies fixture events; each test declares its own cutover
 	plainSeed bool   // revision 1 without frozen provenance
 	uncovered string // legacy account left without a certificate
+	endsAtN0  string // legacy account whose only certificate ends at n0 (does not cover it)
 	edits     []func(*sql.DB)
 }
 
@@ -45,9 +50,10 @@ type continuityFixture struct {
 	firstPreCutoff ForwardEvent
 }
 
-// continuityStore prepares a base, a frozen profile seed, partitioned origin
-// certificates [0,n0) and [n0,∞) for every legacy account and a qualified book.
-// The cutover record itself is left to each test.
+// continuityStore prepares a base, a frozen profile seed, one origin
+// certificate [0,∞) per legacy account and a qualified book. Certificates bound
+// the account mapping over the whole baseline; they never define N0. The
+// cutover record itself is left to each test.
 func continuityStore(t *testing.T, plan continuityPlan) continuityFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -94,9 +100,11 @@ func continuityStore(t *testing.T, plan continuityPlan) continuityFixture {
 	}
 	for _, e := range f.all {
 		if !seen[e.Event.Account] && e.Event.Account != plan.uncovered {
-			for _, window := range [][2]int64{{0, plan.n0}, {plan.n0, 0}} {
-				origins.Certificates = append(origins.Certificates, ForwardOriginCertificate{LegacyAccount: e.Event.Account, Provider: e.Event.Provider, SourceID: "producer", NativeAccount: "native-" + e.Event.Account, NativeCredentialRef: "credential", StartMS: window[0], EndMS: window[1], EvidenceRef: "synthetic-continuity-v1", ProducerVersion: "synthetic-cpa-v1", ParserVersion: "synthetic-cpamp-physical-id-v1"})
+			end := int64(0)
+			if e.Event.Account == plan.endsAtN0 {
+				end = plan.n0
 			}
+			origins.Certificates = append(origins.Certificates, ForwardOriginCertificate{LegacyAccount: e.Event.Account, Provider: e.Event.Provider, SourceID: "producer", NativeAccount: "native-" + e.Event.Account, NativeCredentialRef: "credential", StartMS: 0, EndMS: end, EvidenceRef: "synthetic-continuity-v1", ProducerVersion: "synthetic-cpa-v1", ParserVersion: "synthetic-cpamp-physical-id-v1"})
 		}
 		seen[e.Event.Account] = true
 		qualify(ForwardPriceQualification{SourceID: e.SourceID, Provider: e.Event.Provider, Model: e.Event.Model, AccountID: e.Event.Account})
@@ -118,6 +126,11 @@ func continuityStore(t *testing.T, plan continuityPlan) continuityFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+// cutover declares N0 explicitly with the fixture's recorded basis.
+func (f continuityFixture) cutover(n0 int64, declareCoverageGap bool) (ForwardCutover, error) {
+	return f.s.PrepareForwardCutover(context.Background(), f.origin, n0, continuityBasis, declareCoverageGap)
 }
 
 func (f continuityFixture) native(t *testing.T, id string, at time.Time, legacy string) measurement.Record {
@@ -239,22 +252,28 @@ func TestForwardContinuityOwnershipFrozenProfiles(t *testing.T) {
 	}
 	frozenExports() // the first CPAMP export fills its in-process cache, then reports cache state
 	fileBefore, exportsBefore := frozenFile(), frozenExports()
-	if _, err = f.s.PrepareForwardCutover(ctx, f.origin, false); err != nil {
+	if _, err = f.cutover(continuityN0, false); err != nil {
 		t.Error(err)
 	}
 	old := f.seal(t, forwardAt.Add(time.Hour), f.native(t, "ownership-live", forwardAt, "a"))
 	oldBytes := continuityExports(t, f.s, old)
 
-	// Editing a frozen profile refuses through every library route.
+	// Seeded profile IDs are forward copies: changing and archiving them are
+	// forward revisions ≥ 2. "Frozen" is the artifact's own profile config and
+	// the stored revision-1 object, which no route rewrites.
+	rev := int64(1)
 	for _, p := range f.frozen.Profiles {
-		edit := ForwardProfile{ID: p.ID, Name: "rewritten", Provider: "claude", Memberships: []ForwardMembership{{Account: "a", Start: continuityN0}}}
-		if _, e := f.s.EditProfiles(ctx, 1, ForwardProfileEdit{Profile: edit}); !errors.Is(e, ErrForwardFrozenProfile) {
-			t.Errorf("frozen profile %q edited: %v", p.ID, e)
+		edit := ForwardProfile{ID: p.ID, Name: "rewritten", Provider: p.Provider, Memberships: []ForwardMembership{{Account: "a", Start: continuityN0}}}
+		if got, e := f.s.EditProfiles(ctx, rev, ForwardProfileEdit{Profile: edit}); e != nil || got != rev+1 {
+			t.Fatalf("seeded profile %q not editable: revision=%d %v", p.ID, got, e)
 		}
-		if _, e := f.s.EditProfiles(ctx, 1, ForwardProfileEdit{ArchiveID: p.ID}); !errors.Is(e, ErrForwardFrozenProfile) {
-			t.Errorf("frozen profile %q archived: %v", p.ID, e)
-		}
+		rev++
 	}
+	archived := f.frozen.Profiles[len(f.frozen.Profiles)-1].ID
+	if got, e := f.s.EditProfiles(ctx, rev, ForwardProfileEdit{ArchiveID: archived}); e != nil || got != rev+1 {
+		t.Fatalf("seeded profile %q not archivable: revision=%d %v", archived, got, e)
+	}
+	rev++
 	if _, e := f.s.SeedForwardProfiles(ctx, ForwardProfileConfig{Profiles: []ForwardProfile{}, Bindings: []ForwardBinding{}}); !errors.Is(e, ErrForwardConflict) {
 		t.Error("frozen seed replaced", e)
 	}
@@ -262,17 +281,35 @@ func TestForwardContinuityOwnershipFrozenProfiles(t *testing.T) {
 		t.Error("frozen seed repeated", e)
 	}
 	// New memberships are a forward revision and a new generation.
-	rev, err := f.s.EditProfiles(ctx, 1, ForwardProfileEdit{Profile: ForwardProfile{ID: "forward-only", Name: "Forward", Provider: "claude", Memberships: []ForwardMembership{{Account: "a", Start: continuityN0}}}})
-	if err != nil || rev != 2 {
-		t.Fatal(rev, err)
+	got, err := f.s.EditProfiles(ctx, rev, ForwardProfileEdit{Profile: ForwardProfile{ID: "forward-only", Name: "Forward", Provider: "claude", Memberships: []ForwardMembership{{Account: "a", Start: continuityN0}}}})
+	if err != nil || got != rev+1 {
+		t.Fatal(got, err)
 	}
-	f.rev = rev
+	f.rev = got
 	edited := f.seal(t, forwardAt.Add(2*time.Hour))
-	if r := continuityReport(t, f.s, edited.Generation, ForwardFilter{}); r.Profiles["forward-only"].Rows < 1 || r.Manifest.ProfileRevision != 2 {
-		t.Error("forward profile revision not published", r.Profiles["forward-only"], r.Manifest.ProfileRevision)
+	rewritten := f.frozen.Profiles[0].ID
+	if r := continuityReport(t, f.s, edited.Generation, ForwardFilter{}); r.Profiles["forward-only"].Rows < 1 || r.Profiles[rewritten].Rows < 1 || r.Manifest.ProfileRevision != f.rev {
+		t.Error("forward profile revision not published", r.Profiles["forward-only"], r.Profiles[rewritten], r.Manifest.ProfileRevision)
 	}
-	if after, afterDigest, e := f.s.ProfilesAt(ctx, 1); e != nil || afterDigest != seededDigest || !reflect.DeepEqual(after, seeded) {
+	latest, _, err := f.s.ProfilesAt(ctx, f.rev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range latest.Profiles {
+		if p.ID == rewritten && (p.Name != "rewritten" || p.Archived) || p.ID == archived && !p.Archived {
+			t.Errorf("forward revision %d profile %+v", f.rev, p)
+		}
+	}
+	after, afterDigest, e := f.s.ProfilesAt(ctx, 1)
+	if e != nil || afterDigest != seededDigest || !reflect.DeepEqual(after, seeded) || forwardDigest(after) != f.seed.ConfigDigest {
 		t.Error("frozen revision 1 changed", e)
+	}
+	var seedNow ForwardProfileSeed
+	if e = f.s.objectNamed(ctx, "profile_seed", "1", &seedNow); e != nil || seedNow != f.seed {
+		t.Error("profile seed provenance changed", seedNow, e)
+	}
+	if q, e := f.s.ForwardSelection(ctx, f.book); e != nil || q.ProfileRevision != f.rev || q.BaseDigest != f.base {
+		t.Error("runtime gate refused after forward edits of seeded profiles", q, e)
 	}
 	if !bytes.Equal(fileBefore, frozenFile()) || !bytes.Equal(exportsBefore, frozenExports()) {
 		t.Error("frozen artifact, pins or legacy exports changed after a forward profile edit")
@@ -285,11 +322,11 @@ func TestForwardContinuityOwnershipFrozenProfiles(t *testing.T) {
 func TestForwardContinuityCutoverCombinedDomain(t *testing.T) {
 	ctx := context.Background()
 	f := continuityStore(t, continuityPlan{n0: continuityN0, edits: []func(*sql.DB){continuityPostH}})
-	if _, err := f.s.PrepareForwardCutover(ctx, f.origin, true); !errors.Is(err, ErrInput) {
+	if _, err := f.cutover(continuityN0, true); !errors.Is(err, ErrInput) {
 		t.Error("coverage gap declared without a gap", err)
 	}
-	cut, err := f.s.PrepareForwardCutover(ctx, f.origin, false)
-	wantCut := ForwardCutover{HMS: continuityH, EventsThrough: 240, ObservationsThrough: 65, N0MS: continuityN0}
+	cut, err := f.cutover(continuityN0, false)
+	wantCut := ForwardCutover{HMS: continuityH, EventsThrough: 240, ObservationsThrough: 65, N0MS: continuityN0, N0Basis: continuityBasis}
 	if err != nil || !reflect.DeepEqual(cut, wantCut) {
 		t.Error("cutover", cut, err)
 	}
@@ -432,11 +469,13 @@ func TestForwardContinuityCutoverCombinedDomain(t *testing.T) {
 	}
 }
 
+// Certificates from 0 cover the whole baseline, so deriving N0 from their
+// StartMS would give N0=0 ≤ H and hide this gap. The declared N0 is H+1d.
 func TestForwardContinuityCoverageGapDeclaration(t *testing.T) {
 	ctx := context.Background()
 	n0 := continuityH + 24*3600000
 	f := continuityStore(t, continuityPlan{n0: n0})
-	if _, err := f.s.PrepareForwardCutover(ctx, f.origin, false); !errors.Is(err, ErrForwardCoverageGap) {
+	if _, err := f.cutover(n0, false); !errors.Is(err, ErrForwardCoverageGap) {
 		t.Error("N0 > H prepared without a declaration", err)
 	}
 	if got, err := f.s.PreparedCutover(ctx); err != nil || got != nil {
@@ -445,8 +484,8 @@ func TestForwardContinuityCoverageGapDeclaration(t *testing.T) {
 	if q, err := f.s.ForwardSelection(ctx, f.book); err == nil {
 		t.Error("runtime accepted an undeclared gap", q)
 	}
-	want := ForwardCutover{HMS: continuityH, EventsThrough: 240, ObservationsThrough: 65, N0MS: n0, CoverageGap: &ForwardCoverageGap{FromMS: continuityH, ToMS: n0, Accounts: []string{"a", "b", "c", "d", "forecast", "gap"}}}
-	cut, err := f.s.PrepareForwardCutover(ctx, f.origin, true)
+	want := ForwardCutover{HMS: continuityH, EventsThrough: 240, ObservationsThrough: 65, N0MS: n0, N0Basis: continuityBasis, CoverageGap: &ForwardCoverageGap{FromMS: continuityH, ToMS: n0, Accounts: []string{"a", "b", "c", "d", "forecast", "gap"}}}
+	cut, err := f.cutover(n0, true)
 	if err != nil || !reflect.DeepEqual(cut, want) {
 		t.Errorf("declared gap %+v %v", cut, err)
 	}
@@ -465,6 +504,50 @@ func TestForwardContinuityCoverageGapDeclaration(t *testing.T) {
 	}
 	if _, ok := continuityEvidence(t, f.s, pin, "native-event:"+gapNative.EventID); ok {
 		t.Error("native inside the gap entered the combined domain")
+	}
+}
+
+// N0 is an explicit input with a recorded basis, never derived from
+// certificates, and every certificated legacy account must cover it.
+func TestForwardContinuityN0IsDeclaredAndCovered(t *testing.T) {
+	ctx := context.Background()
+	f := continuityStore(t, continuityPlan{n0: continuityN0})
+	for _, bad := range []struct {
+		n0    int64
+		basis string
+	}{
+		{0, continuityBasis}, {-1, continuityBasis}, {math.MaxInt64/int64(time.Millisecond) + 1, continuityBasis},
+		{continuityN0, ""}, {continuityN0, strings.Repeat("b", 121)}, {continuityN0, "line\nbreak"}, {continuityN0, "naïve checkpoint"}, {continuityN0, "del\x7f"},
+	} {
+		if _, err := f.s.PrepareForwardCutover(ctx, f.origin, bad.n0, bad.basis, false); !errors.Is(err, ErrInput) {
+			t.Errorf("n0=%d basis=%q accepted: %v", bad.n0, bad.basis, err)
+		}
+	}
+	if got, err := f.s.PreparedCutover(ctx); err != nil || got != nil {
+		t.Fatal("refused cutover recorded", got, err)
+	}
+	basis := fmt.Sprintf("%-120s", "  checkpoint sha256:"+strings.Repeat("c", 64)+" (first certified, ~!)")
+	cut, err := f.s.PrepareForwardCutover(ctx, f.origin, continuityN0, basis, false)
+	if err != nil || cut.N0MS != continuityN0 || cut.N0Basis != basis || cut.CoverageGap != nil {
+		t.Errorf("declared N0 %+v %v", cut, err)
+	}
+	if got, err := f.s.PreparedCutover(ctx); err != nil || got == nil || got.N0Basis != basis || got.N0MS != continuityN0 {
+		t.Error("basis not recorded verbatim", got, err)
+	}
+	if q, err := f.s.ForwardSelection(ctx, f.book); err != nil || q.BaseDigest != f.base {
+		t.Error("runtime gate refused the recorded N0", q, err)
+	}
+	// Account c's only certificate is [0,N0): N0 is not covered, with or
+	// without a gap declaration.
+	short := continuityStore(t, continuityPlan{n0: continuityN0, endsAtN0: "c"})
+	if _, err := short.cutover(continuityN0, false); !errors.Is(err, ErrInput) {
+		t.Error("N0 outside a certificate accepted", err)
+	}
+	if _, err := short.cutover(continuityH+24*3600000, true); !errors.Is(err, ErrInput) {
+		t.Error("declared gap with N0 outside a certificate accepted", err)
+	}
+	if got, err := short.s.PreparedCutover(ctx); err != nil || got != nil {
+		t.Error("refused cutover recorded", got, err)
 	}
 }
 
@@ -509,7 +592,7 @@ func TestForwardContinuityRuntimeGate(t *testing.T) {
 	if q, e := ready.s.ForwardSelection(ctx, ready.book); e == nil {
 		t.Error("baseline accepted without a cutover record", q)
 	}
-	if _, e := ready.s.PrepareForwardCutover(ctx, ready.origin, false); e != nil {
+	if _, e := ready.cutover(continuityN0, false); e != nil {
 		t.Error(e)
 	}
 	if q, e := ready.s.ForwardSelection(ctx, ready.book); e != nil || q.BaseDigest != ready.base || q.OriginDigest != ready.origin || q.ProfileRevision != 1 || q.BookDigest != ready.book {
@@ -524,11 +607,34 @@ func TestForwardContinuityRuntimeGate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := continuityStore(t, plan)
-			if _, e := f.s.PrepareForwardCutover(ctx, f.origin, false); e != nil {
+			if _, e := f.cutover(continuityN0, false); e != nil {
 				t.Error(e)
 			}
 			if q, e := f.s.ForwardSelection(ctx, f.book); e == nil {
 				t.Error("runtime gate accepted", q)
+			}
+		})
+	}
+	// The gate re-validates the recorded N0 and basis against the origins; it
+	// never re-derives N0. Records are written directly, bypassing preparation.
+	for name, tc := range map[string]struct {
+		edit   func(*ForwardCutover)
+		accept bool
+	}{
+		"recorded-as-prepared":    {func(*ForwardCutover) {}, true},
+		"recorded-gap-undeclared": {func(c *ForwardCutover) { c.N0MS = continuityH + 1 }, false},
+		"recorded-basis-missing":  {func(c *ForwardCutover) { c.N0Basis = "" }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := continuityStore(t, continuityPlan{n0: continuityN0})
+			c := ForwardCutover{HMS: continuityH, EventsThrough: 240, ObservationsThrough: 65, N0MS: continuityN0, N0Basis: continuityBasis}
+			tc.edit(&c)
+			rec := forwardCutoverRecord{BaseDigest: f.base, OriginDigest: f.origin, Cutover: c}
+			if err := f.s.write(ctx, func(tx *sql.Tx) error { _, e := forwardObject(tx, ctx, "cutover", "1", rec); return e }); err != nil {
+				t.Fatal(err)
+			}
+			if q, e := f.s.ForwardSelection(ctx, f.book); (e == nil) != tc.accept {
+				t.Errorf("runtime gate accept=%v want %v: %+v %v", e == nil, tc.accept, q, e)
 			}
 		})
 	}
