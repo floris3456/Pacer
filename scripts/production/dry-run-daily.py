@@ -33,7 +33,6 @@ from pathlib import Path
 
 ROUTE = '/v0/management/plugins/pacer/dry-run-report'
 UTC = datetime.timezone.utc
-DAY = 86400
 MAX_ATTEMPTS = 5
 
 SCRIPT_DIR = Path(__file__).resolve().parent
