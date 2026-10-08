@@ -285,7 +285,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return p.policy.Dispatch(context.Background(), method, raw)
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}}}, nil
+		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}}, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -485,7 +485,9 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	gate := p.cfg.CompactOnSwitch
 	p.mu.Unlock()
 	if !known && auth != "" {
-		p.discover()
+		// CPA may finish loading credentials after plugin registration. Refresh
+		// its local inventory on a newly selected ID; never call analytics here.
+		p.discover(true)
 		p.mu.Lock()
 		c, known = p.creds[auth]
 		p.mu.Unlock()
@@ -544,6 +546,9 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 }
 
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/keys" {
+		return p.editKeys(req)
+	}
 	if req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/keys" {
 		return p.keysView()
 	}

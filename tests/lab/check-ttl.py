@@ -31,6 +31,15 @@ def checked(name, condition):
     checks.append({"name": name, "pass": True})
 
 
+def cache_ttls(value):
+    if isinstance(value, list):
+        return [ttl for item in value for ttl in cache_ttls(item)]
+    if isinstance(value, dict):
+        own = [value["cache_control"].get("ttl", "5m")] if isinstance(value.get("cache_control"), dict) else []
+        return own + [ttl for key, item in value.items() if key != "cache_control" for ttl in cache_ttls(item)]
+    return []
+
+
 cap = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
 session = "native-ttl-" + uuid.uuid4().hex
 scope = dict(installation_id="pacer-offline-lab", session_id=session, provider_route="claude")
@@ -75,7 +84,7 @@ checked("explicit-trusted-installation-enrollment", state["active"]["ttl"] == "1
 status, body = infer(state)
 assert status == 200, (status, body.decode()[:700])
 last = json.loads(call(UPSTREAM + "/_test/attempts")[1])[-1]
-checked("final-Claude-body-rewrites-5m-to-selected-1h", bool(last["cache_ttls"]) and set(last["cache_ttls"]) == {"1h"} and not last["coordination_leaked"])
+checked("final-Claude-body-rewrites-5m-to-selected-1h", bool(cache_ttls(last["body"])) and set(cache_ttls(last["body"])) == {"1h"} and not last["coordination_leaked"])
 
 # Refresh acknowledged state after logical completion marks this history used.
 query = urllib.parse.urlencode(dict(protocol=1, **scope))
@@ -111,7 +120,7 @@ checked("transition-bound-checkpoint-commits-after-shutdown", active["active"]["
 status, body = infer(active)
 assert status == 200, (status, body.decode()[:700])
 last = json.loads(call(UPSTREAM + "/_test/attempts")[1])[-1]
-checked("new-context-emits-selected-5m", bool(last["cache_ttls"]) and set(last["cache_ttls"]) == {"5m"})
+checked("new-context-emits-selected-5m", bool(cache_ttls(last["body"])) and set(cache_ttls(last["body"])) == {"5m"})
 status, raw = call(BASE + "/v1/plugins/pacer/cache-policy?" + query,
                    headers={**headers, "X-Pacer-Cache-Capability": base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")})
 checked("foreign-capability-cannot-read-policy", status == 403)

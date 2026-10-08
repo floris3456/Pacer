@@ -11,17 +11,19 @@
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p><div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div><details><summary>History and valuation coverage</summary><pre id="history"></pre></details></section>
 <section id="models" hidden><h2>Model Settings</h2><p class="muted">CPA owns these settings. Changes apply to its catalogue, not a second Pacer model store.</p><label>Filter <input id="filter" type="search" placeholder="Model or provider"></label><div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>State</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
-<section id="keys" hidden><h2>Keys &amp; Groups</h2><p class="muted">Friendly names and key-replacement lineage do not change permissions or routing. Dated provider-account profile memberships are preserved separately in the archive; their report UI remains in CPAMP.</p><div id="key-status" class="status"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key reference</th><th>Replacement lineage</th></tr></thead><tbody id="key-rows"></tbody></table></div></section>
+<section id="keys" hidden><h2>Keys &amp; Groups</h2><p class="muted">Friendly names and key-replacement lineage do not change permissions or routing. Dated provider-account profile memberships are preserved separately in the archive; their report UI remains in CPAMP.</p><div id="key-status" class="status"></div><div class="toolbar"><button id="add-key" disabled>Add key label</button><button id="add-group" disabled>New display group</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key reference</th><th>Replacement lineage</th><th></th></tr></thead><tbody id="key-rows"></tbody></table></div><h3>Display groups</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th>Keys</th><th></th></tr></thead><tbody id="group-rows"></tbody></table></div></section>
 </section></main>
 <dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
+<dialog id="metadata-dialog"><form id="metadata-form" style="display:block"><h2 id="metadata-title">Edit label</h2><label id="metadata-name-label">Display name <input id="metadata-name" maxlength="120"></label><label id="metadata-hash-label">Key SHA-256 fingerprint <input id="metadata-hash" pattern="[a-f0-9]{64}" maxlength="64"></label><p class="muted">Never enter a key or token. Labels and lineage do not create, rotate or authorize a CPA credential.</p><fieldset id="metadata-members"><legend>Group members</legend><div id="member-options"></div></fieldset><div id="metadata-error" role="alert"></div><div class="toolbar"><button>Save metadata</button><button type="button" id="metadata-delete">Delete display group</button><button type="button" id="metadata-cancel">Cancel</button></div></form></dialog>
 <script>
 (() => {
   'use strict';
   let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
   const pending = new Map();let allowBridge=true;
+  let metadata={revision:0,keys:[],groups:[]}, metadataEdit=null;
   const root = '/v0/management/plugins/pacer';
   const el = id => document.getElementById(id);
-  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
   function bridgeCall(path,method,body){
     if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
     return new Promise((resolve,reject)=>{
@@ -66,14 +68,39 @@
     el('model-error').textContent='';el('model-dialog').showModal();
   }
   function showModels(){el('catalogue').replaceChildren();const filter=el('filter').value.toLowerCase();for(const model of models){if(!(model.upstream+' '+model.channel+' '+model.id).toLowerCase().includes(filter))continue;const tr=row('catalogue',[model.id||model.upstream,model.channel,model.enabled?'Enabled':('Disabled'+(model.disabled_by?.scope?' · '+model.disabled_by.scope:''))]);tr.dataset.model=model.upstream;const td=document.createElement('td'),button=document.createElement('button');button.textContent='Edit';button.onclick=()=>editModel(model);td.append(button);tr.append(td)}}
+  function metadataButtons(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.disabled=!metadata.editable;td.append(button)}tr.append(td)}
+  function showMetadata(){
+    el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent=metadata.coverage||'';
+    el('add-key').disabled=el('add-group').disabled=!metadata.editable;
+    for(const item of metadata.keys||[]){const tr=row('key-rows',[item.alias||'Unnamed key',item.reference,(item.lineage_hashes||[]).join(', ')]);metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]])}
+    for(const group of metadata.groups||[]){const names=(group.key_references||[]).map(ref=>metadata.keys.find(k=>k.reference===ref)?.alias||ref);const tr=row('group-rows',[group.name,names.join(', ')]);metadataButtons(tr,[['Edit group',()=>editMetadata('put-group',group)]])}
+  }
+  function editMetadata(action,item){
+    const reference=item?.reference||(action==='put-group'?'group:'+Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join(''):'');
+    metadataEdit={action,reference,revision:metadata.revision};
+    el('metadata-title').textContent=action==='put-group'?'Edit display group':action==='rotate-key'?'Record key replacement':action==='add-key'?'Add key label':'Rename key';
+    el('metadata-name').value=item?.alias||item?.name||'';el('metadata-hash').value='';el('metadata-error').textContent='';
+    el('metadata-name-label').hidden=action==='rotate-key';el('metadata-name').required=action==='put-group';
+    el('metadata-hash-label').hidden=!['rotate-key','add-key'].includes(action);el('metadata-hash').required=!el('metadata-hash-label').hidden;
+    el('metadata-members').hidden=action!=='put-group';el('member-options').replaceChildren();
+    for(const key of metadata.keys){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=key.reference;input.checked=!!item?.key_references?.includes(key.reference);label.append(document.createTextNode(key.alias||key.reference),input);el('member-options').append(label)}
+    el('metadata-delete').hidden=action!=='put-group'||!item;
+    el('metadata-dialog').showModal();
+  }
+  async function saveMetadata(remove=false){
+    const buttons=el('metadata-form').querySelectorAll('button');buttons.forEach(b=>b.disabled=true);
+    try{const edit={...metadataEdit};if(remove)edit.action='delete-group';else if(edit.action==='rotate-key')edit.hash=el('metadata-hash').value;else{edit.name=el('metadata-name').value;if(edit.action==='add-key')edit.hash=el('metadata-hash').value;if(edit.action==='put-group')edit.key_references=Array.from(el('member-options').querySelectorAll('input:checked'),n=>n.value)}
+      metadata=await api(root+'/keys','PATCH',edit);el('metadata-dialog').close();showMetadata();message('Display metadata saved. CPA authorization and routing are unchanged.');
+    }catch(error){el('metadata-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
+  }
   async function refresh(){message('');try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
-    else if(tab==='keys'){const data=await api(root+'/keys');el('key-rows').replaceChildren();el('key-status').textContent=data.coverage||'Imported key names and historical lineage';for(const item of data.keys||[])row('key-rows',[item.alias,item.reference,(item.lineage_hashes||[]).join(', ')])}
+    else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
     else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.'}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];for(const id of ['accounts','windows','key-rows','catalogue'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
+  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
@@ -98,6 +125,8 @@
   }
   el('model-form').onsubmit=event=>{event.preventDefault();saveModel()};
   el('model-reset').onclick=()=>saveModel(true);
+  el('add-key').onclick=()=>editMetadata('add-key');el('add-group').onclick=()=>editMetadata('put-group');
+  el('metadata-form').onsubmit=event=>{event.preventDefault();saveMetadata()};el('metadata-delete').onclick=()=>saveMetadata(true);el('metadata-cancel').onclick=()=>el('metadata-dialog').close();
   if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
 })();
 </script></body></html>

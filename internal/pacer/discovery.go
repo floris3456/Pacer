@@ -13,13 +13,13 @@ import (
 
 // Discovery reads CPA-owned credentials locally. Only verified UUID/account IDs
 // merge aliases; email labels are not account identity. Tokens are never retained.
-func (p *Plugin) discover() {
+func (p *Plugin) discover(force ...bool) {
 	if p.Host == nil {
 		return
 	}
 	p.discoverMu.Lock()
 	defer p.discoverMu.Unlock()
-	if !p.lastDiscover.IsZero() && p.now().Sub(p.lastDiscover) < 5*time.Second {
+	if !(len(force) > 0 && force[0]) && !p.lastDiscover.IsZero() && p.now().Sub(p.lastDiscover) < 5*time.Second {
 		return
 	}
 	p.lastDiscover = p.now()

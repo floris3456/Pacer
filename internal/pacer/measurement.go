@@ -62,6 +62,9 @@ func (p *Plugin) recordUsage(raw []byte) error {
 		LifecycleRequestID string
 		AuthID             string
 		Provider           string
+		CachePolicy        *struct {
+			Selected json.RawMessage `json:"selected"`
+		}
 	}
 	if err := json.Unmarshal(raw, &identity); err != nil {
 		return err
@@ -77,6 +80,10 @@ func (p *Plugin) recordUsage(raw []byte) error {
 	var body []byte
 	err := p.db.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, identity.LifecycleRequestID, identity.AuthID).Scan(&body)
 	if err == sql.ErrNoRows {
+		if identity.CachePolicy != nil && len(identity.CachePolicy.Selected) > 0 && string(identity.CachePolicy.Selected) != "null" {
+			p.metricError(err)
+			return err
+		}
 		return nil
 	}
 	if err != nil {
