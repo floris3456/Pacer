@@ -2,6 +2,7 @@ package historyreports
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
@@ -15,6 +16,13 @@ const ForwardConverterVersion = "cpa-normalized-v2-cpamp-e849-v1"
 
 var ErrForwardConflict = errors.New("forward reports: immutable reference conflict")
 var ErrForwardPending = errors.New("forward reports: projection not ready")
+
+// ErrForwardFrozenProfile is an ErrForwardConflict: profiles copied from the
+// frozen artifact are never edited; new memberships use new forward profiles.
+var ErrForwardFrozenProfile = fmt.Errorf("%w: frozen profile is read-only", ErrForwardConflict)
+
+// ErrForwardCoverageGap refuses N0 > H unless the gap [H,N0) is declared.
+var ErrForwardCoverageGap = errors.New("forward reports: native coverage starts after H without a declared coverage gap")
 
 type ForwardComparisonBook = cpamp.ComparisonPriceBook
 type ForwardModelPrice = model.ModelPrice
@@ -53,6 +61,54 @@ type ForwardBase struct {
 	Boundary       history.Boundary `json:"boundary"`
 	Pin            Pin              `json:"pin"`
 	ArtifactDigest string           `json:"artifact_digest"`
+}
+
+// ForwardProfileSeed is the provenance of profile revision 1 when it was copied
+// from the frozen artifact's profile configuration at H.
+type ForwardProfileSeed struct {
+	BaseDigest     string `json:"base_digest"`
+	ArtifactDigest string `json:"artifact_digest"`
+	FrozenRevision int64  `json:"frozen_revision,string"`
+	ConfigDigest   string `json:"config_digest"`
+}
+
+// ForwardCoverageGap is a declared interval without certified native capture.
+// It is reported, never filled or interpolated.
+type ForwardCoverageGap struct {
+	FromMS   int64    `json:"from_ms"`
+	ToMS     int64    `json:"to_ms"`
+	Accounts []string `json:"accounts"`
+}
+
+// ForwardCutover is the frozen→live boundary: H is the frozen bound, N0 the
+// latest certificate StartMS. It is recorded once per store by offline
+// preparation and copied into every generation manifest sealed with that base.
+type ForwardCutover struct {
+	HMS                 int64               `json:"h_ms"`
+	EventsThrough       int64               `json:"events_through"`
+	ObservationsThrough int64               `json:"observations_through"`
+	N0MS                int64               `json:"n0_ms"`
+	CoverageGap         *ForwardCoverageGap `json:"coverage_gap,omitempty"`
+}
+
+type forwardCutoverRecord struct {
+	BaseDigest   string         `json:"base_digest"`
+	OriginDigest string         `json:"origin_digest"`
+	Cutover      ForwardCutover `json:"cutover"`
+}
+
+// ForwardCutoverStatus is generation-level (unfiltered) cutover accounting.
+type ForwardCutoverStatus struct {
+	ForwardCutover
+	PreCutoverNative int64 `json:"pre_cutover_native"`
+	PostHBaseline    int64 `json:"post_h_baseline"`
+}
+
+// ForwardDedup labels a window touched by overlap events whose counterpart on
+// the other side is not linked. Each such event is counted once, on its own side.
+type ForwardDedup struct {
+	UnlinkedBaseline int64 `json:"unlinked_baseline"`
+	UnlinkedNative   int64 `json:"unlinked_native"`
 }
 
 // ForwardEvent is a sanitized projection. Raw usage/headers/transport metadata
@@ -107,6 +163,7 @@ type forwardManifest struct {
 	ProfileDigest   string                     `json:"profile_digest"`
 	At              time.Time                  `json:"report_at"`
 	Provenance      ForwardProvenance          `json:"provenance"`
+	Cutover         *ForwardCutover            `json:"cutover,omitempty"`
 }
 type ForwardFilter struct {
 	Domain   string    `json:"domain,omitempty"` // combined (default), native, baseline
@@ -136,6 +193,7 @@ type ForwardTotals struct {
 	CapturedSelection *int64           `json:"captured_cost_selection_nano_usd"`
 	Reasons           map[string]int64 `json:"reason_counts"`
 	CoverageReasons   map[string]int64 `json:"coverage_reason_counts"`
+	DedupUnverified   *ForwardDedup    `json:"dedup_unverified,omitempty"`
 }
 type ForwardReport struct {
 	Pin       ForwardPin               `json:"pin"`
@@ -148,6 +206,7 @@ type ForwardReport struct {
 	Accounts  map[string]ForwardTotals `json:"accounts"`
 	Profiles  map[string]ForwardTotals `json:"profiles"`
 	Capacity  string                   `json:"capacity"`
+	Cutover   *ForwardCutoverStatus    `json:"cutover,omitempty"`
 }
 type ForwardEvidence struct {
 	Pin               ForwardPin     `json:"pin"`
@@ -166,6 +225,7 @@ type ForwardEvidence struct {
 	IdentityResolved  bool           `json:"identity_resolved"`
 	Issues            []string       `json:"issues"`
 	CoverageReasons   []string       `json:"coverage_reasons"`
+	DedupUnverified   string         `json:"dedup_unverified,omitempty"` // unlinked_baseline or unlinked_native
 }
 type ForwardPage struct {
 	Pin  ForwardPin        `json:"pin"`

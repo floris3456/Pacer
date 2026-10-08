@@ -25,6 +25,9 @@ type ForwardRuntimeStatus struct {
 	ErrorCode         string    `json:"error_code,omitempty"`
 	Failures          uint64    `json:"failures,string"`
 	Capacity          string    `json:"capacity"`
+	// Present only for an accepted prepared baseline store: H, N0, an optional
+	// declared coverage gap, and the latest sealed generation's cutover counts.
+	Cutover *historyreports.ForwardCutoverStatus `json:"cutover,omitempty"`
 }
 
 var ErrForwardUnavailable = errors.New("forward reports unavailable")
