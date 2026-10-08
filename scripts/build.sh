@@ -11,6 +11,8 @@ mkdir -p "$out"
 CGO_ENABLED=1 go build -mod=readonly -trimpath -buildvcs=false \
   -ldflags='-s -w -buildid=' -buildmode=c-shared \
   -o "$out/pacer-v${version}.so" ./cmd/plugin
+CGO_ENABLED=1 go build -mod=readonly -trimpath -buildvcs=false \
+  -ldflags='-s -w -buildid=' -o "$out/pacer-state" ./cmd/pacer-state
 cc -Wall -Wextra -Werror -o "$out/native-probe" tests/native-probe.c -ldl
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/pacer-probe.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM

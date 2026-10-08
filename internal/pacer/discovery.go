@@ -2,6 +2,7 @@ package pacer
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
@@ -40,6 +41,15 @@ func (p *Plugin) discover() {
 		}
 		if file.Disabled || (provider != "claude" && provider != "codex") {
 			continue
+		}
+		// A compatible executor label is not proof of a subscription quota
+		// adapter. Custom gateways keep CPA routing and never receive these
+		// first-party analytics calls or lend their counters to this observer.
+		if file.BaseURL != "" {
+			u, err := url.Parse(file.BaseURL)
+			if err != nil || u.Scheme != "https" || u.User != nil || (provider == "claude" && u.Hostname() != "api.anthropic.com") || (provider == "codex" && u.Hostname() != "chatgpt.com") {
+				continue
+			}
 		}
 		id := file.ID
 		if id == "" {

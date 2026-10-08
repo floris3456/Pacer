@@ -139,7 +139,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if err = file.Close(); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", cfg.StatePath+"?_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sql.Open("sqlite3", cfg.StatePath+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
 	if err != nil {
 		return nil, err
 	}
