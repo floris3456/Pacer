@@ -147,6 +147,15 @@ func chosen(s score, reason string, forced bool) Decision {
 
 func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
 	s := score{Account: a, known: len(a.Budgets) > 0, fit: true, runway: !a.RunwayUnknown, room: math.Inf(1), pace: math.Inf(1)}
+	shortValue := a.ShortValue
+	// Invalid measured load/capacity is not a verified zero load. Keep existing
+	// warm chats, but exclude this account from discretionary placement/fallback.
+	if shortValue < 0 || math.IsNaN(shortValue) || math.IsInf(shortValue, 0) {
+		shortValue, s.runway = 0, false
+	}
+	if a.WarmBurn < 0 || math.IsNaN(a.WarmBurn) || math.IsInf(a.WarmBurn, 0) {
+		s.runway = false
+	}
 	longest := int64(0)
 	for _, b := range a.Budgets {
 		if b.Seconds > longest {
@@ -186,18 +195,18 @@ func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
 			continue
 		}
 		room := b.Remaining
-		if a.ShortValue > 0 {
-			room *= a.ShortValue
+		if shortValue > 0 {
+			room *= shortValue
 		}
 		s.room = math.Min(s.room, room)
-		if a.ShortValue > 0 && expected > 0 {
+		if shortValue > 0 && expected > 0 {
 			if room < expected {
 				s.fit = false
 			}
 		} else if b.Remaining < cfg.NewShort {
 			s.fit = false
 		}
-		if a.ShortValue > 0 && a.WarmBurn > 0 && a.WarmBurn*b.Reset.Sub(now).Hours() > room {
+		if shortValue > 0 && a.WarmBurn > 0 && a.WarmBurn*b.Reset.Sub(now).Hours() > room {
 			s.fit = false
 			s.runway = false
 		}

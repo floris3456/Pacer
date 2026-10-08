@@ -54,9 +54,12 @@ type attempt struct {
 	Caller, Session, Key, Auth string
 	Headers                    http.Header
 	Decision                   routing.Decision
+	RoutingChoice              pluginapi.SchedulerPickResponse
+	RoutingProvider            string
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	routingEligible   bool // Private rollout gate: false in every runtime constructor/configuration.
 	policy            *policyadapter.Adapter
 	selections        map[string]pluginapi.CachePolicy
 	history           *history.Store
@@ -398,6 +401,17 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 }
 
 func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPickResponse {
+	p.mu.Lock()
+	cfg, eligible := p.cfg, p.routingEligible
+	id := header(http.Header(req.Options.Headers), requestHeader)
+	t, tracked := p.requests[id]
+	selection, managed := p.selections[id]
+	// Every scheduler retry supersedes the previous proposal, including fallbacks.
+	t.RoutingChoice, t.Decision = pluginapi.SchedulerPickResponse{}, routing.Decision{}
+	if tracked {
+		p.requests[id] = t
+	}
+	p.mu.Unlock()
 	provider := req.Provider
 	for _, candidate := range req.Candidates {
 		if provider == "" {
@@ -407,19 +421,13 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			return pluginapi.SchedulerPickResponse{}
 		}
 	}
-	p.mu.Lock()
-	cfg := p.cfg
-	requestID := header(http.Header(req.Options.Headers), requestHeader)
-	t, tracked := p.requests[requestID]
-	selection, managed := p.selections[requestID]
-	p.mu.Unlock()
 	enabled := false
 	for _, v := range cfg.Routing.Providers {
 		if v == provider {
 			enabled = true
 		}
 	}
-	if !enabled || !tracked || (t.Claim != nil && t.Claim.Kind != "primary") || (managed && selection.Kind != "primary") {
+	if !cfg.Enabled || !enabled || !tracked || (t.Claim != nil && t.Claim.Kind != "primary") || (managed && selection.Kind != "primary") {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
@@ -456,12 +464,14 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	}
 	accounts := []routing.Account{}
 	expected := 0.0
+	candidates := []credential{}
 	p.mu.Lock()
 	for _, candidate := range req.Candidates {
 		c, ok := p.creds[candidate.ID]
 		if !ok || c.Provider != provider {
 			continue
 		}
+		candidates = append(candidates, c)
 		windows, readErr := p.observer.ReadWindows(c.Account)
 		if readErr != nil {
 			continue
@@ -493,11 +503,11 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	t.Key = key
 	t.Decision = d
 	t.Model, t.PreviousAccount = req.Model, b.Account
+	t.RoutingProvider = provider
+	t.RoutingChoice = routingAction(req, cfg.Routing.Mode, eligible, d, candidates)
 	p.requests[header(http.Header(req.Options.Headers), requestHeader)] = t
 	p.mu.Unlock()
-	// Until the dry-run observation and integration gates are accepted the
-	// candidate records choices but cannot alter the host's scheduler.
-	return pluginapi.SchedulerPickResponse{}
+	return t.RoutingChoice
 }
 
 func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestInterceptResponse {
@@ -506,6 +516,8 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	t, ok := p.requests[req.RequestID]
 	c, known := p.creds[auth]
 	gate := p.cfg.CompactOnSwitch
+	selectedPolicy, managed := p.selections[req.RequestID]
+	managedAux := managed && selectedPolicy.Kind != "primary"
 	p.mu.Unlock()
 	if !known && auth != "" {
 		// CPA may finish loading credentials after plugin registration. Refresh
@@ -520,10 +532,8 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
 		}
 		key := chatKey(t.Caller, c.Provider, req.Model, t.Session, t.Claim)
-		if key != "" {
-			// In off/dry-run CPA alone made the pick. A changed account therefore
-			// retains the established forced-switch checkpoint contract.
-			b, err := p.chats.Admit(req.RequestID, key, tracker.Selection{Auth: c.ID, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: req.Model, Forced: true}, t.Claim, gate)
+		if key != "" && !managedAux {
+			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
 					p.recordDecision(t, c, e.Code)
