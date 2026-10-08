@@ -88,3 +88,31 @@ Only the original fixture URL or the separately owned `pacer-upstream-tier` URL
 is allowed via `PACER_FIXTURE_UPSTREAM`. These are distinct attempt/counter domains.
 Never restart/reset the original fixture to load new source. Scope, preparation,
 ownership, version checks and temporary routing cleanup stay the caller's duty.
+
+## Capacity lower-bound window
+
+Parent-run only. `capacity-window.sh` refuses without `PACER_CAPACITY_WINDOW=1` and
+`check-capacity.py` without `PACER_CAPACITY_READY=1` and `PACER_EVIDENCE`. The fixture
+`capacity_upstream.py` (`pacer-upstream-capacity`, image-free `python:3.12-slim`) is a
+separate attempt domain; the original `upstream.py` is never edited or restarted.
+`capacity-auths/cap-{a..e}.json` are dummy logins without `account_uuid`, with
+`prefix: cap-x`, so a request for `cap-x/claude-opus-5-5` reaches exactly that login.
+
+1. `PACER_CAPACITY_WINDOW=1 PACER_CAPACITY_PARK_ORIGINALS=1 capacity-window.sh up`
+   (prints `STAGED`), `docker restart pacer-lab-cpa`, then `up` again within ~20 s.
+   Any non-cap Claude login stays unverified and makes every interval
+   `unknown_account_ref_tuple`, so the originals must be parked.
+2. `check-capacity.py phase1` (~35 min): cases a–e in parallel, one account each.
+3. On pass: `docker restart pacer-lab-cpa`, `capacity-window.sh up` within ~20 s,
+   then `check-capacity.py phase2` within ~45 min (~35 min run).
+4. `check-capacity.py phase3` (~35 min), then `capacity-window.sh down` and restore
+   any Pacer state snapshot (the run adds `capacity-evidence.sqlite` rows).
+
+Each interval spans two of Pacer's own scheduled usage reads, at least 15 min apart,
+so nothing can be sped up. Receipts are `capacity-phase{1,2,3}.json` and are partial
+on failure. Known residual risks, which surface as an explicit extra reason: a case-b
+request or another account's request landing within the ~50 ms of a sample's cut
+reads; a scheduler delay of more than 8 min past the 15 min gap, which expires
+case d's 600 s hold. Interrupting the checker during case d's hold makes CPA record a
+physical gap, which invalidates every proof in that CPA incarnation.
+`test_capacity_upstream.py` and `test_capacity_checker.py` run offline.
