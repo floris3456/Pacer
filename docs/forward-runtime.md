@@ -51,7 +51,15 @@ Successful output supplies the actual content digest:
 }
 ```
 
-This command imports **no historical baseline**, opens no source database and invents no installation association. Historical books with a historical valuation cohort are refused by this minimal CLI. Existing F1 baseline/origin/profile preparation APIs remain separate offline migration work. The runtime refuses a store containing a frozen baseline rather than silently omitting it. All recorded native revisions, including old rows, can be adopted asynchronously; qualification determines valuation, not admission.
+This command imports **no historical baseline**, opens no source database and invents no installation association. Historical books with a historical valuation cohort are refused by this minimal CLI. Existing F1 baseline/origin/profile preparation APIs remain separate offline migration work. The runtime refuses a store containing a frozen baseline unless that store passes the accepted-baseline gate below; it never silently omits a baseline. All recorded native revisions, including old rows, can be adopted asynchronously; qualification determines valuation, not admission.
+
+## Accepted frozen baseline (frozen→live cutover)
+
+Normative contract: `evidence/implementation/forward-continuity-contract.md` §1–§3. Offline library preparation, in order, once per store (a new cutover is a new store): `PrepareForwardBase`, `SeedFrozenForwardProfiles` (revision 1 = the frozen profile configuration at H, with a `profile_seed` provenance record: base digest, artifact digest, frozen revision, config digest), `RegisterForwardOrigins`, `PrepareForwardCutover(origin, declareCoverageGap)`. The last step records **H** (base `h_ms`, `events_through`, `observations_through`) and **N0** (the largest certificate `StartMS`). `N0 > H` is refused (`ErrForwardCoverageGap`) unless the gap is declared; a declared gap is recorded as `coverage_gap {from_ms: H, to_ms: N0, accounts}` and never filled. There is no `pacer-state` command for these steps yet.
+
+The runtime (`ForwardSelection`, at startup and every cycle) accepts a store with a baseline only when: the base is complete; the cutover's origins are registered, ready and have `missing_count` 0; revision 1 was seeded from the same frozen artifact (`profile_seed` matches base and revision-1 digest); the recorded H/N0 matches the base and certificates with `N0 ≤ H` or a declared `coverage_gap`; and a historical book, if configured, matches H. Otherwise startup keeps the original refusal. No runtime path imports a baseline, seeds profiles or edits origins.
+
+Generations sealed on such a store carry `manifest.cutover`. Combined domain: baseline `started < H`, native `started ≥ N0`; inside `[N0,H)` a qualifying linked native replaces its baseline event; any other event there is counted once on its own side, its evidence row has `dedup_unverified: unlinked_baseline|unlinked_native`, and every touched total/daily/model/account/profile bucket carries `dedup_unverified {unlinked_baseline, unlinked_native}`. The report's `cutover` block adds generation-level `pre_cutover_native` (native `started < N0`, still visible in the `native` domain) and `post_h_baseline` (excluded baseline rows). The `baseline` domain is also capped at H. Profile edits after cutover are forward revisions; profiles copied from the frozen configuration refuse edits/archive (`ErrForwardFrozenProfile`, HTTP 409). Stores and manifests without a recorded cutover keep the original behaviour and query.
 
 ## Runtime configuration
 
@@ -119,9 +127,11 @@ err := plugin.WithForwardReports(ctx, func(ctx context.Context, s *historyreport
 }
 ```
 
+For an accepted baseline store, the status adds `"cutover": {"h_ms", "events_through", "observations_through", "n0_ms", "coverage_gap"?, "pre_cutover_native", "post_h_baseline"}`: the recorded H/N0 and the counts of the latest sealed generation (zero counts before the first seal). Native-only stores omit it.
+
 States: `disabled`, `initializing`, `lag`, `error`, `ready`, `stopped`. Active phases: `bootstrap`, `projection`, `provenance_feed`, `provenance`, `seal`. Optional `target_at` is the frozen cycle horizon; optional `error_code` is one of `forward_bootstrap_failed`, `forward_source_unavailable`, `forward_selection_unavailable`, `forward_store_unavailable`, `forward_projection_failed`, `forward_provenance_feed_failed`, `forward_compute_unavailable`, `forward_seal_failed`, `forward_phase_invalid`. Error text/SQL/paths are never stored in status. Failure counters saturate. Heads/cursors are losslessly encoded sequence strings, **not attempt counts**. `source_head` is the last background-observed source head, not a synchronous current-database assertion.
 
-Additive library helpers in `forward_store.go`: `CheckForwardPath`, `OpenPreparedForward`, `NativeForwardSelection`, `PreparedForwardHead`. They provide prepared-only opening/reference checks; no valuation, converter or identity algorithm changes are included.
+Additive library helpers in `forward_store.go`: `CheckForwardPath`, `OpenPreparedForward`, `NativeForwardSelection`, `PreparedForwardHead`; in `forward_cutover.go`: `ForwardSelection`, `PreparedCutover`, `GenerationCutover` (runtime reads) and the offline-only `SeedFrozenForwardProfiles`, `PrepareForwardCutover`. They provide prepared-only opening/reference checks; no valuation, converter or identity algorithm changes are included.
 
 ## Acceptance boundary
 
