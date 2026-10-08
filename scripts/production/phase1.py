@@ -65,7 +65,7 @@ def env(name, default):
     return os.environ.get('PHASE1_' + name, default)
 
 
-TAG = 'pacer-phase1-ab311f1-bb27d121'
+TAG = 'pacer-phase1-37bd732-bb27d121'
 ROOT = Path(env('ROOT', '/opt/cliproxyapi'))
 RELEASE = Path(env('RELEASE', str(ROOT / 'releases' / TAG)))
 BACKUP = Path(env('BACKUP', str(ROOT / 'backups' / TAG)))
@@ -115,11 +115,11 @@ LEGACY_EVENTS = '/v0/resource/plugins/quota-handoff/events'
 PACER_EVENTS = '/v0/resource/plugins/pacer/events'
 TIMER = 'pacer-dry-run-daily.timer'
 UNIT_SERVICE = 'pacer-dry-run-daily.service'
-SOURCES = {'pacer': 'ab311f1261290010fddce2ed591294005fc69f56',
+SOURCES = {'pacer': '37bd732b0e6cd6be98f3b46e737f95b2f4b1f726',
            'cpa': 'bb27d121a88230bbf25fa9238be1ba4018a48952'}
 PINS = {'image/CLIProxyAPI': 'f66d3605b6e2a6724f245199976f621a1799425620212b0ebb9733dc7f0aea52',
-        'pacer-v0.2.0-dev.so': 'b6e738b29423206bce77f7028b37e6f2525a6fc56152ceb9c74525e87cb2c011',
-        'pacer-state': '82abd0037222ef35d3396cac5696b5fea50c6a3d77e60aebf84abf882583aafb',
+        'pacer-v0.2.0-dev.so': 'd81e1b84bcd058b7313ddcffad0f8f996f18ff764a8d3001fc018b34512c8634',
+        'pacer-state': 'a19a2014e74d2e8db0f7a3b7ae3d26444b780ec3197e23407e5ac4f244f9eb0e',
         'quota-handoff-v0.1.5-local.1.so': 'f40daa696d97a9ef70b5f180a74faeaf2b3ce0c4f333027bf8a214b8f2127c40'}
 DEPLOY_SCRIPTS = ('cutover_v8', 'deploy-discover', 'deploy-compact-on-switch', 'deploy-public-plugin',
                   'deploy-shadow', 'mute-notifications', 'deploy-quota-usage-ct104', 'deploy-profile-keys-ct104',
