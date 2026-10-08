@@ -56,6 +56,24 @@ func TestNativePolicyRequiresExplicitInitializationAndTrustedInstallation(t *tes
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode, string(response.Body))
 	}
+	resolve := pluginapi.CachePolicyResolveRequest{Protocol: 1, Scope: scope, Capability: command.Capability, ContextEpoch: "empty", Revision: 1, Kind: "primary", RequestID: "physical-lifecycle", Model: "claude-opus-5-5", SourceFormat: "claude"}
+	selected := invoke(t, p, pluginabi.MethodCachePolicyResolve, resolve).(pluginapi.CachePolicy)
+	if p.selections[resolve.RequestID] != selected || selected.TTL != "1h" {
+		t.Fatal("scheduler lost acknowledged immutable selection")
+	}
+	resolve.Capability = strings.Repeat("b", 42) + "A"
+	resolve.RequestID = "foreign"
+	raw, _ := json.Marshal(resolve)
+	if _, err = p.Handle(pluginabi.MethodCachePolicyResolve, raw); err == nil {
+		t.Fatal("foreign resolve succeeded")
+	}
+	if _, found := p.selections["foreign"]; found {
+		t.Fatal("failed resolve influenced scheduling")
+	}
+	invoke(t, p, pluginabi.MethodRequestComplete, pluginapi.RequestCompletion{RequestID: "physical-lifecycle", Outcome: pluginapi.RequestCompletionRejected})
+	if len(p.selections) != 0 {
+		t.Fatal("completed selection leaked")
+	}
 	command.Scope.CallerScope = strings.Repeat("b", 64)
 	command.Scope.SessionID = "another"
 	command.Operation.SessionID = "another"

@@ -58,6 +58,7 @@ type attempt struct {
 }
 type Plugin struct {
 	policy            *policyadapter.Adapter
+	selections        map[string]pluginapi.CachePolicy
 	history           *history.Store
 	observationMu     sync.Mutex
 	measurement       *measurement.Store
@@ -84,7 +85,7 @@ type Plugin struct {
 }
 
 func New(host Host) *Plugin {
-	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, workerDone: make(chan struct{})}
+	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, selections: map[string]pluginapi.CachePolicy{}, workerDone: make(chan struct{})}
 }
 
 func registration(policyEnabled ...bool) any {
@@ -283,7 +284,19 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if p.policy == nil {
 			return nil, pluginabi.NewError("pacer_cache_unavailable", "Managed cache policy is not configured", 503)
 		}
-		return p.policy.Dispatch(context.Background(), method, raw)
+		result, err := p.policy.Dispatch(context.Background(), method, raw)
+		if method == pluginabi.MethodCachePolicyResolve && err == nil {
+			var request struct {
+				RequestID string `json:"request_id"`
+			}
+			_ = json.Unmarshal(raw, &request)
+			if selection, ok := result.(pluginapi.CachePolicy); ok {
+				p.mu.Lock()
+				p.selections[request.RequestID] = selection
+				p.mu.Unlock()
+			}
+		}
+		return result, err
 	case pluginabi.MethodManagementRegister:
 		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}}, nil
 	case pluginabi.MethodManagementHandle:
@@ -351,6 +364,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.chats.Complete(req.RequestID)
 		p.mu.Lock()
 		delete(p.requests, req.RequestID)
+		delete(p.selections, req.RequestID)
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
@@ -395,7 +409,9 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	}
 	p.mu.Lock()
 	cfg := p.cfg
-	t, tracked := p.requests[header(http.Header(req.Options.Headers), requestHeader)]
+	requestID := header(http.Header(req.Options.Headers), requestHeader)
+	t, tracked := p.requests[requestID]
+	selection, managed := p.selections[requestID]
 	p.mu.Unlock()
 	enabled := false
 	for _, v := range cfg.Routing.Providers {
@@ -403,7 +419,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			enabled = true
 		}
 	}
-	if !enabled || !tracked || (t.Claim != nil && t.Claim.Kind != "primary") {
+	if !enabled || !tracked || (t.Claim != nil && t.Claim.Kind != "primary") || (managed && selection.Kind != "primary") {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
@@ -439,6 +455,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		}
 	}
 	accounts := []routing.Account{}
+	expected := 0.0
 	p.mu.Lock()
 	for _, candidate := range req.Candidates {
 		c, ok := p.creds[candidate.ID]
@@ -451,6 +468,12 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		}
 		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(provider, req.Model, windows, p.now())}
 		if report, ok := p.measurements[c.Account]; ok && p.now().Sub(report.AsOf) < time.Minute {
+			if managed {
+				prior := report.Expected(measurement.ChatRef{CallerID: selection.Scope.CallerScope, InstallationID: selection.Scope.InstallationID, SessionID: selection.Scope.SessionID, ProviderRoute: selection.Scope.ProviderRoute, Provider: provider, AccountID: c.Account, ContextEpoch: selection.ContextEpoch}, measurement.TTL(selection.TTL))
+				if prior.Known && prior.USD > expected {
+					expected = prior.USD
+				}
+			}
 			if report.SevenDay.Known {
 				account.Size = report.SevenDay.USDPerPercent
 			}
@@ -465,7 +488,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		accounts = append(accounts, account)
 	}
 	p.mu.Unlock()
-	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active}, accounts)
+	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active, ExpectedValue: expected}, accounts)
 	p.mu.Lock()
 	t.Key = key
 	t.Decision = d
@@ -564,6 +587,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	// Exact management paths only: the public resource namespace cannot reach
 	// these branches. CPA authenticates management routes before ABI dispatch.
 	if req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/state" {
+		p.discover() // local inventory only, bounded separately from quota reconciliation
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		accounts := []map[string]any{}
@@ -577,19 +601,15 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 				return resource(503, map[string]string{"error": "observation_unavailable"})
 			}
 			views := []map[string]any{}
-			state := "unknown"
 			for _, w := range windows {
-				state = w.State(p.now())
-				if w.Remaining != nil && w.BalanceAge(p.now()) >= time.Hour {
-					state = "stale"
-				}
+				state := windowState(w, p.now())
 				views = append(views, map[string]any{"scope": w.Scope, "seconds": w.Seconds, "remaining": w.Remaining, "reset": w.Reset, "state": state, "source": w.Usage.Source, "usage_evidence": w.Usage, "reset_evidence": w.ResetEvidence})
 			}
 			job, _, err := p.observer.Status(c.Account)
 			if err != nil {
 				return resource(503, map[string]string{"error": "observation_unavailable"})
 			}
-			row := map[string]any{"id": c.ID, "auth_index": c.Index, "alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
+			row := map[string]any{"id": c.ID, "auth_index": c.Index, "alias": c.Alias, "provider": c.Provider, "state": accountState(c.Provider, windows, p.now()), "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
 			base := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now())}
 			row["pace_unit"] = "%/h · equal sizes"
 			if report, ok := p.measurements[c.Account]; ok {
