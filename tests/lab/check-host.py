@@ -28,7 +28,7 @@ for path, key, want in [
             status, body = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, body = error.code, error.read()
-    checks.append({"path": path, "auth": "none" if key is None else "inference" if key.endswith("inference") else "management",
+    checks.append({"path": path, "auth": "none" if key is None else "inference" if key.endswith("inference") else "unknown-bearer" if key == "pacer-test-invalid-management" else "management",
                    "status": status, "expected": want, "pass": status == want})
     if path.endswith("/events") and status == 200:
         discovery = json.loads(body)
