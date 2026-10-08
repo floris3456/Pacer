@@ -14,6 +14,7 @@ for path, key, want in [
     ("/v0/resource/plugins/pacer/index.html", None, 200),
     ("/v0/management/plugins/pacer/state", None, 401),
     ("/v0/management/plugins/pacer/state", "pacer-test-inference", 401),
+    ("/v0/management/plugins/pacer/state", "pacer-test-invalid-management", 401),
     ("/v0/management/plugins/pacer/state", "pacer-test-admin", 200),
     ("/v8/management/oauth/settings/models", "pacer-test-admin", 200),
     ("/v0/resource/plugins/pacer/state", None, 404),
