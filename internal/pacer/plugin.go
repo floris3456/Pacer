@@ -269,15 +269,6 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if err != nil {
 		p.measurementErrors++
 	}
-	// Prefix evidence is equally optional: an open failure only counts as a
-	// measurement error and leaves the policy path untouched. It lives in its own
-	// SQLite file: adding its tables to the state database would change that
-	// database's DDL generation after the guarded measurement feed boundary,
-	// which the feed integrity witness (correctly) refuses.
-	p.prefixDB, p.prefixEvidence = openPrefixEvidence(cfg.StatePath, p.now)
-	if p.prefixEvidence == nil {
-		p.measurementErrors++
-	}
 	measure, err := p.openMeasurements(db)
 	if err != nil {
 		db.Close()
@@ -313,6 +304,19 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.observer = observer
 	p.policy = policy
 	p.forward = forward
+	// Prefix evidence is equally optional: an open failure only counts as a
+	// measurement error and leaves the policy path untouched. It opens last, after
+	// every field above is assigned, so no earlier error return can leave its
+	// database open. It lives in its own SQLite file: adding its tables to the
+	// state database would change that database's DDL generation after the guarded
+	// measurement feed boundary, which the feed integrity witness (correctly) refuses.
+	if p.prefixDB != nil {
+		_ = p.prefixDB.Close()
+	}
+	p.prefixDB, p.prefixEvidence = openPrefixEvidence(cfg.StatePath, p.now)
+	if p.prefixEvidence == nil {
+		p.measurementErrors++
+	}
 	return registration(p.policy != nil), nil
 }
 
@@ -390,7 +394,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		result, err := p.policy.Dispatch(context.Background(), method, raw)
 		// Settlement is observed only after a successful dispatch and never
 		// changes its result.
-		if method == pluginabi.MethodCachePolicyAttempt && err == nil && p.prefixEvidence != nil {
+		if method == pluginabi.MethodCachePolicyAttempt && err == nil {
 			p.settlePrefixAttempt(raw)
 		}
 		if method == pluginabi.MethodCachePolicyHandle && err == nil && p.policyEvidence != nil {
@@ -408,7 +412,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			}
 		}
 		// Runs after the marker readback, starting from its body, with the same gating.
-		if method == pluginabi.MethodCachePolicyHandle && err == nil && p.prefixEvidence != nil {
+		if method == pluginabi.MethodCachePolicyHandle && err == nil {
 			result = p.augmentPrefixReadback(raw, result)
 		}
 		if method == pluginabi.MethodCachePolicyResolve && err == nil {

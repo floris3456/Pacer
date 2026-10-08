@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -93,23 +94,64 @@ func copyPrefixSnapshot(s *measurement.PrefixSnapshot) *prefixevidence.Snapshot 
 	return out
 }
 
+// prefixHookTimeout bounds one prefix hook call. A call that overruns it fails
+// as a metric error only; it never changes the delivered response.
+const prefixHookTimeout = 2 * time.Second
+
+// prefixHookContext is the context for one hook call. It is bounded, unlike
+// the background context the hooks used before.
+func prefixHookContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), prefixHookTimeout)
+}
+
+// prefixStore returns the live prefix store, or nil. Hooks call it once and use
+// the returned pointer for that call only. Close clears the pointer under p.mu,
+// so a hook sees the store or nil, never a pointer cleared mid-read.
+func (p *Plugin) prefixStore() *prefixevidence.Store {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.prefixEvidence
+}
+
+// observePrefix projects one persisted record into the prefix store. Like the
+// other hooks, it is optional and never acknowledges or fails delivery.
+func (p *Plugin) observePrefix(record measurement.Record) {
+	store := p.prefixStore()
+	if store == nil || record.Policy.SelectedTTL == "" || record.Native == nil || record.Native.PrefixSnapshot == nil {
+		return
+	}
+	ctx, cancel := prefixHookContext()
+	defer cancel()
+	p.metricError(store.Observe(ctx, prefixFact(record)))
+}
+
 // settlePrefixAttempt forwards the CPA physical finish outcome. Logical
 // CompleteRequest settlements are deliberately not forwarded: they are not
 // physical outcomes.
 func (p *Plugin) settlePrefixAttempt(raw []byte) {
+	store := p.prefixStore()
+	if store == nil {
+		return
+	}
 	var request pluginapi.CachePolicyAttemptRequest
 	if json.Unmarshal(raw, &request) != nil || request.Operation != "finish" {
 		return
 	}
 	switch outcome := prefixevidence.Outcome(request.Outcome); outcome {
 	case prefixevidence.OutcomeSucceeded, prefixevidence.OutcomeFailed, prefixevidence.OutcomeCanceled:
-		p.metricError(p.prefixEvidence.Settle(context.Background(), request.AttemptID, outcome))
+		ctx, cancel := prefixHookContext()
+		defer cancel()
+		p.metricError(store.Settle(ctx, request.AttemptID, outcome))
 	}
 }
 
 // augmentPrefixReadback adds prefix_cache_evidence to a fresh, authorized GET
 // 200 policy state. On any failure the caller's response is returned unchanged.
 func (p *Plugin) augmentPrefixReadback(raw []byte, result any) any {
+	store := p.prefixStore()
+	if store == nil {
+		return result
+	}
 	var request pluginapi.CachePolicyRequest
 	if json.Unmarshal(raw, &request) != nil || request.Method != http.MethodGet {
 		return result
@@ -118,7 +160,9 @@ func (p *Plugin) augmentPrefixReadback(raw []byte, result any) any {
 	if !ok || response.StatusCode != http.StatusOK {
 		return result
 	}
-	body, err := p.prefixEvidence.AugmentAuthorized(context.Background(), request.Scope.CallerScope, response.Body)
+	ctx, cancel := prefixHookContext()
+	defer cancel()
+	body, err := store.AugmentAuthorized(ctx, request.Scope.CallerScope, response.Body)
 	if err != nil {
 		p.metricError(err)
 		return result
@@ -132,10 +176,22 @@ func prefixEvidencePath(statePath string) string {
 	return filepath.Join(filepath.Dir(statePath), "prefix-evidence.sqlite")
 }
 
+// prefixDSN builds the SQLite URI for a path. The path is escaped as a URI path,
+// so a '?' or '#' in a directory name is not read as the start of the query.
+// It mirrors historyreports' uri helper.
+func prefixDSN(path string) string {
+	return (&url.URL{Scheme: "file", Path: path}).String() + "?_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL"
+}
+
 // openPrefixEvidence opens the optional prefix-evidence store in its own file.
 // Any failure returns (nil, nil): the evidence is optional and never blocks
-// startup, policy or measurement.
+// startup, policy or measurement. The file is owner-only, because it holds
+// account, binding and session references.
 func openPrefixEvidence(statePath string, now func() time.Time) (*sql.DB, *prefixevidence.Store) {
+	if statePath == "" {
+		// filepath.Dir("") is ".", which would put the database in the working directory.
+		return nil, nil
+	}
 	path := prefixEvidencePath(statePath)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -144,7 +200,18 @@ func openPrefixEvidence(statePath string, now func() time.Time) (*sql.DB, *prefi
 	if err = file.Close(); err != nil {
 		return nil, nil
 	}
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	// An existing file keeps its mode, so tighten anything wider than 0600. If that
+	// fails, do not open the file at all.
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, nil
+	}
+	if info.Mode().Perm()&^0600 != 0 {
+		if err = os.Chmod(path, 0600); err != nil {
+			return nil, nil
+		}
+	}
+	db, err := sql.Open("sqlite3", prefixDSN(path))
 	if err != nil {
 		return nil, nil
 	}

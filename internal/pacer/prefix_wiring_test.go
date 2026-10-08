@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -389,5 +390,173 @@ func TestPrefixEvidenceNeverChangesStateSchemaAcrossRestart(t *testing.T) {
 	after, tables := version()
 	if after != before || tables != 0 {
 		t.Fatalf("state schema generation changed across restart: %d -> %d (prefix objects %d)", before, after, tables)
+	}
+}
+
+// configureRaw is the RPC body configure decodes, built the way invoke builds it.
+func configureRaw(t *testing.T, yaml string) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"config_yaml": []byte(yaml), "schema_version": 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func prefixTestClock() time.Time { return prefixEpoch }
+
+// A configure that fails after the prefix store opened must not leave its
+// database handle open. The prefix store opens only once configure has
+// committed its own fields, so every earlier error return leaves no handle.
+func TestPrefixEvidenceFailedConfigureLeavesNoPrefixDB(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.sqlite")
+	missing := filepath.Join(t.TempDir(), "missing-history.sqlite")
+	p := New(testHost)
+	p.now = prefixTestClock
+	yaml := "enabled: true\npriority: 1\nstate_path: " + statePath + "\nhistory_path: " + missing + "\nrouting:\n  mode: off\n"
+	if _, err := p.configure(configureRaw(t, yaml)); err == nil {
+		t.Fatal("configure with a missing history archive succeeded")
+	}
+	if p.prefixDB != nil || p.prefixEvidence != nil {
+		t.Fatal("failed configure left the prefix evidence database open")
+	}
+}
+
+// An empty state path must open nothing. Otherwise the database would land in
+// the working directory.
+func TestPrefixEvidenceEmptyStatePathOpensNothing(t *testing.T) {
+	t.Chdir(t.TempDir())
+	db, store := openPrefixEvidence("", prefixTestClock)
+	if db != nil || store != nil {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatal("empty state path opened prefix evidence")
+	}
+	if _, err := os.Stat("prefix-evidence.sqlite"); !os.IsNotExist(err) {
+		t.Fatal("empty state path created a prefix database in the working directory")
+	}
+}
+
+// A '?' in the directory must not be read as the start of the DSN query. Unescaped,
+// SQLite opens the truncated name ".../a" instead, which creates a stray file
+// beside the directory, so the test checks that no such file appears.
+func TestPrefixEvidenceOpensUnderPathWithQuestionMark(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "a?b")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	db, store := openPrefixEvidence(filepath.Join(dir, "state.sqlite"), prefixTestClock)
+	if store == nil {
+		t.Fatal("prefix evidence did not open under a directory containing '?'")
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := os.Stat(filepath.Join(parent, "a")); !os.IsNotExist(err) {
+		t.Fatal("DSN was truncated at '?': a stray database was created beside the directory")
+	}
+}
+
+// The prefix database is owner-only after open, whether it was created here or
+// already existed with a wider mode.
+func TestPrefixEvidenceFileIsOwnerOnlyAfterOpen(t *testing.T) {
+	for _, preexisting := range []bool{false, true} {
+		statePath := filepath.Join(t.TempDir(), "state.sqlite")
+		file := prefixEvidencePath(statePath)
+		if preexisting {
+			if err := os.WriteFile(file, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(file, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		db, store := openPrefixEvidence(statePath, prefixTestClock)
+		if store == nil {
+			t.Fatalf("preexisting=%v: prefix evidence did not open", preexisting)
+		}
+		t.Cleanup(func() { db.Close() })
+		info, err := os.Stat(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0600 {
+			t.Fatalf("preexisting=%v: mode %o after open, want 600", preexisting, got)
+		}
+	}
+}
+
+// An unwritable prefix path (a directory where the file should be) must not
+// block startup. It leaves the store nil and counts one measurement error.
+func TestPrefixEvidenceUnwritablePathDoesNotBlockStartup(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.sqlite")
+	if err := os.Mkdir(prefixEvidencePath(statePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := New(testHost)
+	p.now = prefixTestClock
+	yaml := "enabled: true\npriority: 1\nstate_path: " + statePath + "\nrouting:\n  mode: off\n"
+	if _, err := p.configure(configureRaw(t, yaml)); err != nil {
+		t.Fatal("optional prefix evidence blocked startup:", err)
+	}
+	t.Cleanup(p.Close)
+	if p.prefixEvidence != nil {
+		t.Fatal("prefix store opened on an unwritable path")
+	}
+	if p.measurementErrors != 1 {
+		t.Fatalf("measurementErrors=%d, want 1", p.measurementErrors)
+	}
+}
+
+// Hook calls race Close. Under -race an unlocked read of the store pointer
+// against Close's write is reported; locked reads see either a live store or nil.
+func TestPrefixHooksRaceCloseWithoutDataRace(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.sqlite")
+	p := startPlugin(t, statePath)
+	finish, err := json.Marshal(pluginapi.CachePolicyAttemptRequest{Operation: "finish", AttemptID: "physical", Outcome: "succeeded", Dispatched: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readback, err := json.Marshal(pluginapi.CachePolicyRequest{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := pluginapi.CachePolicyResponse{StatusCode: http.StatusOK, Body: []byte(`{"protocol":1}`)}
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				p.settlePrefixAttempt(finish)
+				p.augmentPrefixReadback(readback, ok)
+			}
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	p.Close()
+	close(stop)
+	wg.Wait()
+	if p.prefixStore() != nil {
+		t.Fatal("prefix store still reachable after Close")
+	}
+}
+
+// Each hook call is bounded by a 2 s context; a timeout is only a metric error.
+func TestPrefixHookContextIsBounded(t *testing.T) {
+	ctx, cancel := prefixHookContext()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("hook context has no deadline")
+	}
+	if until := time.Until(deadline); until > 2*time.Second || until < time.Second {
+		t.Fatalf("hook deadline in %v, want about 2s", until)
 	}
 }
