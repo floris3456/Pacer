@@ -38,3 +38,28 @@ they survive a real unchanged inventory refresh. Missing reports are failures, n
 proof of unknown coverage. It neither infers nor changes provider/fixture state.
 Native acceptance runners preserve accumulated fixture attempts; any reset must
 be a separately authorized operation with prior evidence retention, not a preamble.
+
+## Exact physical-cut acceptance
+
+`internal/measurement/physical_lab_test.go` is an opt-in read-only check against a
+private SQLite **backup snapshot**, not the live database. It is skipped in normal
+source tests. Place copies in a task-local `physical-source-snapshots/` directory
+and set `PACER_PHYSICAL_SNAPSHOT` to the positive snapshot before running:
+
+```sh
+go test -count=1 -timeout=45s -v ./internal/measurement -run '^TestNativePhysicalStoredSelections$'
+```
+
+The lab must have the matching physical-proof host/plugin. Observe a genuine first
+quiescent lower cut before the managed 1h/5m stream/nonstream attempts being selected;
+do not infer it from idle time or a snapshot row count. The check reopens current
+consumer manifests through the real `Store.SelectPhysical` API, checks exact native
+accounting joins and 25/75 split preservation, and refuses an unissued upper cut.
+Billing membership and primary warmth must still be unknown.
+
+Optionally set `PACER_PHYSICAL_REVOKED_SNAPSHOT` to a later backup after an actual
+failed native dispatch; it must revoke a previously known nonempty exact selection
+with an origin gap. This is not equivalent to manually inserting a gap. Preserve
+both copies and failures. Never clear faults, reset fixture history, or restore an
+older database to produce a positive result. Bind receipts to loaded artifact hashes;
+source fixtures or a skipped test do not establish native acceptance.
