@@ -155,9 +155,32 @@ func (p *Plugin) capacityCuts(s *capacitySandwich) []capacity.CutRead {
 			continue
 		}
 		identity := measurement.PhysicalCutIdentity{SourceID: p.measurementSource, ConsumerID: s.consumer.ID(), MembershipID: s.membership, SourceRef: measurement.SourceReference(p.measurementSource, measurement.SourceScope{Provider: t.scope.Provider, AuthID: t.scope.AuthID, AuthIndex: t.scope.AuthIndex, Kind: t.scope.Kind, Version: t.scope.Version}), ManagerID: response.ManagerIncarnationID, SinkID: response.IncarnationID}
-		reads = append(reads, capacityCutRead(t.ref, identity, t.scope, response))
+		read := capacityCutRead(t.ref, identity, t.scope, response)
+		if read.Reason == "" {
+			read = withStoredLower(read, s.consumer)
+		}
+		reads = append(reads, read)
 	}
 	return reads
+}
+
+// withStoredLower replaces the host's lower cut with the lower edge this
+// consumer stored, which is where every durable proof of the epoch starts. It
+// can be later than the host's cut after a membership change or when this
+// consumer missed the sink's first cut. Without a stored edge there is no cut.
+func withStoredLower(read capacity.CutRead, consumer *usagecoverage.Consumer) capacity.CutRead {
+	lower, err := consumer.PhysicalLower(context.Background(), *read.Cut)
+	switch {
+	case err != nil:
+		read.Reason = "physical_lower_unreadable"
+	case lower == nil || lower.Sequence > read.Cut.Sequence || read.Lower == nil || lower.Sequence < read.Lower.Sequence:
+		read.Reason = "physical_lower_unavailable"
+	default:
+		read.Lower = lower
+		return read
+	}
+	read.Lower, read.Cut = nil, nil
+	return read
 }
 
 // capacityCutRead keeps a cut only if the read is a quiescent cut without any

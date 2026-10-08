@@ -114,6 +114,20 @@ func boundedPhysicalResponse(r pluginapi.HostUsageCheckpointResponse) bool {
 	return true
 }
 
+// PhysicalLower returns this listener's stored lower edge for cut c's epoch.
+func (c *Consumer) PhysicalLower(ctx context.Context, cut measurement.PhysicalCutIdentity) (*measurement.PhysicalCutIdentity, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ready(ctx); err != nil {
+		return nil, err
+	}
+	if cut.ConsumerID != c.id {
+		return nil, nil
+	}
+	lower, err := c.store.PhysicalLower(ctx, cut)
+	return lower, c.storageResult(err)
+}
+
 // SelectPhysical accepts only this listener's exact persisted cut identities.
 // Historical listeners can be inspected explicitly with Store.SelectPhysical.
 func (c *Consumer) SelectPhysical(ctx context.Context, s measurement.PhysicalSelection) (measurement.PhysicalResult, error) {

@@ -451,3 +451,19 @@ func TestCapacityInventoryProvenance(t *testing.T) {
 		t.Fatal(pluginabi.MethodHostAuthInventoryCheckpoint)
 	}
 }
+
+// Lab regression (run 2b capacity window): the host's first cut of the sink
+// was taken before this consumer existed, so the consumer never sees
+// first_quiescent_cut. It must adopt its own first known cut and still reach a
+// lower bound, never borrowing the host's earlier cut.
+func TestCapacityLowerBoundWhenHostFirstCutPredatesConsumer(t *testing.T) {
+	h := newCapacityHost()
+	h.lower["auth-000"] = &pluginapi.UsagePhysicalCut{Sequence: 3, At: hookEpoch.Add(-2 * time.Hour)}
+	p := openCapacityPlugin(t, h, "")
+	admissibleCapacity(t, h, p)
+	p.refreshMeasurements()
+	_, object := readCapacity(t, p)
+	if object.Status != "lower_bound" || len(object.Reasons) != 0 || object.Value == nil || object.Value.Records != 1 {
+		t.Fatal("host first cut before the consumer blocked capacity", object)
+	}
+}
