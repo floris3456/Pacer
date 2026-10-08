@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,12 @@ const (
 	attemptRetention = 7 * 24 * time.Hour
 	// retentionCap bounds the rows one sweep() call deletes, across both kinds.
 	retentionCap = 1000
+	// agedSweepInterval bounds how often the retention deletes (old anchors and
+	// old terminal attempts) run, in store-clock time. Closing timed-out pending
+	// attempts and the overflow bound run on every write: both read only the
+	// small, index-backed pending set, and skipping them could let a late
+	// settlement join an attempt that has already timed out.
+	agedSweepInterval = time.Minute
 )
 
 // Store borrows db. It never closes it or changes its connection settings, and
@@ -31,6 +38,15 @@ const (
 type Store struct {
 	db    *sql.DB
 	clock func() time.Time
+	// mu serialises write transactions in this process, so the throttle state
+	// below is only read and written by one writer at a time.
+	mu sync.Mutex
+	// agedDone and lastAged record the last committed retention sweep, in
+	// store-clock nanoseconds. A fresh Store has none, so its first write sweeps.
+	agedDone bool
+	lastAged int64
+	// agedSweeps counts committed retention sweeps. Tests read it.
+	agedSweeps int
 }
 
 // schema keeps one row per physical attempt. The fact is stored as its
@@ -220,9 +236,12 @@ func (s *Store) Sweep(ctx context.Context) error {
 
 // mutate runs one write transaction on a single connection. BEGIN IMMEDIATE takes
 // the write lock before the clock is read, as Open does, so the sweep and the
-// write are decided under one lock. ErrConflict is returned after the quarantine
-// it wrote is committed; every other error rolls back.
+// write are decided under one lock. The retention deletes run only when due (see
+// agedSweepInterval); timeout closing and the overflow bound run on every write. ErrConflict
+// is returned after the quarantine it wrote is committed; every other error rolls back.
 func (s *Store) mutate(ctx context.Context, fn func(tx txn, now int64) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return dbError(ctx, err)
@@ -239,21 +258,39 @@ func (s *Store) mutate(ctx context.Context, fn func(tx txn, now int64) error) er
 		}
 	}()
 	now := s.clock().UnixNano()
-	if err := sweep(ctx, conn, now); err != nil {
+	// A clock that moved backwards is treated as due, so the sweep cannot stall.
+	aged := !s.agedDone || now < s.lastAged || now-s.lastAged >= int64(agedSweepInterval)
+	if err := sweepWrite(ctx, conn, now, aged); err != nil {
 		return err
 	}
 	ferr := fn(conn, now)
 	if ferr != nil && !errors.Is(ferr, ErrConflict) {
 		return ferr
 	}
-	if err := sweep(ctx, conn, now); err != nil {
+	if err := sweepWrite(ctx, conn, now, aged); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return dbError(ctx, err)
 	}
 	committed = true
+	if aged {
+		s.agedDone, s.lastAged = true, now
+		s.agedSweeps++
+	}
 	return ferr
+}
+
+// sweepWrite runs the full sweep when retention is due, and otherwise only the
+// pending-set work: timeout closing and the overflow bound.
+func sweepWrite(ctx context.Context, tx txn, now int64, aged bool) error {
+	if aged {
+		return sweep(ctx, tx, now)
+	}
+	if err := closeAged(ctx, tx, now); err != nil {
+		return err
+	}
+	return closeOverflow(ctx, tx)
 }
 
 func validOutcome(o Outcome) bool {
@@ -521,6 +558,17 @@ func dependents(ctx context.Context, tx txn, k anchorKey) ([]string, error) {
 // retentionCap in total: anchors first, then terminal attempts. Pending rows are
 // never retired.
 func sweep(ctx context.Context, tx txn, now int64) error {
+	if err := closeAged(ctx, tx, now); err != nil {
+		return err
+	}
+	if err := closeOverflow(ctx, tx); err != nil {
+		return err
+	}
+	return retire(ctx, tx, now)
+}
+
+// closeAged closes one-sided attempts that have waited pendingAge.
+func closeAged(ctx context.Context, tx txn, now int64) error {
 	aged, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) AND arrived_ns<=? ORDER BY arrived_ns, rowid`, now-int64(pendingAge))
 	if err != nil {
 		return err
@@ -530,6 +578,11 @@ func sweep(ctx context.Context, tx txn, now int64) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// closeOverflow closes the oldest one-sided attempts beyond pendingLimit.
+func closeOverflow(ctx context.Context, tx txn) error {
 	var open int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>''))`).Scan(&open); err != nil {
 		return dbError(ctx, err)
@@ -545,6 +598,12 @@ func sweep(ctx context.Context, tx txn, now int64) error {
 			}
 		}
 	}
+	return nil
+}
+
+// retire deletes old anchors and old terminal attempts, at most retentionCap
+// rows in total: anchors first, then terminal attempts.
+func retire(ctx context.Context, tx txn, now int64) error {
 	budget := retentionCap
 	n, err := deleteAnchors(ctx, tx, now-int64(anchorRetention), budget)
 	if err != nil {

@@ -133,3 +133,61 @@ func TestPendingAndTerminalQueriesHaveIndexes(t *testing.T) {
 		t.Fatalf("pending sweep does not use its index:\n%s", plan.String())
 	}
 }
+
+// The age and retention deletes run at most once per agedSweepInterval of the
+// store clock. A fresh Store sweeps on its first write. Overflow is not throttled
+// (see TestPendingOverflowClosesOldest).
+func TestAgedSweepRunsAtMostOncePerMinute(t *testing.T) {
+	h := newHarness(t)
+	h.at(0)
+	first := baseFact(KindPrimary, "5m")
+	first.AttemptID = "a"
+	h.observe(t, first)
+	if n := h.s.agedSweeps; n != 1 {
+		t.Fatalf("first write ran %d aged sweeps, want 1", n)
+	}
+	h.at(time.Second)
+	second := baseFact(KindPrimary, "5m")
+	second.AttemptID = "b"
+	h.observe(t, second)
+	if n := h.s.agedSweeps; n != 1 {
+		t.Fatalf("write 1s later ran %d aged sweeps in total, want 1", n)
+	}
+	h.at(61 * time.Second)
+	third := baseFact(KindPrimary, "5m")
+	third.AttemptID = "c"
+	h.observe(t, third)
+	if n := h.s.agedSweeps; n != 2 {
+		t.Fatalf("write 61s after the sweep ran %d aged sweeps in total, want 2", n)
+	}
+}
+
+// Timeout closing is never throttled: a one-sided attempt that has aged out is
+// closed by the very next write, even inside the retention throttle window, so a
+// late success cannot join and promote it.
+func TestAgedPendingClosesOnNextWriteInsideThrottleWindow(t *testing.T) {
+	h := newHarness(t)
+	h.at(0)
+	first := baseFact(KindPrimary, "5m")
+	first.AttemptID = "a"
+	h.observe(t, first) // retention sweep at 0
+	h.at(time.Second)
+	old := baseFact(KindPrimary, "5m")
+	old.AttemptID = "old" // arrives at 1s, aged from 15m+1s
+	h.observe(t, old)
+	h.at(pendingAge)
+	h.observe(t, baseFact(KindPrimary, "5m")) // retention sweep at 15m
+	sweeps := h.s.agedSweeps
+	h.at(pendingAge + 30*time.Second) // inside the throttle window
+	h.settle(t, "old", OutcomeSucceeded)
+	if h.s.agedSweeps != sweeps {
+		t.Fatal("retention sweep ran inside the throttle window")
+	}
+	var closed, status, reason string
+	if err := h.db.QueryRow(`SELECT closed, obs_status, obs_reason FROM prefix_attempts WHERE attempt_id='old'`).Scan(&closed, &status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if closed == "" || status == statusObserved || reason != reasonSettlementTimeout {
+		t.Fatalf("late success inside the throttle window joined a timed-out attempt: closed=%q status=%q reason=%q", closed, status, reason)
+	}
+}
