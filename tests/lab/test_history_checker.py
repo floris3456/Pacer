@@ -14,6 +14,10 @@ spec.loader.exec_module(checker)
 
 
 class HistoryCheckerTests(unittest.TestCase):
+    def test_acceptance_runners_preserve_accumulated_fixture_evidence(self):
+        for name in ('check-host.py', 'check-inference.py', 'check-ttl.py', 'check-history.py'):
+            self.assertNotIn('/_test/reset', pathlib.Path(__file__).with_name(name).read_text())
+
     def test_counter_uses_the_real_fixture_endpoint(self):
         server = ThreadingHTTPServer(('127.0.0.1', 0), upstream.Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -2,6 +2,7 @@ package pacer
 
 import (
 	"encoding/json"
+	"maps"
 	"net/url"
 	"strings"
 	"time"
@@ -107,10 +108,13 @@ func (p *Plugin) discover(force ...bool) {
 	}
 	groups := p.persistCoverageInventory(found)
 	p.mu.Lock()
+	changed := !maps.Equal(p.creds, found)
 	p.creds = found
 	p.coverageGroups = groups
-	p.coverageGeneration++
-	p.measurements = map[string]measurement.Report{}
+	if changed {
+		p.coverageGeneration++
+		p.measurements = map[string]measurement.Report{}
+	}
 	p.mu.Unlock()
 	for _, c := range found {
 		if _, exists, err := p.observer.Status(c.Account); err == nil && !exists {

@@ -92,7 +92,7 @@ def read_effective(ttl):
     raise AssertionError("Native marker-TTL readback did not arrive within its deadline")
 
 
-assert call(UPSTREAM + "/_test/reset", {})[0] == 200
+assert json.loads(call(UPSTREAM + "/_test/activity")[1])["active_messages"] == 0
 status, discovery = call(BASE + "/v0/resource/plugins/pacer/events")
 checked("schema7-discovery-advertises-policy", status == 200 and json.loads(discovery)["cache_policy"]["contract_revision"] == 2)
 status, state = command("ensure", enrollment="new_empty")
