@@ -18,14 +18,34 @@ import (
 )
 
 // Caps are recorded in real-boundary.json so a capped oracle is never mistaken
-// for an exhaustive one.
-const (
+// for an exhaustive one. PACER_REAL_CAPS (JSON object with the keys of the
+// "caps" map) may lower or raise them for one run; every value must be >= 1.
+var (
 	realProfileCap      = 20
 	realAccountCap      = 20
 	realProfileProofCap = 300
 	realProofCap        = 100
 	realForecastCap     = 50
 )
+
+func realApplyCaps(t *testing.T) {
+	raw := os.Getenv("PACER_REAL_CAPS")
+	if raw == "" {
+		return
+	}
+	var caps map[string]int
+	if e := json.Unmarshal([]byte(raw), &caps); e != nil {
+		t.Fatal("PACER_REAL_CAPS is not a JSON object of integers")
+	}
+	targets := map[string]*int{"profiles": &realProfileCap, "accounts": &realAccountCap, "profile_proof": &realProfileProofCap, "history_proof": &realProofCap, "forecasts": &realForecastCap}
+	for name, value := range caps {
+		target, ok := targets[name]
+		if !ok || value < 1 {
+			t.Fatal("PACER_REAL_CAPS has an unknown key or a value below 1: " + name)
+		}
+		*target = value
+	}
+}
 
 // realOracleCase has the same layout as the synthetic historical-oracle.json.
 type realOracleCase struct {
@@ -66,6 +86,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 	if out == "" || db == "" || pinPath == "" {
 		t.Fatal("explicit output, scratch DB and pin required")
 	}
+	realApplyCaps(t)
 	pinBytes, e := os.ReadFile(pinPath)
 	if e != nil {
 		t.Fatal(e)
