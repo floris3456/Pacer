@@ -397,15 +397,33 @@ func (a *ForwardHTTP) readProfiles(ctx context.Context, query url.Values) plugin
 		return forwardHTTPError(err)
 	}
 	// Keep original profile/binding/plan fields; quote the potentially wide revision.
+	// Shadow only the legacy omitempty field: nil keeps legacy ownership semantics,
+	// while a nonnil slice (including []) remains explicit in this read-only DTO.
+	type profileWire struct {
+		historyreports.ForwardProfile
+		Memberships *[]historyreports.ForwardMembership `json:"memberships,omitempty"`
+	}
+	var profiles []profileWire
+	if config.Profiles != nil {
+		profiles = make([]profileWire, len(config.Profiles))
+	}
+	for i, p := range config.Profiles {
+		profiles[i].ForwardProfile = p
+		if p.Memberships != nil {
+			memberships := p.Memberships
+			profiles[i].Memberships = &memberships
+		}
+	}
 	type configWire struct {
 		historyreports.ForwardProfileConfig
-		Revision int64 `json:"revision,string"`
+		Profiles []profileWire `json:"profiles"`
+		Revision int64         `json:"revision,string"`
 	}
 	return forwardHTTPJSON(200, struct {
 		Revision int64      `json:"revision,string"`
 		Digest   string     `json:"digest"`
 		Config   configWire `json:"config"`
-	}{revision, digest, configWire{config, config.Revision}})
+	}{revision, digest, configWire{config, profiles, config.Revision}})
 }
 
 func (a *ForwardHTTP) editProfiles(ctx context.Context, raw []byte) pluginapi.ManagementResponse {

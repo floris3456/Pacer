@@ -117,6 +117,14 @@ No key metadata or provider authorization is changed.
 revision, not current/latest. GET quotes both the branch revision and the retained
 configuration revision while retaining original profiles, bindings and plans.
 
+V8 GET `profiles` preserves the membership distinction in its read DTO: nil legacy
+memberships remain omitted (with retained legacy `accounts`/`active_account`), an
+explicit empty selection is always `"memberships":[]`, and nonempty memberships
+retain their exact entries and integer millisecond dates. All other profile fields
+are retained. Both revision fields remain quoted; `digest` is the stored immutable
+metadata digest, **not** a hash of the public wire projection. This projection does
+not change durable encoding, legacy generated types, pins or report calculations.
+
 Successful mutation returns **202**:
 `{revision:"N", publication:"pending", notification_enqueued:true|false}`.
 Only after successful library CAS does a nonblocking send target the caller's
