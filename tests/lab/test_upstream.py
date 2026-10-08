@@ -56,9 +56,26 @@ class FixtureTests(unittest.TestCase):
         try:
             self.assertEqual(409, self.call("/_test/response", {"text": "new"})[0])
             self.assertEqual(409, self.call("/_test/reset", {})[0])
+            self.assertEqual(409, self.call("/_test/recover", {"accounts": ["a"]})[0])
+            self.assertEqual(409, self.call("/_test/exhaust", {"accounts": ["a"]})[0])
         finally:
             with upstream.lock:
                 upstream.active_messages = 0
+
+    def test_targeted_recovery_retains_attempt_evidence(self):
+        for control in ("/_test/exhaust", "/_test/recover"):
+            for body in ({}, {"accounts": []}, {"accounts": "a"}, {"accounts": ["unknown"]}, {"accounts": ["a"], "extra": True}):
+                self.assertEqual(400, self.call(control, body)[0])
+        self.assertEqual(200, self.call("/_test/exhaust", {"accounts": ["a", "b"]})[0])
+        self.assertEqual(429, self.call("/v1/messages", {"messages": []})[0])
+        with upstream.lock:
+            before = list(upstream.attempts)
+        self.assertEqual(200, self.call("/_test/recover", {"accounts": ["a"]})[0])
+        with upstream.lock:
+            self.assertEqual(before, upstream.attempts)
+            self.assertEqual({"b"}, upstream.exhausted)
+        self.assertEqual(200, self.call("/v1/messages", {"messages": []})[0])
+        self.assertEqual(0, json.loads(self.call("/_test/activity")[1])["active_messages"])
 
 
 if __name__ == "__main__":

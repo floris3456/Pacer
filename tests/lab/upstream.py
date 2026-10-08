@@ -99,9 +99,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(409, {"error": "fixture_busy"})
                 reply_text = text
             return self.reply(200, {"ok": True})
-        if self.path == "/_test/exhaust":
+        if self.path in ("/_test/exhaust", "/_test/recover"):
+            accounts = body.get("accounts")
+            if set(body) != {"accounts"} or not isinstance(accounts, list) or not accounts or len(accounts) > 2 or any(a not in ("a", "b") for a in accounts):
+                return self.reply(400, {"error": "invalid_fixture_accounts"})
             with lock:
-                exhausted.update(body.get("accounts", []))
+                if active_messages:
+                    return self.reply(409, {"error": "fixture_busy"})
+                if self.path == "/_test/recover":
+                    exhausted.difference_update(accounts)
+                else:
+                    exhausted.update(accounts)
             return self.reply(200, {"ok": True})
         if self.path.split("?", 1)[0] != "/v1/messages":
             return self.reply(404, {"error": "not_found"})
