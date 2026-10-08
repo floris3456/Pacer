@@ -82,6 +82,11 @@ that must not see each other's credential IDs, aliases or quota bars.
 
 ## Build and test
 
+The independent historical store and native display metadata contracts are in
+[Historical preservation / keys and groups](docs/history-import.md). Its trusted
+offline importer preserves a frozen CPAMP snapshot; native Usage Quota report
+parity and management integration remain separate acceptance gates.
+
 With Go 1.26, a C compiler and libc development headers:
 
 ```sh

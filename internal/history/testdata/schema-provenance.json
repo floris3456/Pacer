@@ -1,0 +1,7 @@
+{
+  "apps/manager-server/internal/repository/sqlite/migrate.go": "2fbe5b57f7d39c9ab7ac51879cdd19cd8015df068de7f2b780045d89b8a631a3",
+  "apps/manager-server/internal/service/usagehistory/service.go": "8c79d556efdf39377473582e17b7d159a6bdd73b006cda180eda7062042323ce",
+  "apps/manager-server/internal/service/usagehistory/profiles.go": "7643658f10a6f99f8e136608db9a928ef5735cab59fd6c7646afd6e7ad5c935d",
+  "apps/manager-server/internal/service/usagehistory/forecasts.go": "01420bcc7e590bf5b3802edf672360ad98e36ded0d50e78956e73f042dabc7ae",
+  "apps/manager-server/internal/service/usagehistory/valuation_policy.go": "6f9af1c15d9f8b013842152715c33c4000d4086fc9032dd5a7edfa1fc80a34ba"
+}
