@@ -82,6 +82,16 @@ selected TTL, pending transition or warming state is changed by the projection.
 
 ## Parent acceptance after hooking
 
+Native acceptance found that CPA's top-level `UsageRecord.SessionID` comes from
+client logging/affinity metadata (`helps/usage_helpers.go` and
+`pluginhost/adapters_usage_translation.go`), independently of the authenticated
+`CachePolicy.Selected.Scope.SessionID`. Managed attribution in `FromNative` uses
+the latter. Equality with the logging ID is not a policy authorization rule:
+prefixed/generated logging IDs must neither suppress valid readback nor rebind it.
+The parent regression uses different logging/policy IDs and still refuses reads
+under a foreign policy session or caller. Previously ignored event receipts are
+not rewritten; new valid physical evidence is needed for readback.
+
 - Successful native 5m/1h inference then authorized GET shows `last_effective_ttl`.
   Absence of complete prefix proof still leaves cache refresh/warming unknown.
 - No usage callback or selected choice alone shows a received/applied TTL.

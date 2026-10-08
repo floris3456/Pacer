@@ -137,9 +137,10 @@ func project(r measurement.Record, now time.Time) (event, error) {
 	if !identifier(a.AccountID) || !identifier(a.CredentialRef) || !reference(n.CredentialBindingRef) || r.ExecutionID != r.AttemptID || r.Policy.Revision < 1 {
 		return ignore("unverified_attempt_identity")
 	}
-	if n.SessionID != "" && n.SessionID != a.SessionID {
-		return ignore("native_session_scope_conflict")
-	}
+	// CPA UsageRecord.SessionID is client logging/affinity topology (possibly
+	// prefixed or generated), not CachePolicy.Selected.Scope.SessionID. The
+	// converter takes managed attribution from the authenticated policy scope.
+	// Never use the logging ID either to reject that scope or to rebind it.
 	if (r.Kind != "primary" && r.Kind != "warming") || p.Kind != r.Kind || n.IsCompaction || n.NodeKind == "auxiliary" || n.NodeKind == "title" || n.NodeKind == "summary" || n.NodeKind == "compaction" || (n.NodeKind == "primary" || n.NodeKind == "warming") && n.NodeKind != r.Kind {
 		return ignore("incoherent_request_kind")
 	}

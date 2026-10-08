@@ -36,16 +36,18 @@ for path, key, want in [
 request = urllib.request.Request(BASE + "/v0/management/plugins", headers={"Authorization": "Bearer pacer-test-admin"})
 with http.open(request, timeout=5) as response:
     plugins = json.load(response)["plugins"]
-pacer = next(plugin for plugin in plugins if plugin["id"] == "pacer")
-checks.append({"name": "native-plugin-registered-and-enabled", "pass": pacer["registered"] and pacer["effective_enabled"]})
-request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/state", headers={"Authorization": "Bearer pacer-test-admin"})
-with http.open(request, timeout=5) as response:
-    accounts = json.load(response)["accounts"]
-assert accounts, "lab must expose dummy subscription credentials"
-request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/observations?auth_index=" + accounts[0]["auth_index"], headers={"Authorization": "Bearer pacer-test-admin"})
-with http.open(request, timeout=5) as response:
-    observation = json.load(response)
-checks.append({"name": "unreserved-native-observation-route", "pass": isinstance(observation["windows"], list) and "reconciliation" in observation})
+pacer = next((plugin for plugin in plugins if plugin["id"] == "pacer"), {})
+registered = pacer.get("registered", False) and pacer.get("effective_enabled", False)
+checks.append({"name": "native-plugin-registered-and-enabled", "pass": registered})
+if registered:
+    request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/state", headers={"Authorization": "Bearer pacer-test-admin"})
+    with http.open(request, timeout=5) as response:
+        accounts = json.load(response)["accounts"]
+    assert accounts, "lab must expose dummy subscription credentials"
+    request = urllib.request.Request(BASE + "/v0/management/plugins/pacer/observations?auth_index=" + accounts[0]["auth_index"], headers={"Authorization": "Bearer pacer-test-admin"})
+    with http.open(request, timeout=5) as response:
+        observation = json.load(response)
+    checks.append({"name": "unreserved-native-observation-route", "pass": isinstance(observation["windows"], list) and "reconciliation" in observation})
 out = pathlib.Path(os.environ.get("PACER_EVIDENCE", "../../evidence/implementation"))
 out.mkdir(parents=True, exist_ok=True)
 (out / "native-host-auth.json").write_text(json.dumps(checks, indent=2) + "\n")

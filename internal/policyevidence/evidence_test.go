@@ -225,31 +225,46 @@ func TestExactForeignScopesAndHostDigestNotRehashed(t *testing.T) {
 	}
 }
 
+func TestNativeAffinityTopologyCannotRebindAuthenticatedPolicyScope(t *testing.T) {
+	s, _, _, _ := fixture(t)
+	r := record("different-affinity-session", testTime, measurement.TTL1h)
+	r.Native.SessionID = "pck:server-generated-affinity-id"
+	if result := observe(t, s, r); result.Disposition != "recorded" || !result.HeadChanged {
+		t.Fatal(result)
+	}
+	wantTTL(t, s, caller, state("epoch", "1h", 3), "1h")
+	var foreign map[string]any
+	json.Unmarshal(state("epoch", "1h", 3), &foreign)
+	foreign["session_id"] = r.Native.SessionID
+	raw, _ := json.Marshal(foreign)
+	wantTTL(t, s, caller, raw, "")
+	wantTTL(t, s, strings.Repeat("c", 64), state("epoch", "1h", 3), "")
+}
+
 func TestIgnoredDispatchSourceAndClockEvidenceNeverPromotes(t *testing.T) {
 	tests := map[string]func(*measurement.Record){
-		"failed":                  func(r *measurement.Record) { r.Success = false },
-		"not-final":               func(r *measurement.Record) { r.Final = false },
-		"not-dispatched":          func(r *measurement.Record) { r.Native.Dispatched = false },
-		"no-native":               func(r *measurement.Record) { r.Native = nil },
-		"unmanaged":               func(r *measurement.Record) { r.Policy.Kind = "" },
-		"wrong-executor":          func(r *measurement.Record) { r.Native.ExecutorType = "OpenAICompatExecutor" },
-		"wrong-provider":          func(r *measurement.Record) { r.Attribution.Provider = "codex" },
-		"wrong-model":             func(r *measurement.Record) { r.Attribution.Model = "gpt-other" },
-		"wrong-source":            func(r *measurement.Record) { r.Attribution.Client = "unverified" },
-		"bad-binding":             func(r *measurement.Record) { r.Native.CredentialBindingRef = "PRIVATE-RAW-CREDENTIAL" },
-		"title":                   func(r *measurement.Record) { r.Kind = "title" },
-		"summary":                 func(r *measurement.Record) { r.Native.IsCompaction = true },
-		"kind-mismatch":           func(r *measurement.Record) { r.Policy.Kind = "warming" },
-		"node-kind-mismatch":      func(r *measurement.Record) { r.Native.NodeKind = "warming" },
-		"explicit-auxiliary":      func(r *measurement.Record) { r.Native.NodeKind = "auxiliary" },
-		"native-session-mismatch": func(r *measurement.Record) { r.Native.SessionID = "other-session" },
-		"request-time-fallback":   func(r *measurement.Record) { r.StartTimeBasis = "requested_at_unverified" },
-		"missing-basis":           func(r *measurement.Record) { r.StartTimeBasis = "" },
-		"admission-time":          func(r *measurement.Record) { r.Policy.RequestStartedAt = r.RequestedAt },
-		"missing-start":           func(r *measurement.Record) { r.StartedAt = time.Time{} },
-		"requested-after-start":   func(r *measurement.Record) { r.RequestedAt = r.StartedAt.Add(time.Second) },
-		"end-before-start":        func(r *measurement.Record) { r.EndedAt = r.StartedAt.Add(-time.Second) },
-		"latency-mismatch":        func(r *measurement.Record) { r.Native.Latency = time.Hour },
+		"failed":                func(r *measurement.Record) { r.Success = false },
+		"not-final":             func(r *measurement.Record) { r.Final = false },
+		"not-dispatched":        func(r *measurement.Record) { r.Native.Dispatched = false },
+		"no-native":             func(r *measurement.Record) { r.Native = nil },
+		"unmanaged":             func(r *measurement.Record) { r.Policy.Kind = "" },
+		"wrong-executor":        func(r *measurement.Record) { r.Native.ExecutorType = "OpenAICompatExecutor" },
+		"wrong-provider":        func(r *measurement.Record) { r.Attribution.Provider = "codex" },
+		"wrong-model":           func(r *measurement.Record) { r.Attribution.Model = "gpt-other" },
+		"wrong-source":          func(r *measurement.Record) { r.Attribution.Client = "unverified" },
+		"bad-binding":           func(r *measurement.Record) { r.Native.CredentialBindingRef = "PRIVATE-RAW-CREDENTIAL" },
+		"title":                 func(r *measurement.Record) { r.Kind = "title" },
+		"summary":               func(r *measurement.Record) { r.Native.IsCompaction = true },
+		"kind-mismatch":         func(r *measurement.Record) { r.Policy.Kind = "warming" },
+		"node-kind-mismatch":    func(r *measurement.Record) { r.Native.NodeKind = "warming" },
+		"explicit-auxiliary":    func(r *measurement.Record) { r.Native.NodeKind = "auxiliary" },
+		"request-time-fallback": func(r *measurement.Record) { r.StartTimeBasis = "requested_at_unverified" },
+		"missing-basis":         func(r *measurement.Record) { r.StartTimeBasis = "" },
+		"admission-time":        func(r *measurement.Record) { r.Policy.RequestStartedAt = r.RequestedAt },
+		"missing-start":         func(r *measurement.Record) { r.StartedAt = time.Time{} },
+		"requested-after-start": func(r *measurement.Record) { r.RequestedAt = r.StartedAt.Add(time.Second) },
+		"end-before-start":      func(r *measurement.Record) { r.EndedAt = r.StartedAt.Add(-time.Second) },
+		"latency-mismatch":      func(r *measurement.Record) { r.Native.Latency = time.Hour },
 		"future-end": func(r *measurement.Record) {
 			r.EndedAt = testTime.Add(2 * time.Hour)
 			r.Native.Latency = r.EndedAt.Sub(r.RequestedAt)
