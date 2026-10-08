@@ -151,6 +151,9 @@ func canonicalRecord(r Record) (Record, []byte, []byte, error) {
 	if !r.Policy.RequestStartedAt.IsZero() && !r.Policy.RequestStartedAt.Equal(r.StartedAt) || r.Policy.Revision < 0 {
 		return r, nil, nil, ErrInvalid
 	}
+	if !r.RequestedAt.IsZero() && !validTime(r.RequestedAt) || !knownStart(r) && r.StartTimeBasis != "requested_at_unverified" {
+		return r, nil, nil, ErrInvalid
+	}
 	if r.Kind != "primary" && r.Kind != "warming" && r.Kind != "title" && r.Kind != "summary" && r.Kind != "other" {
 		return r, nil, nil, ErrInvalid
 	}
@@ -158,6 +161,7 @@ func canonicalRecord(r Record) (Record, []byte, []byte, error) {
 		return r, nil, nil, fmt.Errorf("%w: raw usage must be bounded JSON", ErrInvalid)
 	}
 	r.StartedAt, r.EndedAt, r.Policy.RequestStartedAt = utc(r.StartedAt), utc(r.EndedAt), utc(r.Policy.RequestStartedAt)
+	r.RequestedAt = utc(r.RequestedAt)
 	body, err := json.Marshal(r)
 	if err != nil {
 		return r, nil, nil, err

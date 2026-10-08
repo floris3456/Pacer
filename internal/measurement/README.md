@@ -231,8 +231,138 @@ Verified 2026-10-08: `go test -race -count=1 -timeout=120s -v
 ./internal/measurement` passed; `go vet ./internal/measurement` passed. Receipts:
 `measurement-race.log` and `measurement-vet.log` (empty successful vet output).
 
-The parent integration still supplies the additive CPA adapter, normalized fields,
+The parent integration still supplies additive CPA hook delivery, normalized fields,
 physical-attempt identity, immutable policy evidence, observer samples/closures,
 drained delivery horizons and dropped-event diagnostics. No native-host end-to-end
 acceptance, CPAMP historical migration/parity, production activation, remote push,
-or live provider test is claimed by these package tests.
+or live provider test is claimed by these package tests. JSON conversion is supplied
+by the independent native adapter below.
+
+## Native CPA JSON adapter
+
+`native.go` now provides the independent converter:
+
+```go
+record, err := measurement.FromNative(rawJSON, measurement.NativeCredential{
+    Provider: verifiedCredential.Provider,
+    AccountID: verifiedAccountID,
+    CredentialRef: opaqueCredentialReference,
+    AuthID: verifiedCredential.AuthID,
+    AuthIndex: verifiedCredential.AuthIndex,
+    // Optional: the fingerprint pinned to this attempt, not a later token rotation.
+    AccessTokenSHA256: verifiedAttemptTokenFingerprint,
+}, stableHostInstallationID)
+if err != nil {
+    // Classify errors.Is(err, measurement.ErrUnrecordable), retain a delivery-gap
+    // diagnostic through the parent's ingestion path, never invent a mapping.
+    return err
+}
+_, err = store.PutRecord(ctx, record)
+```
+
+The parent marshals the actual `pluginapi.UsageRecord` to JSON. The converter uses
+its own explicit wire envelope, with CPA's **PascalCase top-level/Detail members**
+and **snake_case policy/cache-creation/token-breakdown members**. It neither imports
+the SDK nor changes the vendored copy. The interface is independent of the v7/v8
+Go module name. An older SDK that drops the new fields produces conservative
+legacy evidence, not restored telemetry. The remaining host integration owns the
+additive SDK/hook delivery, account mapping, storage error handling and observation
+service; it no longer needs to implement this conversion itself.
+
+### Mapping and identity
+
+Capture the verified credential/account mapping **by value in the host callback**,
+before asynchronous delivery. Every supplied wire AuthID/AuthIndex must match that
+snapshot. At least one must be present. Provider and verified account/reference
+are required. When a pinned access-token fingerprint is available, it must match
+the wire fingerprint. The converter does no inventory lookup and never derives a
+shared account from an alias, AuthIndex, email, or token. Pin/reuse the original
+mapping for duplicate/replayed events: using a newly repurposed credential mapping
+for an old event conflicts with immutable persisted identity.
+
+| CPA source | Measurement field |
+| --- | --- |
+| `RequestID` (physical execution UUID) | `AttemptID`, `ExecutionID`; hashed with stable host namespace into `EventID` |
+| `LifecycleRequestID` | Logical `Record.RequestID`, empty when absent; never a dedup key |
+| `TraceID` | `TraceID`; no invented stream ID (CPA supplies only a stream flag) |
+| `Selected.scope` | Host caller SHA, installation, session, route; scope wins over auxiliary session metadata |
+| `APIKey` | SHA-256 `KeyRef`; fallback caller uses CPA's domain-separated `CallerScope` algorithm |
+| `AccessTokenSHA256` | Validated SHA-256 reference, never an access token |
+| `ResponseModel` / `Model` | Actual reported model first, execution model otherwise; both retained in sanitized metadata |
+| `Alias` / `Model` | Requested-model attribution |
+| `ResponseServiceTier` / `ServiceTier` | Reported tier first; requested tier otherwise, with both facts retained |
+| Session hierarchy, node kind, fork/compaction and stream/generate flags | `NativeMetadata`; no client IPs, forwarded addresses, user agent or URLs |
+
+`sourceID` is a stable host installation namespace, **not** an observer incarnation
+or the native `Source` field. CPA's native `Source` can contain account email or raw
+API key, so it is deliberately dropped. The verified credential reference must
+itself be opaque/non-secret; raw AuthID (potentially a filename/email) is used only
+for matching and a binding hash. Host-selected caller digests are retained as
+provided, not hashed a second time. Duplicate conversion is deterministic; retries
+sharing a lifecycle ID retain distinct physical event IDs. Conflicting re-emissions
+are store errors, not extra events. CPA's once-emitted native facts become
+`Final=true`, `Revision=1`, including failed attempts with usage.
+
+### Accounting, clocks and prefix evidence
+
+Only `AccountingVersion=2` **and** `TokenBreakdown.schema_version=2` authorize
+normalized categories. Input's disjoint uncached/read/write fields and output's
+total/reasoning fields are used directly. Output reasoning is not added twice;
+legacy `CachedTokens` and `CacheReadTokens` mirrors are never summed. Presence,
+non-negativity, input/output/total conservation and unclassified counts are checked.
+Missing counters and inconsistent/non-complete accounting cannot produce an exact
+value, even when the remaining counters happen to be zero. Unsupported versions
+retain source usage with unknown normalized quality instead of guessing semantics.
+
+Optional `Detail.CacheCreation` counters remain optional. Its reported total,
+unknown remainder and classification are cross-checked with normalized writes;
+inconsistent quality/counters invalidate precision. A missing split remains unknown
+write mix. Missing split fields with zero writes do not manufacture uncertainty.
+Complete provider-reported mixtures remain scalar even under a selected 1h policy.
+`AllWritesCovered` is **always false** for this CPA evidence: the executor only
+describes caller/CPA-controlled markers; provider-added writes remain possible.
+
+`RequestedAt` is retained separately. `EndedAt` is exactly the host's captured
+`RequestedAt + Latency`, not callback/persistence time. `StartedAt` and policy
+request start use `UpstreamStartedAt` only when `Dispatched=true` and that timestamp
+falls within the host request interval. Admission-time `AttemptStartedAt` is never
+used as dispatch evidence. Without actual dispatch time, the record retains
+`RequestedAt` as an explicit `requested_at_unverified` start bound, keeps the policy
+request-start timestamp absent, and cannot qualify a measured observation interval
+or cache refresh. Malformed identity/mapping/clock/envelope data returns a typed
+`NativeError` with a fixed non-secret code; source JSON is never echoed in errors.
+
+Activity requires a valid immutable selected primary/warming kind, matching wire
+TTL, confirmed dispatch, positive breakpoints, successful reported cache use and
+complete normalized accounting. Title/summary/compaction conflicts, failures,
+mixed wire TTL, no-cache and unmanaged activity cannot qualify. Native prefix
+coverage remains **partial**, including when activity qualifies: this host envelope
+does not prove all relevant prefixes were refreshed. Thus it cannot seed a fully
+known warm-stretch prior by itself. The parent's tracker/policy reconciliation
+continues to own conservative binding protection.
+
+`RawUsage` is a canonical **allowlisted projection of `Detail` and `TokenBreakdown`**,
+not the original native envelope. Only numeric fields and known quality enums are
+retained; unknown nested fields are dropped. No headers, API keys, raw tokens,
+failure body, source string, URLs or network addresses enter raw usage. The store
+preserves these projected bytes across revisions. This distinction from storing a
+whole native callback is intentional and tested.
+
+The converter is pure: no clock reads, database/observer calls, delivery-run writes
+or checkpointing. Parent coverage remains unknown until an explicit conservative
+drained horizon exists; receiving a native callback does not establish one.
+
+Source contract inspected offline at CPA `d314c85d7161f6147359c78d975d12ec372abfad`:
+`sdk/pluginapi/{types.go,cache_policy.go}`, native usage translation, executor
+`helps/{usage_helpers.go,cache_policy.go}`, `sdk/cliproxy/usage/{accounting.go,
+cache_creation.go}`, and `sdk/cliproxy/session/identity.go`. Independent test fixtures
+serialize that SDK struct shape, plus legacy v7-shaped records missing additive
+fields. They cover optional/zero counters, wrong schema/quality, managed/unmanaged
+clocks, delays, physical retries, immutable mappings, secret-free projection and
+the absence of callback-driven coverage. Native-specific receipts use
+`measurement-native-*.log` under the implementation evidence directory.
+
+Verified 2026-10-08 after the adapter changes: the full measurement suite passed
+`go test -race -count=1 -timeout=120s -v ./internal/measurement`; package `go vet`
+also passed. Receipts are `measurement-native-race.log` and
+`measurement-native-vet.log` (empty successful vet output).

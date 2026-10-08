@@ -50,7 +50,7 @@ func protectionTTL(r Record) TTL {
 
 func qualifies(r Record) bool {
 	_, valid := normalized(r.Usage)
-	return r.Final && r.Success && r.Activity.PrimaryPrefix && valid && (r.Usage.CacheRead > 0 || r.Usage.CacheCreate > 0) && (r.Kind == "primary" || r.Kind == "warming")
+	return knownStart(r) && r.Final && r.Success && r.Activity.PrimaryPrefix && valid && (r.Usage.CacheRead > 0 || r.Usage.CacheCreate > 0) && (r.Kind == "primary" || r.Kind == "warming")
 }
 
 func buildStretches(e evidence, q Query) []Stretch {

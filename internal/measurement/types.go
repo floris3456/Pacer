@@ -68,6 +68,7 @@ type PolicySnapshot struct {
 	EffectiveTTL     TTL       `json:"effective_ttl,omitempty"`
 	RequestStartedAt time.Time `json:"request_started_at"`
 	AllWritesCovered bool      `json:"all_writes_covered"`
+	Kind             string    `json:"kind,omitempty"`
 }
 
 // Usage is an explicit, disjoint normalized domain, not CPA's legacy input
@@ -117,14 +118,19 @@ type Record struct {
 	Policy              PolicySnapshot  `json:"policy"`
 	Activity            Activity        `json:"activity"`
 	Kind                string          `json:"kind"`       // primary | warming | title | summary | other
-	StartedAt           time.Time       `json:"started_at"` // Upstream dispatch, never completion.
+	StartedAt           time.Time       `json:"started_at"` // Upstream dispatch, or explicitly unverified RequestedAt fallback.
+	RequestedAt         time.Time       `json:"requested_at,omitempty,omitzero"`
+	StartTimeBasis      string          `json:"start_time_basis,omitempty"` // Empty/upstream = actual; requested_at_unverified cannot measure an interval.
 	EndedAt             time.Time       `json:"ended_at"`
 	Final               bool            `json:"final"`
 	Success             bool            `json:"success"`
 	Usage               Usage           `json:"usage"`
 	CapturedCostNanoUSD *int64          `json:"captured_cost_nano_usd,omitempty"`
 	RawUsage            json.RawMessage `json:"-"` // Local evidence only; excluded from reports.
+	Native              *NativeMetadata `json:"native,omitempty"`
 }
+
+func knownStart(r Record) bool { return r.StartTimeBasis == "" || r.StartTimeBasis == "upstream" }
 
 type StoredRecord struct {
 	Record

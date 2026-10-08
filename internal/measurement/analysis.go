@@ -152,6 +152,9 @@ func measureWindow(e evidence, q Query, obs []Observation, c Closure) WindowEsti
 		}
 		for _, p := range byInterval[i-1] {
 			r := e.Records[p.index]
+			if !knownStart(r) {
+				in.Reasons = append(in.Reasons, "unverified_upstream_start")
+			}
 			in.Requests++
 			v := p.value
 			if r.StartedAt.Before(a.At) || r.EndedAt.IsZero() || r.EndedAt.After(b.At) {
