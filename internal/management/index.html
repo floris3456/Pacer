@@ -5,6 +5,7 @@
 /* The host may inject a light generic plugin theme. Pacer keeps its explicit
    neutral palette rather than mixing dark controls with inherited light text. */
 body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,code,kbd,samp{color:inherit}thead,th{background:#292a2d}pre,code,kbd,samp{background:#252629}
+#legacy-advanced caption{text-align:left;color:#bfc0c5;margin:14px 0 6px}#legacy-advanced .table-wrap{margin:12px 0}#legacy-advanced input,#legacy-advanced select{max-width:100%}#legacy-proof-dialog{max-width:1000px}#legacy-advanced td{overflow-wrap:anywhere;min-width:125px}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
@@ -24,6 +25,36 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
 <h3>Quota windows</h3><div class="toolbar"><label>State <select id="report-window-state"><option value="completed">Completed</option><option value="current">Current at checkpoint</option><option value="all">All, including uncertain</option></select></label><label>Kind <select id="report-window-kind"><option value="">All windows</option><option value="5h">5-hour</option><option value="weekly">Weekly</option></select></label><button id="report-window-load" disabled>Show windows</button><button id="report-window-next" disabled>Next windows</button><span id="report-window-count" class="muted"></span></div>
 <div class="table-wrap"><table><thead><tr><th>Account / window</th><th>Reset / attribution end</th><th>State / completion</th><th>Selected value / writes</th><th>Measured $ per %</th><th></th></tr></thead><tbody id="report-windows"></tbody></table></div>
 <h3>Requests</h3><div class="toolbar"><button id="report-request-prev" disabled>Previous requests</button><button id="report-request-next" disabled>Next requests</button><span id="report-request-page" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Started UTC</th><th>Account / model</th><th>API-equivalent value</th><th>Write evidence / outcome</th></tr></thead><tbody id="report-requests"></tbody></table></div>
+<details id="legacy-advanced"><summary>Legacy &amp; Scenarios · advanced frozen history</summary>
+<p>Read the older profile accounting, exhaustion estimates and retained forecast ledger, or compare subscription-tier scenarios. These views keep their original calculation rules. They do not refresh providers, issue forecasts or merge current native usage.</p>
+<div id="legacy-status" class="status" role="status">Load a frozen view to check historical preparation.</div>
+<form id="legacy-form" class="toolbar">
+<label>View <select id="legacy-view"><option value="profiles">Legacy profile totals</option><option value="history">Exhaustion history</option><option value="quota">Subscription scenarios</option></select></label>
+<label>Profile <select id="legacy-profile"><option value="">All history</option><option value="unassigned">Unassigned history</option></select></label>
+<label>From UTC <input type="date" id="legacy-from"></label><label>Before UTC <input type="date" id="legacy-to"></label>
+<label>Model <input id="legacy-model" maxlength="256" placeholder="All models"></label>
+<label>Key fingerprints <input id="legacy-keys" maxlength="6499" placeholder="SHA-256 list; never keys"></label>
+<label>Kind (history / scenarios) <select id="legacy-kind"><option value="">All</option><option value="5h">5-hour</option><option value="weekly">Weekly</option></select></label>
+<label>Scenario period <select id="legacy-period"><option value="current">Current at checkpoint</option><option value="history">Historical windows</option></select></label>
+<label>Tier rules <select id="legacy-basis"><option value="today">Pinned catalog benchmarks</option><option value="then">Rules valid then</option></select></label>
+<label><input type="checkbox" id="legacy-gateway">Assume gateway-only quota use (scenarios)</label>
+<button id="legacy-load" data-legacy-action>Load frozen view</button></form>
+<p class="muted">Dates are UTC, start-inclusive and end-exclusive. Exhaustion history supports dates and key fingerprints; clear profile/model filters for that view. Kind and tier controls apply only to their labeled views. Downloads retain the last loaded pin, even if controls are edited.</p>
+<p id="legacy-summary"></p><div class="toolbar"><button id="legacy-json" data-legacy-action disabled>Download view JSON</button><button id="legacy-csv" data-legacy-action disabled>Download view CSV</button></div>
+<div class="table-wrap"><table><caption>Legacy selected profile contributions · captured prices</caption><thead><tr><th>Profile</th><th>Requests / failed</th><th>Captured cost</th><th>Missing price requests</th></tr></thead><tbody id="legacy-profiles"></tbody></table></div>
+<div class="table-wrap"><table><caption>Frozen windows and exhaustion evidence</caption><thead><tr><th>Account / profile / window</th><th>State / source coverage</th><th>Provider-observed use / time</th><th>Captured cost / requests</th><th>Reset / attribution end</th><th>Exhaustion / estimator bounds</th><th>Uncertainty / reason</th><th>Details</th></tr></thead><tbody id="legacy-windows"></tbody></table></div>
+<section id="legacy-scenarios" hidden><h4>Subscription comparison</h4>
+<p class="muted">Catalog prices and multipliers are frozen source benchmarks, not current offers. Session multipliers do not establish weekly budgets. Outside applications may contribute to provider meters. Gateway-only and custom capacity ratios are explicit assumptions, not observations.</p>
+<form id="legacy-scenario-form" class="toolbar"><label>One window <select id="legacy-scenario-window"><option value="">Select a loaded window</option></select></label><label>Source plan <select id="legacy-source-plan"><option value="">Use captured assignment</option></select></label><label>Target plan <select id="legacy-target-plan"><option value="">Published comparisons</option></select></label><label>Assumed target / source capacity <input id="legacy-ratio" type="number" min="0" max="10000" step="any" placeholder="Blank: published ratios"></label><button id="legacy-apply" data-legacy-action disabled>Apply new scenario at same checkpoint</button></form>
+<div class="table-wrap"><table><caption>Selected usage versus observed shared quota</caption><thead><tr><th>Window</th><th>Selected captured cost / missing prices</th><th>Observed provider use</th><th>Selected quota attribution / assumption</th><th>Source plan / basis</th><th>Details</th></tr></thead><tbody id="legacy-quota"></tbody></table></div>
+<div class="table-wrap"><table><caption>Tier estimates and explicit scenarios</caption><thead><tr><th>Window / target tier</th><th>Catalog monthly USD / reviewed</th><th>Status</th><th>Target / source ratio</th><th>Estimated use</th><th>Reason / scope</th></tr></thead><tbody id="legacy-comparisons"></tbody></table></div></section>
+<h4>Saved forecasts and verification revisions</h4><p class="muted">This is the complete source-window ledger at the chosen checkpoint, not profile/key-attributed spend. Selection filters are cleared for this ledger only. An unscorable latest revision is not a verified forecast. No forecast worker is running here.</p>
+<form id="legacy-forecast-form" class="toolbar"><label>Window ID <input id="legacy-forecast-window" maxlength="256" required></label><button id="legacy-forecast-load" data-legacy-action>Read saved forecasts</button><button id="legacy-forecast-next" data-legacy-action type="button" disabled>Next saved forecasts</button><span id="legacy-forecast-count" class="muted"></span></form>
+<div class="table-wrap"><table><caption>Saved predictions · estimated, not observed spend</caption><thead><tr><th>ID / estimator</th><th>Issued UTC / target</th><th>Saved prediction USD / bounds</th><th>Latest retained state / reason</th><th>Event / observation bounds</th></tr></thead><tbody id="legacy-forecasts"></tbody></table></div>
+<div class="table-wrap"><table><caption>Every retained verification revision on this page</caption><thead><tr><th>Forecast / revision</th><th>Settled UTC / state</th><th>Observed use / time</th><th>Actual USD / measurement bounds</th><th>Signed error / accuracy</th><th>Reason</th></tr></thead><tbody id="legacy-verifications"></tbody></table></div>
+<details><summary>Exact loaded pin, assumptions and ledger checkpoint</summary><pre id="legacy-pin"></pre><pre id="legacy-forecast-pin"></pre></details>
+<details><summary>Replay a saved legacy or scenario pin</summary><p class="muted">Choose the matching view above and paste its exported filter or report. For raw exhaustion history, copy the exact loaded pin above; its original export has no filter field. Replay uses only that pin, ignoring editable selection controls. A workspace pin with a page field is not a legacy pin.</p><textarea id="legacy-pin-input" rows="4" maxlength="60000" style="width:100%;color:inherit;background:#292a2d" aria-label="Saved legacy or scenario pin"></textarea><button id="legacy-replay" data-legacy-action type="button">Replay saved pin</button></details>
+</details>
 </section>
 <section id="models" hidden><h2>Model Settings</h2><p class="muted">CPA owns these settings. Changes apply to its catalogue, not a second Pacer model store.</p><label>Filter <input id="filter" type="search" placeholder="Model or provider"></label><div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>State</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
 <section id="keys" hidden><h2>Keys &amp; Groups</h2><p class="muted">Friendly names and key-replacement lineage do not change permissions or routing. Frozen dated provider-account profiles belong to Usage Quota, separately from these display groups; their pinned reports never change when labels are edited.</p><div id="key-status" class="status"></div><div class="toolbar"><button id="add-key" disabled>Add key label</button><button id="add-group" disabled>New display group</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key reference</th><th>Replacement lineage</th><th></th></tr></thead><tbody id="key-rows"></tbody></table></div><h3>Display groups</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th>Keys</th><th></th></tr></thead><tbody id="group-rows"></tbody></table></div></section>
@@ -31,6 +62,7 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
 <dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
 <dialog id="metadata-dialog"><form id="metadata-form" style="display:block"><h2 id="metadata-title">Edit label</h2><label id="metadata-name-label">Display name <input id="metadata-name" maxlength="120"></label><label id="metadata-hash-label">Key SHA-256 fingerprint <input id="metadata-hash" pattern="[a-f0-9]{64}" maxlength="64"></label><p class="muted">Never enter a key or token. Labels and lineage do not create, rotate or authorize a CPA credential.</p><fieldset id="metadata-members"><legend>Group members</legend><div id="member-options"></div></fieldset><div id="metadata-error" role="alert"></div><div class="toolbar"><button>Save metadata</button><button type="button" id="metadata-delete">Delete display group</button><button type="button" id="metadata-cancel">Cancel</button></div></form></dialog>
 <dialog id="evidence-dialog"><h2>Quota-window evidence</h2><p class="muted">Selected, shared and boundary contributions overlap; they are not additive spend. Values retain the saved price book and completion provenance.</p><div class="toolbar"><button id="evidence-json">Download JSON</button><button id="evidence-csv">Download CSV</button><button id="evidence-close">Close</button></div><pre id="evidence-body"></pre></dialog>
+<dialog id="legacy-proof-dialog"><h2>Frozen legacy proof</h2><p id="legacy-proof-summary"></p><p class="muted">Selected, shared and boundary rows overlap; do not add them together. Forecasts describe the whole source-account window.</p><div class="table-wrap"><table><thead><tr><th>Contribution</th><th>Requests</th><th>Captured cost</th><th>Missing price rows</th></tr></thead><tbody id="legacy-proof-totals"></tbody></table></div><div class="table-wrap"><table><thead><tr><th>Observation / source</th><th>Observed UTC</th><th>Observed use</th><th>Boundary evidence</th></tr></thead><tbody id="legacy-proof-observations"></tbody></table></div><div class="toolbar"><button id="legacy-proof-json" data-legacy-action>Download proof JSON</button><button id="legacy-proof-csv" data-legacy-action>Download proof CSV</button><button id="legacy-proof-close">Close</button></div><details><summary>Exact proof, price book, forecast revisions and bounds</summary><pre id="legacy-proof-body"></pre></details></dialog>
 <script>
 (() => {
   'use strict';
@@ -38,10 +70,13 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
   const pending = new Map();let allowBridge=true;
   let metadata={revision:0,keys:[],groups:[]}, metadataEdit=null;
   let reportPin=null, reportCursor='', reportProfilesLoaded=false, reportBusy=false, evidenceWindow='', historyGeneration=0;
+  let legacyEpoch=0, legacyBusy=false, legacyDefaultPin=null, legacyLoaded=null, legacyProof=null, legacyForecast=null;
+  const legacyDownloads=new Set();
   const root = '/v0/management/plugins/pacer';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
   allowed.add('GET '+root+'/history/profiles');for(const op of ['report','windows','evidence','export'])allowed.add('POST '+root+'/history/'+op);
+  allowed.add('GET '+root+'/history/legacy/status');for(const op of ['profiles','profile-proof','history','history-proof','forecasts','quota','export','quota-export'])allowed.add('POST '+root+'/history/legacy/'+op);
   function bridgeCall(path,method,body){
     if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
     return new Promise((resolve,reject)=>{
@@ -132,6 +167,152 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
   async function loadReportWindows(next){if(!reportPin)return;const id=historyGeneration;try{const data=await api(root+'/history/windows','POST',{query:{pin:reportPin},state:el('report-window-state').value,kind:el('report-window-kind').value,limit:25,...(next&&reportCursor?{cursor:reportCursor}:{})});if(id!==historyGeneration)return;el('report-windows').replaceChildren();for(const w of data.windows||[]){const n=w.normalization,range=n?.usd_per_percent;const tr=row('report-windows',[(w.label||w.account)+' / '+w.kind+' / '+w.scope,date(w.reset_ms/1000)+' / '+date(w.attribution_end_ms/1000),w.status+(w.stale?' · stale':'')+' · '+(w.valuation?.reason||'legacy completion'),historyValue(w.selected?.api_value)+' · '+historyWrites(w.selected?.api_value),range?'$'+range.low.toFixed(4)+' – $'+range.high.toFixed(4)+' / %':'Unknown · '+(n?.reason||n?.status||'no compatible sample')]);const td=document.createElement('td'),button=document.createElement('button');button.textContent='Evidence';button.onclick=()=>showWindowEvidence(w.id);td.append(button);tr.append(td)}reportCursor=data.next_cursor||'';el('report-window-next').disabled=!reportCursor;el('report-window-count').textContent=(data.windows||[]).length+' shown of '+data.total+' matching windows'}catch(error){el('report-window-count').textContent=error.message}}
   async function showWindowEvidence(windowID){const id=historyGeneration;try{const data=await api(root+'/history/evidence','POST',{query:{pin:reportPin},window_id:windowID});if(id!==historyGeneration)return;evidenceWindow=windowID;el('evidence-body').textContent=JSON.stringify(data,null,2);el('evidence-dialog').showModal()}catch(error){message(error.message,true)}}
   async function historyDownload(format,csv='',windowID=''){if(!reportPin)return;try{const data=await api(root+'/history/export','POST',{query:{pin:reportPin},format,csv,...(windowID?{window_id:windowID}:{})});if(typeof data.content!=='string'||data.filename!=='pacer-history.'+format)throw Error('Invalid report download');const blob=new Blob([data.content],{type:data.media_type+';charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=data.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(error){message(error.message,true)}}
+  const legacyDate=ms=>date(ms/1000);
+  const legacyNumber=n=>Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):'Unavailable';
+  const legacyPercent=n=>Number.isFinite(n)?legacyNumber(n)+'%':'Unavailable';
+  const legacyUSD=n=>Number.isFinite(n)?'$'+legacyNumber(n):'Unavailable';
+  const legacyCost=n=>Number.isFinite(n)?usd(n):'Unavailable';
+  const legacyMix=m=>Number.isFinite(m?.weighted_input_equivalent)?legacyUSD(m.weighted_input_equivalent/1e6):'Unavailable';
+  function legacyCurrent(ticket){return connected&&ticket.generation===generation&&ticket.epoch===legacyEpoch}
+  function legacyControls(){
+    el('legacy-advanced').querySelectorAll('[data-legacy-action]').forEach(b=>b.disabled=legacyBusy);
+    for(const id of ['legacy-json','legacy-csv'])el(id).disabled=legacyBusy||!legacyLoaded;
+    el('legacy-apply').disabled=legacyBusy||legacyLoaded?.view!=='quota';
+    el('legacy-forecast-next').disabled=legacyBusy||!legacyForecast?.cursor;
+    for(const id of ['legacy-proof-json','legacy-proof-csv'])el(id).disabled=legacyBusy||!legacyProof;
+  }
+  function clearLegacyRows(){
+    for(const id of ['legacy-profiles','legacy-windows','legacy-quota','legacy-comparisons','legacy-forecasts','legacy-verifications','legacy-proof-totals','legacy-proof-observations'])el(id).replaceChildren();
+    for(const id of ['legacy-summary','legacy-pin','legacy-forecast-pin','legacy-forecast-count','legacy-proof-summary','legacy-proof-body'])el(id).textContent='';
+    el('legacy-scenarios').hidden=true;el('legacy-proof-dialog').close();
+  }
+  function clearLegacy(){
+    legacyEpoch++;legacyBusy=false;legacyDefaultPin=null;legacyLoaded=null;legacyProof=null;legacyForecast=null;
+    clearLegacyRows();for(const id of ['legacy-form','legacy-scenario-form','legacy-forecast-form'])el(id).reset();
+    el('legacy-pin-input').value='';el('legacy-advanced').open=false;
+    while(el('legacy-profile').options.length>2)el('legacy-profile').remove(2);
+    for(const id of ['legacy-source-plan','legacy-target-plan','legacy-scenario-window'])while(el(id).options.length>1)el(id).remove(1);
+    for(const url of legacyDownloads)URL.revokeObjectURL(url);legacyDownloads.clear();
+    el('legacy-status').textContent='Load a frozen view to check historical preparation.';el('legacy-status').className='status';legacyControls();
+  }
+  async function legacyTask(work){
+    if(legacyBusy||!connected)return;
+    const ticket={generation,epoch:++legacyEpoch};legacyBusy=true;legacyControls();
+    try{await work(ticket)}catch(error){if(legacyCurrent(ticket)){el('legacy-status').textContent=error.message;el('legacy-status').className='status error'}}
+    finally{if(legacyCurrent(ticket)){legacyBusy=false;legacyControls()}}
+  }
+  async function legacyCall(op,body,ticket){
+    const data=await api(root+'/history/legacy/'+op,op==='status'?'GET':'POST',body);
+    if(!legacyCurrent(ticket))throw Error('Historical view changed');return data;
+  }
+  async function ensureLegacy(ticket){
+    if(legacyDefaultPin)return;
+    const status=await legacyCall('status',undefined,ticket);
+    if(!status.historical_ready)throw Error('This artifact needs offline re-preparation for historical views. Existing Workspace reports remain available.');
+    const profiles=await api(root+'/history/profiles');if(!legacyCurrent(ticket))throw Error('Historical view changed');
+    while(el('legacy-profile').options.length>2)el('legacy-profile').remove(2);
+    for(const p of profiles.profiles||[]){const option=document.createElement('option');option.value=p.reference;option.textContent=p.name+(p.archived?' · archived':'');el('legacy-profile').append(option)}
+    legacyDefaultPin=status.default_pin;
+  }
+  function legacySelection(){
+    const keys=el('legacy-keys').value.split(/[\s,]+/).filter(Boolean);
+    if(keys.length>100||keys.some(v=>! /^[a-f0-9]{64}$/.test(v)))throw Error('Use at most 100 SHA-256 fingerprints, never API keys');
+    const query={profile_reference:el('legacy-profile').value,model:el('legacy-model').value.trim(),key_hashes:keys};
+    for(const [id,field] of [['legacy-from','from'],['legacy-to','to']])if(el(id).value)query[field]=Date.parse(el(id).value+'T00:00:00Z');
+    if(query.to&&query.from>=query.to)throw Error('Before UTC must be later than From UTC');return query;
+  }
+  function legacyPinText(pin){return 'Frozen at '+legacyDate(pin.at)+' · events ≤ '+pin.through+' · observations ≤ '+pin.observations_through+' · forecasts/results ≤ '+pin.forecasts_through+'/'+pin.verifications_through+' · '+(pin.estimator||'quota-estimator-v2')}
+  function legacyActions(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.dataset.legacyAction='';button.disabled=legacyBusy;td.append(button)}tr.append(td)}
+  function legacyShowWindows(windows,view){
+    for(const w of windows||[]){
+      const c=w.comparison,cycle=c?.actual_cycle_projection;
+      const bounds=cycle?'Estimated final '+legacyMix(cycle.total_value_low)+' – '+legacyMix(cycle.total_value_high)+' · '+cycle.status:c?'Estimated capacity '+legacyMix(c.rounding_capacity_low)+' – '+legacyMix(c.rounding_capacity_high)+' · '+c.status:'Token estimate '+legacyNumber(w.estimated_remaining_tokens)+' remaining';
+      const tr=row('legacy-windows',[(w.label||w.account)+' / '+(w.profile_name||'source account')+' / '+w.kind+' / '+w.id,w.status+' · '+w.coverage,legacyPercent(w.last_used_percent)+' · '+legacyDate(w.last_observed_ms),legacyCost(w.cost_nano_usd)+' / '+w.requests+' requests · '+w.unpriced_requests+' unpriced',legacyDate(w.reset_ms)+' / '+legacyDate(w.attribution_end_ms),(w.projected_exhaustion_ms?'Projected exhaustion '+legacyDate(w.projected_exhaustion_ms):'Exhaustion unavailable')+' · '+bounds,'Boundary-uncertain '+w.boundary_uncertain_requests+' · '+[...(w.notes||[]),...(c?.notes||[]),...(cycle?.availability_reasons||[])].join(' · ')]);
+      legacyActions(tr,[['Proof',()=>loadLegacyProof(view==='profiles'?'profile-proof':'history-proof',w.id)],['Saved forecasts',()=>loadLegacyForecasts(w.id,false)]]);
+    }
+  }
+  function legacyShowQuota(data){
+    el('legacy-scenarios').hidden=false;
+    for(const id of ['legacy-source-plan','legacy-target-plan','legacy-scenario-window'])while(el(id).options.length>1)el(id).remove(1);
+    for(const tier of data.tiers||[])for(const id of ['legacy-source-plan','legacy-target-plan']){const option=document.createElement('option');option.value=tier.id;option.textContent=tier.name+' · '+tier.provider;el(id).append(option)}
+    for(const w of data.windows||[]){
+      const option=document.createElement('option');option.value=w.id;option.textContent=(w.label||w.account)+' / '+w.kind+' / '+w.id;el('legacy-scenario-window').append(option);
+      const a=w.attribution||{};
+      const tr=row('legacy-quota',[(w.label||w.account)+' / '+w.kind+' / '+w.id,legacyCost(w.selected?.cost_nano_usd)+' / '+(w.selected?.unpriced??'?')+' unpriced',legacyPercent(w.used_percent)+' · '+legacyDate(w.last_observed_ms)+' · '+w.status+(w.stale?' · stale':''),a.status+' · '+legacyPercent(a.percent)+' · '+(a.reason||'')+' · unassigned observed delta '+legacyPercent(a.unattributed_delta),(w.source_plan||'Unassigned')+' · '+w.plan_basis]);
+      legacyActions(tr,[['Saved forecasts',()=>loadLegacyForecasts(w.id,false)]]);
+      for(const c of w.comparisons||[])row('legacy-comparisons',[w.id+' / '+c.tier.name,legacyUSD(c.tier.monthly_usd)+' / '+legacyDate(c.tier.reviewed_ms),c.status,legacyNumber(c.capacity_ratio),legacyPercent(c.percent),c.reason+' · scope '+c.tier.scope]);
+    }
+    el('legacy-scenario-window').value=data.filter.window||'';el('legacy-source-plan').value=data.filter.source_plan||'';el('legacy-target-plan').value=data.filter.target_plan||'';el('legacy-ratio').value=data.filter.capacity_ratio||'';
+  }
+  function legacyShow(data,view,query,kind){
+    const pin=data.filter||query.pin;
+    legacyLoaded={view,query:{pin},kind:kind||''};legacyProof=null;legacyForecast=null;clearLegacyRows();
+    el('legacy-status').className='status';el('legacy-status').textContent=legacyPinText(pin)+'. Historical only; current native usage is separate.';
+    el('legacy-pin').textContent=JSON.stringify({view,pin,kind:kind||undefined,normalization:data.normalization,config:data.config,policy:'Captured prices and original estimator semantics; v3 assumed-write valuation is not applied by these legacy views.'},null,2);
+    const t=data.totals||{};
+    if(view==='history')el('legacy-summary').textContent='Source-account windows at '+legacyDate(data.generated_at_ms)+' · event/observation checkpoint '+data.through_event_id+'/'+data.through_observation_row+'. Pending/backfill counts describe the frozen source, not an active ingestion worker.';
+    else el('legacy-summary').textContent=(t.requests??0)+' requests · '+(t.failed??0)+' failed · captured '+legacyCost(t.cost_nano_usd)+' · '+(t.unpriced??0)+' missing-price requests. '+(view==='quota'?'Deduplicated matched-window requests: '+(data.matched_totals?.requests??0)+'.':'Legacy bindings use first matching ownership; shared provider meters are not additive profile spend.');
+    if(view==='profiles'){for(const b of data.by_profile||[]){const name=data.config?.profiles?.find(p=>p.id===b.key)?.name||b.key;row('legacy-profiles',[name,b.requests+' / '+b.failed,legacyCost(b.cost_nano_usd),b.unpriced])}legacyShowWindows(data.windows,view)}
+    else if(view==='history')legacyShowWindows(data.windows,view);else legacyShowQuota(data);
+  }
+  function loadLegacy(replay,replayKind=''){return legacyTask(async ticket=>{
+    const view=el('legacy-view').value;await ensureLegacy(ticket);
+    let query=replay?{pin:replay}:{selection:legacySelection()},kind='';
+    if(view==='history'){
+      if(query.selection&&(query.selection.profile_reference||query.selection.model))throw Error('Exhaustion history supports dates and keys only. Choose All history and clear Model.');
+      kind=replay?replayKind:el('legacy-kind').value;
+      // Raw history has no returned filter: anchor a complete pin before calling.
+      if(!replay){const s=query.selection;query={pin:{...legacyDefaultPin,from:s.from||0,to:s.to||0,api_key:s.key_hashes.length?'keys:'+s.key_hashes.join(','):''}}}
+    }else if(view==='quota'&&!replay)query={...query,kind:el('legacy-kind').value,period:el('legacy-period').value,basis:el('legacy-basis').value,gateway_only:el('legacy-gateway').checked};
+    const data=await legacyCall(view,{query,...(view==='history'?{kind}:{})},ticket);legacyShow(data,view,query,kind);
+  })}
+  function applyLegacyScenario(){return legacyTask(async ticket=>{
+    if(legacyLoaded?.view!=='quota')return;
+    const windowID=el('legacy-scenario-window').value,raw=el('legacy-ratio').value,ratio=raw===''?0:Number(raw);
+    if(!windowID||!Number.isFinite(ratio)||ratio<0||ratio>10000)throw Error('Select one window and a finite ratio from 0 to 10,000.');
+    if(ratio>0&&!el('legacy-target-plan').value)throw Error('An assumed ratio requires a target tier.');
+    const query={pin:{...legacyLoaded.query.pin,window:windowID,source_plan:el('legacy-source-plan').value,target_plan:el('legacy-target-plan').value,capacity_ratio:ratio,gateway_only:el('legacy-gateway').checked}};
+    const data=await legacyCall('quota',{query},ticket);legacyShow(data,'quota',query,'');
+  })}
+  function legacyLedgerPin(){
+    const p=legacyLoaded?.query.pin||legacyDefaultPin;
+    // Copy only source ProfileFilter fields; a quota pin has additional fields.
+    const pin={};for(const k of ['at','through','observations_through','forecasts_through','verifications_through','revision','estimator','valuation_rule','token_evidence_through'])if(p[k]!==undefined)pin[k]=p[k];
+    return {...pin,profile:'',account:'',model:'',api_key:'',from:0,to:0};
+  }
+  function loadLegacyForecasts(windowID,next){return legacyTask(async ticket=>{
+    await ensureLegacy(ticket);
+    const request=next?{...legacyForecast.request,cursor:legacyForecast.cursor}:{query:{pin:legacyLedgerPin()},window_id:windowID,limit:25};
+    const page=await legacyCall('forecasts',request,ticket);
+    legacyForecast={request:{query:request.query,window_id:request.window_id,limit:request.limit},cursor:page.next_cursor||''};
+    el('legacy-forecast-window').value=request.window_id;el('legacy-forecasts').replaceChildren();el('legacy-verifications').replaceChildren();
+    el('legacy-forecast-count').textContent=(page.forecasts||[]).length+' shown / '+page.total+' saved predictions';
+    el('legacy-forecast-pin').textContent=JSON.stringify({window_id:request.window_id,pin:page.pin,scope:'Full source-window ledger; no selection attribution'},null,2);
+    for(const item of page.forecasts||[]){const f=item.forecast,results=item.results||[],latest=results[results.length-1];
+      row('legacy-forecasts',[f.id+' / '+f.estimator_id,legacyDate(f.issued_ms)+' / '+legacyPercent(f.target_percent)+' · '+(f.target_kind||'forward_incremental_api_value'),legacyUSD(f.predicted_incremental_usd)+' ['+legacyUSD(f.predicted_low_usd)+' – '+legacyUSD(f.predicted_high_usd)+']',latest?latest.state+' · '+(latest.reason||'No additional reason'):'No retained verification',f.through_event_id+' / '+f.through_observation_row]);
+      for(const v of results)row('legacy-verifications',[f.id+' / '+v.id,legacyDate(v.settled_ms)+' / '+v.state,legacyPercent(v.actual_percent)+' / '+legacyDate(v.observed_ms),legacyUSD(v.actual_usd)+' ['+legacyUSD(v.actual_low_usd)+' – '+legacyUSD(v.actual_high_usd)+']',legacyPercent(v.signed_error_percent)+' / '+legacyPercent(v.accuracy_percent),v.reason||'No additional reason']);
+    }
+    el('legacy-status').className='status';el('legacy-status').textContent=legacyPinText(page.pin)+'. Saved source-window ledger; no new predictions or verification.';
+  })}
+  function loadLegacyProof(view,windowID){return legacyTask(async ticket=>{
+    if(!legacyLoaded)return;let query=legacyLoaded.query;
+    if(view==='history-proof')query={pin:{...query.pin,from:0,to:0,profile:'',account:'',model:''}};
+    const data=await legacyCall(view,{query,window_id:windowID},ticket);legacyProof={view,query,window_id:windowID};
+    el('legacy-proof-summary').textContent=windowID+' · '+legacyPinText(query.pin)+' · selected reconciled: '+data.reconciled+' · shared reconciled: '+data.shared_reconciled;
+    el('legacy-proof-totals').replaceChildren();el('legacy-proof-observations').replaceChildren();
+    for(const [name,events] of [['Selected',data.events||[]],['Shared',data.shared_events||[]],['Boundary',data.boundary_events||[]]])row('legacy-proof-totals',[name,events.length,legacyCost(events.reduce((n,e)=>n+(e.cost_nano_usd??0),0)),events.filter(e=>!Number.isFinite(e.cost_nano_usd)).length]);
+    for(const o of data.observations||[])row('legacy-proof-observations',[o.id+' / '+(o.source||'Unknown'),legacyDate(o.observed_at_ms),legacyPercent(o.used_percent),o.boundary||'Unknown']);
+    el('legacy-proof-body').textContent=JSON.stringify(data,null,2);el('legacy-proof-dialog').showModal();
+  })}
+  function legacyDownload(format,proof=false){return legacyTask(async ticket=>{
+    const state=proof?legacyProof:legacyLoaded;if(!state)return;
+    const quota=state.view==='quota',op=quota?'quota-export':'export';
+    const data=await legacyCall(op,{query:state.query,format,...(!quota?{view:state.view,...(state.window_id?{window_id:state.window_id}:{}),...(state.kind?{kind:state.kind}:{})}:{})},ticket);
+    if(typeof data.content!=='string'||data.filename!=='pacer-legacy-'+state.view+'.'+format||data.media_type!==(format==='csv'?'text/csv':'application/json'))throw Error('Invalid historical download');
+    const url=URL.createObjectURL(new Blob([data.content],{type:data.media_type+';charset=utf-8'}));legacyDownloads.add(url);
+    const a=document.createElement('a');a.href=url;a.download=data.filename;a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);legacyDownloads.delete(url)},1000);
+  })}
   async function refresh(){message('');try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
@@ -139,7 +320,7 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
+  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
@@ -172,6 +353,11 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
   el('report-window-load').onclick=()=>loadReportWindows(false);el('report-window-next').onclick=()=>loadReportWindows(true);
   el('report-request-prev').onclick=()=>loadReport({pin:{...reportPin,page:Math.max(0,(reportPin?.page||0)-1)}});el('report-request-next').onclick=()=>loadReport({pin:{...reportPin,page:(reportPin?.page||0)+1}});
   el('evidence-json').onclick=()=>historyDownload('json','',evidenceWindow);el('evidence-csv').onclick=()=>historyDownload('csv','',evidenceWindow);el('evidence-close').onclick=()=>el('evidence-dialog').close();
+  el('legacy-form').onsubmit=event=>{event.preventDefault();loadLegacy()};
+  el('legacy-replay').onclick=()=>{try{const saved=JSON.parse(el('legacy-pin-input').value);loadLegacy(saved.filter||saved.pin||saved,saved.pin?(saved.kind||''):'')}catch{el('legacy-status').textContent='Invalid saved legacy JSON pin'}};
+  el('legacy-scenario-form').onsubmit=event=>{event.preventDefault();applyLegacyScenario()};
+  el('legacy-forecast-form').onsubmit=event=>{event.preventDefault();loadLegacyForecasts(el('legacy-forecast-window').value,false)};el('legacy-forecast-next').onclick=()=>{if(legacyForecast?.cursor)loadLegacyForecasts('',true)};
+  el('legacy-json').onclick=()=>legacyDownload('json');el('legacy-csv').onclick=()=>legacyDownload('csv');el('legacy-proof-json').onclick=()=>legacyDownload('json',true);el('legacy-proof-csv').onclick=()=>legacyDownload('csv',true);el('legacy-proof-close').onclick=()=>el('legacy-proof-dialog').close();
   if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
 })();
 </script></body></html>

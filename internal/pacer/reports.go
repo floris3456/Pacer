@@ -21,7 +21,7 @@ func reportRoutes() []map[string]string {
 	for _, name := range []string{"report", "windows", "evidence", "export"} {
 		out = append(out, map[string]string{"Method": "POST", "Path": "/plugins/pacer/history/" + name})
 	}
-	return out
+	return append(out, legacyReportRoutes()...)
 }
 
 type reportRequest struct {
@@ -50,6 +50,8 @@ func (b *boundedReport) Write(p []byte) (int, error) {
 func reportError(err error) pluginapi.ManagementResponse {
 	status, message := 503, "Frozen report evidence is unavailable"
 	switch {
+	case errors.Is(err, historyreports.ErrNotPrepared):
+		status, message = 409, "Historical views require offline re-preparation of the frozen report artifact"
 	case errors.Is(err, historyreports.ErrInput), errors.Is(err, historyreports.ErrBoundary):
 		status, message = 400, "Invalid report filter or pin outside the frozen checkpoint"
 	case errors.Is(err, historyreports.ErrCursor):
@@ -75,6 +77,9 @@ func boundedReportResponse(value any) pluginapi.ManagementResponse {
 // Only exact CPA-authenticated management paths reach this function. Paths and
 // preparation are operator-only configuration; no request can materialize a DB.
 func (p *Plugin) reportsAPI(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if strings.HasPrefix(req.Path, legacyHistoryRoot) {
+		return p.legacyReportsAPI(req)
+	}
 	op := strings.TrimPrefix(req.Path, historyRoot)
 	if !strings.HasPrefix(req.Path, historyRoot) || !(req.Method == "GET" && op == "profiles" || req.Method == "POST" && (op == "report" || op == "windows" || op == "evidence" || op == "export")) {
 		return resource(404, map[string]string{"error": "not_found"})
@@ -126,6 +131,46 @@ func (p *Plugin) reportsAPI(req pluginapi.ManagementRequest) pluginapi.Managemen
 			return reportError(historyreports.ErrInput)
 		}
 	}
+	return p.withReportReader(func(ctx context.Context, reader *historyreports.Reader) pluginapi.ManagementResponse {
+		var value any
+		var err error
+		switch op {
+		case "profiles":
+			var profiles historyreports.ProfileList
+			profiles, err = reader.Profiles(ctx, revision)
+			value = map[string]any{"profiles": profiles.Profiles, "source_revision": profiles.Revision, "default_pin": reader.DefaultPin(), "coverage": "Frozen checkpoint only. Current native usage is separate; browser integration and CPAMP retirement remain unverified."}
+		case "report":
+			value, err = reader.Report(ctx, body.Query)
+		case "windows":
+			value, err = reader.ListWindows(ctx, historyreports.WindowQuery{Query: body.Query, Kind: body.Kind, State: body.State, Limit: body.Limit, Cursor: body.Cursor})
+		case "evidence":
+			value, err = reader.Evidence(ctx, body.Query, body.WindowID)
+		case "export":
+			o := historyreports.ExportOptions{WindowID: body.WindowID, CSV: body.CSV, Kind: body.Kind, ProfileReferences: body.ProfileReferences}
+			var output boundedReport
+			media := "application/json"
+			switch body.Format {
+			case "json":
+				err = reader.ExportJSON(ctx, body.Query, o, &output)
+			case "csv":
+				media = "text/csv"
+				err = reader.ExportCSV(ctx, body.Query, o, &output)
+			default:
+				err = historyreports.ErrInput
+			}
+			// A JSON envelope works identically through the credential-free iframe
+			// bridge. Downloaded content is the exact domain writer output bytes.
+			value = map[string]string{"filename": "pacer-history." + body.Format, "media_type": media, "content": output.String()}
+		}
+		if err != nil {
+			return reportError(err)
+		}
+		return boundedReportResponse(value)
+	})
+}
+
+// Workspace and legacy routes share admission and the same immutable reader.
+func (p *Plugin) withReportReader(call func(context.Context, *historyreports.Reader) pluginapi.ManagementResponse) pluginapi.ManagementResponse {
 	p.mu.Lock()
 	reader, gate := p.reports, p.reportSlots
 	p.mu.Unlock()
@@ -142,38 +187,5 @@ func (p *Plugin) reportsAPI(req pluginapi.ManagementRequest) pluginapi.Managemen
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var value any
-	var err error
-	switch op {
-	case "profiles":
-		var profiles historyreports.ProfileList
-		profiles, err = reader.Profiles(ctx, revision)
-		value = map[string]any{"profiles": profiles.Profiles, "source_revision": profiles.Revision, "default_pin": reader.DefaultPin(), "coverage": "Frozen checkpoint only. Current native usage is separate; CPAMP retirement and unported legacy views remain unverified."}
-	case "report":
-		value, err = reader.Report(ctx, body.Query)
-	case "windows":
-		value, err = reader.ListWindows(ctx, historyreports.WindowQuery{Query: body.Query, Kind: body.Kind, State: body.State, Limit: body.Limit, Cursor: body.Cursor})
-	case "evidence":
-		value, err = reader.Evidence(ctx, body.Query, body.WindowID)
-	case "export":
-		o := historyreports.ExportOptions{WindowID: body.WindowID, CSV: body.CSV, Kind: body.Kind, ProfileReferences: body.ProfileReferences}
-		var output boundedReport
-		media := "application/json"
-		switch body.Format {
-		case "json":
-			err = reader.ExportJSON(ctx, body.Query, o, &output)
-		case "csv":
-			media = "text/csv"
-			err = reader.ExportCSV(ctx, body.Query, o, &output)
-		default:
-			err = historyreports.ErrInput
-		}
-		// A JSON envelope works identically through the credential-free iframe
-		// bridge. Downloaded content is the exact domain writer output bytes.
-		value = map[string]string{"filename": "pacer-history." + body.Format, "media_type": media, "content": output.String()}
-	}
-	if err != nil {
-		return reportError(err)
-	}
-	return boundedReportResponse(value)
+	return call(ctx, reader)
 }

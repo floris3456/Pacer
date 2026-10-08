@@ -20,10 +20,14 @@ import (
 )
 
 func reportFixture(t *testing.T) *historyreports.Reader {
+	return reportFixtureFrom(t, "golden/fixture.sql.gz", 40, 18)
+}
+
+func reportFixtureFrom(t *testing.T, fixture string, events, observations int64) *historyreports.Reader {
 	t.Helper()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "frozen.sqlite")
-	f, err := os.Open("../historyreports/testdata/golden/fixture.sql.gz")
+	f, err := os.Open("../historyreports/testdata/" + fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +64,7 @@ func reportFixture(t *testing.T) *historyreports.Reader {
 		t.Fatal(err)
 	}
 	defer archive.Close()
-	boundary := history.Boundary{Schema: "cpamp-usage-v3", SnapshotSHA256: hex.EncodeToString(digest[:]), LineageSHA256: strings.Repeat("a", 64), CheckpointSHA256: strings.Repeat("c", 64), HMS: 1790812800000, EventsThrough: 40, ObservationsThrough: 18}
+	boundary := history.Boundary{Schema: "cpamp-usage-v3", SnapshotSHA256: hex.EncodeToString(digest[:]), LineageSHA256: strings.Repeat("a", 64), CheckpointSHA256: strings.Repeat("c", 64), HMS: 1790812800000, EventsThrough: events, ObservationsThrough: observations}
 	progress, err := archive.Import(context.Background(), history.ImportOptions{SourcePath: source, Boundary: boundary, BatchSize: 25})
 	if err != nil || !progress.Complete {
 		t.Fatal(progress, err)

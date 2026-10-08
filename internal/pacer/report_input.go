@@ -11,13 +11,8 @@ import (
 // Saved pins are authoritative input, not best-effort options. Unlike ordinary
 // encoding/json decoding, this refuses duplicates, case aliases and scalar nulls.
 func decodeReport(raw []byte, op string, out *reportRequest) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.UseNumber()
-	if err := reportInputValue(d, reflect.TypeOf(*out), 0); err != nil {
+	if err := decodeStrictReport(raw, out); err != nil {
 		return err
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return io.ErrUnexpectedEOF
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
@@ -40,6 +35,20 @@ func decodeReport(raw []byte, op string, out *reportRequest) error {
 		if !allowed[key] {
 			return io.ErrUnexpectedEOF
 		}
+	}
+	return nil
+}
+
+// Each legacy operation supplies its own request type so even an empty field
+// belonging to a different operation is rejected by the same strict scanner.
+func decodeStrictReport(raw []byte, out any) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	if err := reportInputValue(d, reflect.TypeOf(out).Elem(), 0); err != nil {
+		return err
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return io.ErrUnexpectedEOF
 	}
 	return json.Unmarshal(raw, out)
 }
