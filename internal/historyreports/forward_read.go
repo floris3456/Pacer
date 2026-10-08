@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -63,7 +64,22 @@ func (s *ForwardStore) SealForward(ctx context.Context, q ForwardSeal) (ForwardP
 		q.Provenance.Reasons = append(q.Provenance.Reasons, "source_proof_absent")
 	}
 	q.Provenance.Reasons = forwardUnique(q.Provenance.Reasons)
-	m := forwardManifest{Version: ForwardVersion, Converter: forwardQualifiedConverterVersion, Head: q.Head, BaseDigest: q.BaseDigest, BookDigest: q.BookDigest, OriginDigest: q.OriginDigest, ProfileRevision: q.ProfileRevision, ProfileDigest: pd, At: q.At.UTC(), Provenance: q.Provenance}
+	// A store with a recorded cutover seals its base only with that cutover's
+	// origins, and copies H/N0 into the manifest. Other stores are unchanged.
+	var cutover *ForwardCutover
+	if q.BaseDigest != "" {
+		rec, e := s.preparedCutover(ctx)
+		if e != nil {
+			return ForwardPin{}, e
+		}
+		if rec != nil {
+			if rec.BaseDigest != q.BaseDigest || rec.OriginDigest != q.OriginDigest {
+				return ForwardPin{}, ErrForwardConflict
+			}
+			cutover = &rec.Cutover
+		}
+	}
+	m := forwardManifest{Version: ForwardVersion, Converter: forwardQualifiedConverterVersion, Head: q.Head, BaseDigest: q.BaseDigest, BookDigest: q.BookDigest, OriginDigest: q.OriginDigest, ProfileRevision: q.ProfileRevision, ProfileDigest: pd, At: q.At.UTC(), Provenance: q.Provenance, Cutover: cutover}
 	body, err := json.Marshal(m)
 	if err != nil {
 		return ForwardPin{}, ErrInput
@@ -155,6 +171,9 @@ func (s *ForwardStore) forwardContext(ctx context.Context, p ForwardPin, staging
 		return c, pin, ErrForwardPending
 	}
 	if hash(string(raw)) != p.Generation || json.Unmarshal(raw, &c.manifest) != nil || c.manifest.Version != ForwardVersion || (c.manifest.Converter != ForwardConverterVersion && c.manifest.Converter != forwardQualifiedConverterVersion) {
+		return c, pin, ErrSource
+	}
+	if cut := c.manifest.Cutover; cut != nil && (c.manifest.BaseDigest == "" || c.manifest.OriginDigest == "" || cut.HMS <= 0 || cut.HMS > math.MaxInt64/int64(time.Millisecond) || cut.N0MS < 0 || cut.N0MS > math.MaxInt64/int64(time.Millisecond)) {
 		return c, pin, ErrSource
 	}
 	f := &pin.Filter
@@ -254,6 +273,7 @@ type forwardJoinedRow struct {
 	native, baseline  []byte
 	proof             sql.NullString
 	qualifierConflict bool
+	unlinked          bool
 }
 
 const forwardQualifies = `n.account=l.account AND n.provider=l.provider AND n.credential=l.credential AND n.started>=l.start_ns AND (l.end_ns=0 OR n.started<l.end_ns)`
@@ -267,6 +287,24 @@ const forwardBatchSQL = `SELECT n.sort_key AS key,n.started AS started,n.body AS
  FROM forward_base_events b LEFT JOIN forward_links l ON l.origin=? AND l.baseline=b.id
  WHERE ? AND (NOT ? OR NOT EXISTS(SELECT 1 FROM forward_native n WHERE n.physical=l.physical AND n.sequence<=? AND ` + forwardQualifies + `))
  AND (b.started,b.id)>(?,?) AND b.started<?
+ ORDER BY started,key LIMIT 250`
+
+// Combined domain of a cutover manifest: baseline started < H, native started
+// ≥ N0. A qualifying linked native ≥ N0 replaces its baseline (< H). Any other
+// event inside [N0,H) is unlinked: counted once on its own side and labelled.
+const forwardCutoverBatchSQL = `SELECT n.sort_key AS key,n.started AS started,n.body AS native_body,CASE WHEN ` + forwardQualifies + ` THEN b.body END AS base_body,l.physical AS proof,
+ (l.physical IS NOT NULL AND NOT (` + forwardQualifies + `)) AS qualifier_conflict,
+ ((b.id IS NULL OR NOT (` + forwardQualifies + `)) AND n.started<:h) AS unlinked
+ FROM forward_native n LEFT JOIN forward_links l ON l.origin=:origin AND l.physical=n.physical LEFT JOIN forward_base_events b ON b.id=l.baseline AND b.started<:h
+ WHERE n.sequence<=:through AND n.revision=(SELECT max(x.revision) FROM forward_native x WHERE x.event_id=n.event_id AND x.sequence<=:through)
+ AND (n.started,n.sort_key)>(:native_after,:native_after_id) AND n.started<:to
+ UNION ALL
+ SELECT b.id AS key,b.started,NULL AS native_body,b.body AS base_body,l.physical AS proof,
+ EXISTS(SELECT 1 FROM forward_native n WHERE n.physical=l.physical AND n.sequence<=:through AND n.started>=:n0 AND NOT (` + forwardQualifies + `)) AS qualifier_conflict,
+ (b.started>=:n0) AS unlinked
+ FROM forward_base_events b LEFT JOIN forward_links l ON l.origin=:origin AND l.baseline=b.id
+ WHERE NOT EXISTS(SELECT 1 FROM forward_native n WHERE n.physical=l.physical AND n.sequence<=:through AND n.started>=:n0 AND ` + forwardQualifies + `)
+ AND (b.started,b.id)>(:after,:after_id) AND b.started<:base_to
  ORDER BY started,key LIMIT 250`
 
 func (s *ForwardStore) readForwardBatch(ctx context.Context, c forwardReadContext, p ForwardPin, afterTime int64, afterID string) ([]forwardJoinedRow, error) {
@@ -283,12 +321,30 @@ func (s *ForwardStore) readForwardBatch(ctx context.Context, c forwardReadContex
 	if !p.Filter.To.IsZero() {
 		to = min(to, p.Filter.To.UnixNano())
 	}
+	baseTo := to
+	cut := c.manifest.Cutover
+	if cut != nil {
+		baseTo = min(to, cut.HMS*int64(time.Millisecond))
+	}
+	query := forwardBatchSQL
+	args := []any{linkOrigin, includeNative, c.manifest.Head.Through, c.manifest.Head.Through, afterTime, afterID, to, includeNative, c.manifest.Head.Through, linkOrigin, includeBase, includeNative, c.manifest.Head.Through, afterTime, afterID, baseTo}
+	labelled := cut != nil && includeNative && includeBase
+	if labelled {
+		n0 := cut.N0MS * int64(time.Millisecond)
+		nativeAfter, nativeAfterID := afterTime, afterID
+		if nativeAfter < n0 {
+			// Keys are non-empty, so (started,key) > (N0,"") means started ≥ N0.
+			nativeAfter, nativeAfterID = n0, ""
+		}
+		query = forwardCutoverBatchSQL
+		args = []any{sql.Named("origin", linkOrigin), sql.Named("through", c.manifest.Head.Through), sql.Named("h", cut.HMS*int64(time.Millisecond)), sql.Named("n0", n0), sql.Named("native_after", nativeAfter), sql.Named("native_after_id", nativeAfterID), sql.Named("after", afterTime), sql.Named("after_id", afterID), sql.Named("to", to), sql.Named("base_to", baseTo)}
+	}
 	tx, err := s.reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, forwardBatchSQL, linkOrigin, includeNative, c.manifest.Head.Through, c.manifest.Head.Through, afterTime, afterID, to, includeNative, c.manifest.Head.Through, linkOrigin, includeBase, includeNative, c.manifest.Head.Through, afterTime, afterID, to)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +356,11 @@ func (s *ForwardStore) readForwardBatch(ctx context.Context, c forwardReadContex
 			return nil, err
 		}
 		var r forwardJoinedRow
-		if err = rows.Scan(&r.id, &r.at, &r.native, &r.baseline, &r.proof, &r.qualifierConflict); err != nil {
+		dest := []any{&r.id, &r.at, &r.native, &r.baseline, &r.proof, &r.qualifierConflict}
+		if labelled {
+			dest = append(dest, &r.unlinked)
+		}
+		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		n := len(r.native) + len(r.baseline)
@@ -348,6 +408,9 @@ func (s *ForwardStore) walkForward(ctx context.Context, c forwardReadContext, p 
 			afterTime, afterID = at, id
 			var n, b ForwardEvent
 			if len(nb) > 0 && json.Unmarshal(nb, &n) != nil || len(bb) > 0 && json.Unmarshal(bb, &b) != nil {
+				return ErrSource
+			}
+			if cut := c.manifest.Cutover; cut != nil && len(bb) > 0 && b.Event.ID > cut.EventsThrough {
 				return ErrSource
 			}
 			if len(bb) > 0 && c.manifest.Converter == forwardQualifiedConverterVersion {
@@ -439,6 +502,12 @@ func (s *ForwardStore) walkForward(ctx context.Context, c forwardReadContext, p 
 			}
 			out.CoverageReasons = forwardCoverage(c, e)
 			out.CapturedCost, out.CapturedCostBasis = captured, costBasis
+			if row.unlinked {
+				out.DedupUnverified = "unlinked_baseline"
+				if len(nb) > 0 {
+					out.DedupUnverified = "unlinked_native"
+				}
+			}
 			stop, err := visit(out, members, time.Unix(0, at).UTC())
 			if err != nil {
 				return err
@@ -548,6 +617,16 @@ func addForwardTotals(t *ForwardTotals, e ForwardEvidence) error {
 	for _, reason := range e.CoverageReasons {
 		t.CoverageReasons[reason]++
 	}
+	if e.DedupUnverified != "" {
+		if t.DedupUnverified == nil {
+			t.DedupUnverified = &ForwardDedup{}
+		}
+		if e.DedupUnverified == "unlinked_native" {
+			t.DedupUnverified.UnlinkedNative++
+		} else {
+			t.DedupUnverified.UnlinkedBaseline++
+		}
+	}
 	if e.IdentityResolved && e.Value != nil {
 		if err := addForwardValue(&t.ValuedSubset, *e.Value); err != nil {
 			return err
@@ -649,6 +728,11 @@ func (s *ForwardStore) forwardReport(ctx context.Context, p ForwardPin, staging 
 	for _, m := range []map[string]ForwardTotals{r.Daily, r.Models, r.Accounts, r.Profiles} {
 		for k, v := range m {
 			m[k] = finishForwardTotals(v)
+		}
+	}
+	if c.manifest.Cutover != nil {
+		if r.Cutover, err = s.forwardCutoverStatus(ctx, c.manifest); err != nil {
+			return ForwardReport{}, err
 		}
 	}
 	encoded, e := json.Marshal(r)

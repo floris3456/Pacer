@@ -111,6 +111,10 @@ func (s *ForwardStore) ProfilesAt(ctx context.Context, revision int64) (c Forwar
 // SeedForwardProfiles preserves legacy bindings/ordering and original revision
 // inside the copied configuration, assigning one local immutable branch revision.
 func (s *ForwardStore) SeedForwardProfiles(ctx context.Context, c ForwardProfileConfig) (int64, error) {
+	return s.seedForwardProfiles(ctx, c, nil)
+}
+
+func (s *ForwardStore) seedForwardProfiles(ctx context.Context, c ForwardProfileConfig, seed *ForwardProfileSeed) (int64, error) {
 	if len(c.Profiles) > 1000 || len(c.Bindings) > 10000 {
 		return 0, ErrLimit
 	}
@@ -124,6 +128,11 @@ func (s *ForwardStore) SeedForwardProfiles(ctx context.Context, c ForwardProfile
 		}
 		if _, e := forwardObject(tx, ctx, "profiles", "1", forwardStoredProfiles{c}); e != nil {
 			return e
+		}
+		if seed != nil {
+			if _, e := forwardObject(tx, ctx, "profile_seed", "1", *seed); e != nil {
+				return e
+			}
 		}
 		_, e := tx.ExecContext(ctx, `UPDATE forward_meta SET profile_revision=1 WHERE id=1`)
 		return e
@@ -150,6 +159,11 @@ func (s *ForwardStore) EditProfiles(ctx context.Context, expected int64, edit Fo
 		}
 		if current == math.MaxInt64 {
 			return ErrLimit
+		}
+		if frozen, e := forwardFrozenProfileIDs(ctx, tx); e != nil {
+			return e
+		} else if frozen[edit.ArchiveID] || frozen[edit.Profile.ID] {
+			return ErrForwardFrozenProfile
 		}
 		var raw []byte
 		if e := tx.QueryRowContext(ctx, `SELECT body FROM forward_objects WHERE kind='profiles' AND name=?`, strconv.FormatInt(current, 10)).Scan(&raw); e != nil {

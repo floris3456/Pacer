@@ -237,6 +237,7 @@ func TestForwardContinuityOwnershipFrozenProfiles(t *testing.T) {
 		pin, _ := json.Marshal(f.r.DefaultPin())
 		return append(out.Bytes(), pin...)
 	}
+	frozenExports() // the first CPAMP export fills its in-process cache, then reports cache state
 	fileBefore, exportsBefore := frozenFile(), frozenExports()
 	if _, err = f.s.PrepareForwardCutover(ctx, f.origin, false); err != nil {
 		t.Error(err)
@@ -464,6 +465,32 @@ func TestForwardContinuityCoverageGapDeclaration(t *testing.T) {
 	}
 	if _, ok := continuityEvidence(t, f.s, pin, "native-event:"+gapNative.EventID); ok {
 		t.Error("native inside the gap entered the combined domain")
+	}
+}
+
+func TestForwardContinuityReadPlanUsesBoundedKeysets(t *testing.T) {
+	s, _ := forwardLedger(t)
+	args := []any{sql.Named("origin", "origin"), sql.Named("through", 100001), sql.Named("h", 1000000), sql.Named("n0", 10), sql.Named("native_after", 10), sql.Named("native_after_id", ""), sql.Named("after", 1), sql.Named("after_id", "last-id"), sql.Named("to", 1000000), sql.Named("base_to", 1000000)}
+	rows, err := s.reader.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+forwardCutoverBatchSQL, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	plan := ""
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(plan)
+	if bytes.Contains([]byte(plan), []byte("USE TEMP B-TREE")) || !bytes.Contains([]byte(plan), []byte("forward_native_page")) || !bytes.Contains([]byte(plan), []byte("forward_base_page")) {
+		t.Fatal("cutover batch query must seek both ordered streams without a whole-ledger sort")
 	}
 }
 
