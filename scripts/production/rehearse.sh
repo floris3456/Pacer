@@ -42,6 +42,7 @@ CPA=http://pacer-rehearsal-cpa.orb.local:8317
 PY=$RH/venv/bin/python
 FAILED=0
 CACHE_BEFORE=$RH/buildcache-before.txt
+CACHE_LEFT=
 
 mkdir -p "$RH" "$EVID"
 LOG=$EVID/rehearsal.log
@@ -64,9 +65,12 @@ prune_build_cache() {  # only cache records that did not exist before this sessi
   docker buildx du --verbose 2>/dev/null | awk '/^ID:/{print $2}' | sort >"$RH/buildcache-after.txt"
   local id n=0
   for id in $(comm -13 "$CACHE_BEFORE" "$RH/buildcache-after.txt"); do
-    docker buildx prune -f --filter "id=$id" >/dev/null 2>&1 && n=$((n + 1))
+    # --all is needed for records shared with the image store; the id filter keeps it to this record.
+    docker buildx prune -f --all --filter "id=$id" >/dev/null 2>&1 && n=$((n + 1))
   done
-  log "build cache: pruned $n record(s) created by this session"
+  docker buildx du --verbose 2>/dev/null | awk '/^ID:/{print $2}' | sort >"$RH/buildcache-after.txt"
+  CACHE_LEFT=$(comm -13 "$CACHE_BEFORE" "$RH/buildcache-after.txt" | tr '\n' ' ')
+  log "build cache: pruned $n record(s) created by this session; remaining new: ${CACHE_LEFT:-none}"
 }
 
 leftovers() {
@@ -86,11 +90,11 @@ cleanup() {
   teardown
   prune_build_cache
   local left
-  left=$(leftovers)
+  left=$(leftovers)${CACHE_LEFT:+ build-cache:$CACHE_LEFT}
   if [[ -n $left ]]; then
     log "LEFTOVER Docker objects: $left"
   else
-    log "cleanup: no pacer-rehearsal-* containers, networks, images or volumes remain"
+    log "cleanup: no pacer-rehearsal-* containers, networks, images, volumes or session build-cache records remain"
   fi
   rm -rf "$RH"/run-* "$CACHE_BEFORE" "$RH/buildcache-after.txt"
   printf '{"session": "%s", "failed": %s, "leftovers": %s}\n' "$SESSION" "$FAILED" \
