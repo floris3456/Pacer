@@ -81,8 +81,10 @@ type ForwardCoverageGap struct {
 }
 
 // ForwardCutover is the frozen→live boundary: H is the frozen bound, N0 the
-// latest certificate StartMS. It is recorded once per store by offline
-// preparation and copied into every generation manifest sealed with that base.
+// explicitly declared start of certified native capture with its recorded
+// basis (never derived from certificates). It is recorded once per store by
+// offline preparation and copied into every generation manifest sealed with
+// that base.
 type ForwardCutover struct {
 	HMS                 int64               `json:"h_ms"`
 	EventsThrough       int64               `json:"events_through"`

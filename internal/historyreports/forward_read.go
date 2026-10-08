@@ -173,7 +173,7 @@ func (s *ForwardStore) forwardContext(ctx context.Context, p ForwardPin, staging
 	if hash(string(raw)) != p.Generation || json.Unmarshal(raw, &c.manifest) != nil || c.manifest.Version != ForwardVersion || (c.manifest.Converter != ForwardConverterVersion && c.manifest.Converter != forwardQualifiedConverterVersion) {
 		return c, pin, ErrSource
 	}
-	if cut := c.manifest.Cutover; cut != nil && (c.manifest.BaseDigest == "" || c.manifest.OriginDigest == "" || cut.HMS <= 0 || cut.HMS > math.MaxInt64/int64(time.Millisecond) || cut.N0MS < 0 || cut.N0MS > math.MaxInt64/int64(time.Millisecond)) {
+	if cut := c.manifest.Cutover; cut != nil && (c.manifest.BaseDigest == "" || c.manifest.OriginDigest == "" || cut.HMS <= 0 || cut.HMS > math.MaxInt64/int64(time.Millisecond) || cut.N0MS <= 0 || cut.N0MS > math.MaxInt64/int64(time.Millisecond) || !validN0Basis(cut.N0Basis)) {
 		return c, pin, ErrSource
 	}
 	f := &pin.Filter

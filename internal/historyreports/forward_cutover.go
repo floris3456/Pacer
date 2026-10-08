@@ -48,9 +48,11 @@ func (s *ForwardStore) SeedFrozenForwardProfiles(ctx context.Context, r *Reader,
 	return rev, seed, err
 }
 
-// PrepareForwardCutover records H (the base boundary) and N0 (the latest origin
-// certificate StartMS). N0 > H refuses unless the coverage gap is declared; a
-// declared gap is recorded, never filled.
+// PrepareForwardCutover records H (the base boundary) and the explicitly
+// declared N0 with its basis, recorded verbatim. N0 is never derived from the
+// certificates, which bound only the account mapping; each certificated legacy
+// account must have a certificate covering N0. N0 > H refuses unless the
+// coverage gap is declared; a declared gap is recorded, never filled.
 func (s *ForwardStore) PrepareForwardCutover(ctx context.Context, originDigest string, n0MS int64, n0Basis string, declareCoverageGap bool) (ForwardCutover, error) {
 	if !validHash(originDigest) {
 		return ForwardCutover{}, ErrInput
@@ -73,7 +75,7 @@ func (s *ForwardStore) PrepareForwardCutover(ctx context.Context, originDigest s
 	if !ready {
 		return ForwardCutover{}, ErrForwardPending
 	}
-	cut, err := forwardCutoverFor(base, o, declareCoverageGap)
+	cut, err := forwardCutoverFor(base, o, n0MS, n0Basis, declareCoverageGap)
 	if err != nil {
 		return ForwardCutover{}, err
 	}
@@ -82,16 +84,26 @@ func (s *ForwardStore) PrepareForwardCutover(ctx context.Context, originDigest s
 	return cut, err
 }
 
-func forwardCutoverFor(base ForwardBase, o ForwardOrigins, declared bool) (ForwardCutover, error) {
+// forwardCutoverFor validates a declared N0 against the base and the origins.
+// It is also the runtime gate's re-validation of a recorded cutover.
+func forwardCutoverFor(base ForwardBase, o ForwardOrigins, n0MS int64, n0Basis string, declared bool) (ForwardCutover, error) {
 	b := base.Boundary
-	c := ForwardCutover{HMS: b.HMS, EventsThrough: b.EventsThrough, ObservationsThrough: b.ObservationsThrough}
-	if len(o.Certificates) == 0 || b.HMS <= 0 || b.HMS > math.MaxInt64/int64(time.Millisecond) {
+	c := ForwardCutover{HMS: b.HMS, EventsThrough: b.EventsThrough, ObservationsThrough: b.ObservationsThrough, N0MS: n0MS, N0Basis: n0Basis}
+	if len(o.Certificates) == 0 || b.HMS <= 0 || b.HMS > math.MaxInt64/int64(time.Millisecond) || n0MS <= 0 || n0MS > math.MaxInt64/int64(time.Millisecond) || !validN0Basis(n0Basis) {
 		return c, ErrInput
 	}
+	covered := map[string]bool{}
 	for _, cert := range o.Certificates {
-		c.N0MS = max(c.N0MS, cert.StartMS)
+		covered[cert.LegacyAccount] = covered[cert.LegacyAccount] || cert.StartMS <= n0MS && (cert.EndMS == 0 || n0MS < cert.EndMS)
 	}
-	if c.N0MS <= c.HMS {
+	accounts := make([]string, 0, len(covered))
+	for account, ok := range covered {
+		if !ok {
+			return c, ErrInput
+		}
+		accounts = append(accounts, account)
+	}
+	if n0MS <= c.HMS {
 		if declared {
 			return c, ErrInput
 		}
@@ -100,17 +112,22 @@ func forwardCutoverFor(base ForwardBase, o ForwardOrigins, declared bool) (Forwa
 	if !declared {
 		return c, ErrForwardCoverageGap
 	}
-	accounts := []string{}
-	seen := map[string]bool{}
-	for _, cert := range o.Certificates {
-		if cert.StartMS > c.HMS && !seen[cert.LegacyAccount] {
-			seen[cert.LegacyAccount] = true
-			accounts = append(accounts, cert.LegacyAccount)
+	sort.Strings(accounts)
+	c.CoverageGap = &ForwardCoverageGap{FromMS: c.HMS, ToMS: n0MS, Accounts: accounts}
+	return c, nil
+}
+
+// An N0 basis is 1-120 printable ASCII characters, recorded verbatim.
+func validN0Basis(s string) bool {
+	if len(s) < 1 || len(s) > 120 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
 		}
 	}
-	sort.Strings(accounts)
-	c.CoverageGap = &ForwardCoverageGap{FromMS: c.HMS, ToMS: c.N0MS, Accounts: accounts}
-	return c, nil
+	return true
 }
 
 func (s *ForwardStore) preparedCutover(ctx context.Context) (*forwardCutoverRecord, error) {
@@ -183,7 +200,7 @@ func (s *ForwardStore) acceptBaseline(ctx context.Context, q *ForwardSeal) error
 	if err = s.object(ctx, "origins", rec.OriginDigest, &o); err != nil || o.BaseDigest != rec.BaseDigest {
 		return ErrSource
 	}
-	if want, e := forwardCutoverFor(base, o, rec.Cutover.CoverageGap != nil); e != nil || forwardDigest(want) != forwardDigest(rec.Cutover) {
+	if want, e := forwardCutoverFor(base, o, rec.Cutover.N0MS, rec.Cutover.N0Basis, rec.Cutover.CoverageGap != nil); e != nil || forwardDigest(want) != forwardDigest(rec.Cutover) {
 		return ErrSource
 	}
 	var seed ForwardProfileSeed
