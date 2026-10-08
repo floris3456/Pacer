@@ -63,6 +63,7 @@ STREAM_TIMEOUT = 1800  # longer than the fixture's 600 s hold limit
 FIVE_HOUR_LEFT, SEVEN_DAY_LEFT = 7200, 86400  # resets nearer than this are moved before s1
 POLL = 1.0
 PROFILE, TOKEN, MESSAGES, USAGE = "/api/oauth/profile", "/v1/oauth/token", "/v1/messages", "/api/oauth/usage"
+DISCOVERY_TIMEOUT = 180  # seconds for Pacer to list the cap logins after a CPA (re)start
 RESTART_MARKER = "capacity-restart-required.json"
 MEMBERSHIP_REASONS = ("account_ref_changed", "account_ref_unknown", "binding_changed_inside", "inventory_incarnation_changed",
                       "inventory_sequence_regressed", "inventory_unknown", "no_account_tuples", "unknown_account_ref_tuple")
@@ -413,8 +414,15 @@ def normalize(lab):
 def preflight(lab):
     health = lab.health()
     assert health.get("ready") is True and health.get("accounts") == list(ACCOUNTS), "capacity fixture is not the expected one"
-    state = lab.state()
-    rows, others = cap_rows(state)
+    # After a CPA restart Pacer lists the hot-added logins only once CPA has
+    # verified them (first profile fetch), which can take a discovery pass.
+    deadline = lab.now() + DISCOVERY_TIMEOUT
+    while True:
+        state = lab.state()
+        rows, others = cap_rows(state)
+        if (sorted(rows) == list(ACCOUNTS) and not others) or lab.now() >= deadline:
+            break
+        lab.sleep(5)
     assert not others, ("non-cap Claude logins %r stay unverified, so every interval would be "
                         "unknown_account_ref_tuple; use PACER_CAPACITY_PARK_ORIGINALS=1 and restart CPA" % others)
     assert sorted(rows) == list(ACCOUNTS), "readback lacks cap logins: %r" % sorted(set(ACCOUNTS) - set(rows))
