@@ -70,6 +70,12 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	forwardManagementMu    sync.Mutex
+	forwardManagementEpoch uint64
+	forwardManagement      *forwardManagementBinding
+	// Optional deterministic lease barrier, set only before starting the plugin.
+	forwardManagementLeaseHook func(context.Context)
+
 	forward            *forwardPublisher
 	forwardOptions     *forwardOptions
 	coverage           *usagecoverage.Consumer
@@ -116,7 +122,7 @@ func New(host Host) *Plugin {
 func registration(policyEnabled ...bool) any {
 	schema := 6
 	enabled := len(policyEnabled) > 0 && policyEnabled[0]
-	if enabled {
+	if enabled || len(policyEnabled) > 1 && policyEnabled[1] {
 		schema = 7
 	}
 	return map[string]any{"schema_version": schema, "metadata": pluginapi.Metadata{Name: "pacer", Version: "0.2.0-dev", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true, "cache_policy": enabled}}
@@ -325,8 +331,13 @@ func (p *Plugin) Close() {
 
 func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	if method == pluginabi.MethodPluginRegister || method == pluginabi.MethodPluginReconfigure {
+		p.revokeForwardManagement()
 		result, err := p.configure(raw)
+		p.revokeForwardManagement()
 		if err == nil {
+			p.mu.Lock()
+			result = registration(p.policy != nil, p.forward != nil)
+			p.mu.Unlock()
 			p.discover()
 			p.startWorker()
 			p.startForward()
@@ -334,6 +345,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		return result, err
 	}
 	if method == pluginabi.MethodPluginShutdown || method == pluginabi.MethodPluginQuiesce {
+		p.revokeForwardManagement()
 		p.mu.Lock()
 		if !p.stopped {
 			p.stopped = true
@@ -342,6 +354,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		p.stopForward(false)
 		return struct{}{}, nil
+	}
+	// Forward dispatch is capability- and lease-gated before the legacy handler.
+	// Handle has no host IO context; the lease still inherits publisher shutdown.
+	if method == pluginabi.MethodManagementHandle && forwardManagementRPC(raw) {
+		return p.handleForwardManagement(context.Background(), raw), nil
 	}
 	p.mu.Lock()
 	ready := p.db != nil && !p.stopped
@@ -382,7 +399,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return result, err
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}, reportRoutes()...)}, nil
+		result := map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}, reportRoutes()...)}
+		result["routes"] = append(result["routes"].([]map[string]string), p.registerForwardManagement(raw)...)
+		return result, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
