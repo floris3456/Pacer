@@ -133,6 +133,9 @@ func TestAuditBaselineQualification(t *testing.T) {
 			e.AccountingVersion, e.RawInput = 2, sample.tokens.Input
 			e.Quality, e.Tokens, e.SourceTokens, e.TokenEvidence = sample.quality, sample.tokens, nil, nil
 			e.OriginalAccounting, e.CostNano = nil, nil
+			e.AuthFile = "private-baseline-auth-file"
+			e.QuotaHeaders = map[string]string{"Authorization": "private-baseline-header"}
+			e.Metadata = json.RawMessage(`{"capability":"private-baseline-capability"}`)
 			raw, err := json.Marshal(e)
 			if err != nil {
 				t.Fatal(err)
@@ -194,6 +197,13 @@ func TestAuditBaselineQualification(t *testing.T) {
 		}
 		if !proof.IdentityResolved {
 			t.Fatal("fixture lacks legitimate identity certificate", proof)
+		}
+		raw, err := json.Marshal(proof)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("private-baseline-")) {
+			t.Fatal("baseline private fields leaked in evidence")
 		}
 		if sample.reason != "" {
 			if proof.Value != nil || !slices.Contains(proof.Issues, sample.reason) {
@@ -297,5 +307,64 @@ func TestAuditLegacyAccountingStillQualifiesAfterCorrection(t *testing.T) {
 				t.Fatal("legacy control absent")
 			}
 		})
+	}
+}
+
+func TestAuditForwardEvidencePrivacy(t *testing.T) {
+	ctx := context.Background()
+	r := forwardNative(t, "privacy-audit", forwardAt)
+	var wire map[string]any
+	if err := json.Unmarshal(r.RawUsage, &wire); err != nil {
+		t.Fatal(err)
+	}
+	wire["APIKey"] = "private-native-api-key"
+	wire["Source"] = "private-native-source"
+	wire["RequestHeaders"] = map[string]string{"Authorization": "private-native-request-auth", "X-Pacer-Cache-Capability": "private-native-capability"}
+	wire["ResponseHeaders"] = map[string][]string{"Authorization": {"private-native-response-auth"}}
+	wire["FailureBody"] = "private-native-failure-body"
+	raw, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// FromNative already sanitizes its raw projection. Independently exercise
+	// the forward boundary with a retained raw envelope containing secrets.
+	r.RawUsage = raw
+	if !bytes.Contains(r.RawUsage, []byte("private-native-")) {
+		t.Fatal("fixture must retain private local evidence")
+	}
+	feed, _ := forwardFeed(t)
+	forwardPut(t, feed, r)
+	s, _ := forwardLedger(t)
+	pin := forwardSeal(t, s, forwardAdvance(t, s, feed), forwardBook(t, s), 0)
+	e, err := s.ForwardEvidence(ctx, pin, "native-event:"+r.EventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ForwardRequests(ctx, pin, 25, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary, csv bytes.Buffer
+	if err = s.ExportForwardJSON(ctx, pin, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExportForwardCSV(ctx, pin, 25, "", &csv); err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string][]byte{"evidence": proof, "requests": rows, "json": summary.Bytes(), "csv": csv.Bytes()} {
+		if bytes.Contains(output, []byte("private-native-")) {
+			t.Fatalf("private source field leaked in %s", name)
+		}
+	}
+	if e.Value == nil || e.Value.Low != 7250000000 || len(e.Origins) != 1 || e.Origins[0].RawDigest == "" {
+		t.Fatal("sanitization removed factual value/provenance", e)
 	}
 }
