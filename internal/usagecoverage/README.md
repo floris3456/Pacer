@@ -4,6 +4,11 @@ Consumes CPA `ace073d2` / schema 7 `host.usage.checkpoint` and `UsageRecord.Sour
 This package performs **no host RPC, provider polling, runtime changes or routing**. The parent
 owns hooks and inventory. The consumer writes only the borrowed measurement SQLite database.
 
+The Pacer hooks are now wired; see [native integration and its incomplete-inventory limits](../pacer/coverage.md).
+`ObserveUsageWithRecord` adds the accepted authoritative record to the existing `ObserveUsage`
+result for optional projections. `Invalidate` durably faults pre-correlation/discovery failures.
+`ObserveUsage` remains backward compatible. Neither new method makes host calls.
+
 ## Exact supported claim and remaining barrier
 
 `Consumer.Snapshot` can return `Known:true` for an account's **request-start** interval
@@ -41,6 +46,11 @@ Create one consumer for the native sink and install it in the acknowledged usage
 requesting checkpoints. `New` generates a fresh durable ID; older consumers for the same host
 become inactive. Restart/reload requires a new object. Old IDs cannot be reused. Startup does not
 acknowledge history. SourceID is a stable installation namespace, not a process ID or secret.
+
+Equal/regressed startup clocks register a poisoned new incarnation instead of disabling ingestion;
+its lower bound is not moved backward. Duplicate incarnation IDs are still refused. Incomplete
+zero-width membership snapshots are now accepted as point observations, with no covered interval.
+This supports honest `host.auth.list` diagnostics without pretending it supplies historical membership.
 
 ```go
 err = consumer.PutMembership(ctx, usagecoverage.Membership{

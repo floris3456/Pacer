@@ -7,11 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"sort"
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/usagecoverage"
 )
 
 func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
@@ -20,7 +23,7 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth)); CREATE TABLE IF NOT EXISTS pacer_usage_capture_metadata(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
 		return nil, err
 	}
 	var source [16]byte
@@ -36,83 +39,146 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if err = m.RegisterPriceBook(ctx, measurement.DefaultPriceBook()); err != nil {
 		return nil, err
 	}
-	var id [16]byte
-	if _, err = rand.Read(id[:]); err != nil {
+	// The native path has its own source-scoped incarnation. Legacy global runs
+	// are never started, checkpointed or consulted by this integration.
+	p.coverage, err = usagecoverage.New(ctx, m, usagecoverage.Options{SourceID: p.measurementSource, Clock: p.now})
+	if err != nil {
 		return nil, err
 	}
-	// No timer-based checkpoint: the native callback transport has not supplied
-	// a drained event-time watermark. Unknown coverage must stay unknown.
-	if err = m.StartDelivery(ctx, hex.EncodeToString(id[:]), p.now()); err != nil {
-		return nil, err
-	}
+	p.coverageGroups = map[string]coverageGroup{}
 	return m, nil
 }
 
 func (p *Plugin) captureUsageCredential(request string, c credential) error {
+	err := p.captureUsageCredentialTx(request, c)
+	if err != nil {
+		p.coverageFailure("capture_unavailable", c.Account)
+	}
+	return err
+}
+
+type usageCaptureMetadata struct {
+	Version         int
+	MembershipID    string
+	AccountVerified bool
+	ExactIdentity   bool
+	CapturedAt      time.Time
+}
+
+func (p *Plugin) captureUsageCredentialTx(request string, c credential) error {
+	if request == "" || len(request) > 256 || c.ID == "" || len(c.ID) > 512 || c.Index == "" || len(c.Index) > 128 {
+		return errors.New("invalid usage correlation")
+	}
 	value := measurement.NativeCredential{Provider: c.Provider, AccountID: c.Account, CredentialRef: tracker.Digest(c.Provider + "\x00" + c.ID + "\x00" + c.Index), AuthID: c.ID, AuthIndex: c.Index}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_, err = p.db.Exec(`INSERT INTO pacer_usage_credentials(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, request, c.ID, raw)
+	tx, err := p.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`INSERT INTO pacer_usage_credentials(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, request, c.ID, raw)
 	if err != nil {
 		return err
 	}
 	var stored []byte
-	if err = p.db.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, request, c.ID).Scan(&stored); err != nil {
+	if err = tx.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, request, c.ID).Scan(&stored); err != nil {
 		return err
 	}
 	var original measurement.NativeCredential
 	if json.Unmarshal(stored, &original) != nil || original != value {
 		return errors.New("credential identity changed within logical dispatch")
 	}
-	return nil
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if inserted == 1 {
+		meta := usageCaptureMetadata{Version: 1, MembershipID: c.CoverageMembership, AccountVerified: c.AccountVerified, ExactIdentity: c.ExactIdentity, CapturedAt: p.now().Round(0).UTC()}
+		body, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO pacer_usage_capture_metadata VALUES(?,?,?)`, request, c.ID, body); err != nil {
+			return err
+		}
+	}
+	// Existing legacy captures deliberately remain without verified metadata.
+	return tx.Commit()
 }
 
 func (p *Plugin) recordUsage(raw []byte) error {
+	_, err := p.recordUsageCaptured(raw)
+	return err
+}
+
+func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error) {
+	defer func() {
+		p.clearMeasurementCache()
+		if err != nil {
+			p.metricError(err)
+			p.coverageFailure("usage_unrecorded", captured.Account)
+		}
+	}()
+	if len(raw) == 0 || len(raw) > 8<<20 {
+		return captured, errors.New("invalid native usage envelope")
+	}
 	var identity struct {
 		LifecycleRequestID string
 		AuthID             string
 		Provider           string
-		CachePolicy        *struct {
-			Selected json.RawMessage `json:"selected"`
-		}
+		SourceEvidence     json.RawMessage
 	}
 	if err := json.Unmarshal(raw, &identity); err != nil {
-		return err
+		return captured, errors.New("invalid native usage envelope")
+	}
+	if identity.Provider == "" {
+		return captured, errors.New("native usage provider missing")
 	}
 	if identity.Provider != "claude" && identity.Provider != "codex" {
-		return nil
+		if len(identity.SourceEvidence) > 0 && string(identity.SourceEvidence) != "null" {
+			return captured, errors.New("unsupported native source")
+		}
+		return captured, nil // Unrelated providers are outside Pacer's source contract.
 	}
 	// Older hosts cannot correlate final callback to the immutable per-request
 	// inventory. No mutable-discovery fallback: its record would be misattributed.
 	if identity.LifecycleRequestID == "" {
-		return nil
+		return captured, errors.New("native usage correlation missing")
 	}
-	var body []byte
-	err := p.db.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, identity.LifecycleRequestID, identity.AuthID).Scan(&body)
-	if err == sql.ErrNoRows {
-		if identity.CachePolicy != nil && len(identity.CachePolicy.Selected) > 0 && string(identity.CachePolicy.Selected) != "null" {
-			p.metricError(err)
-			return err
+	var body, metadata []byte
+	err = p.db.QueryRow(`SELECT c.body,m.body FROM pacer_usage_credentials c LEFT JOIN pacer_usage_capture_metadata m ON m.request_id=c.request_id AND m.auth=c.auth WHERE c.request_id=? AND c.auth=?`, identity.LifecycleRequestID, identity.AuthID).Scan(&body, &metadata)
+	if err != nil {
+		return captured, err
+	}
+	var capture usagecoverage.Capture
+	if err = json.Unmarshal(body, &capture.Credential); err != nil {
+		return captured, errors.New("native usage capture invalid")
+	}
+	captured = credential{ID: capture.Credential.AuthID, Index: capture.Credential.AuthIndex, Provider: capture.Credential.Provider, Account: capture.Credential.AccountID}
+	if len(metadata) > 0 {
+		var meta usageCaptureMetadata
+		if json.Unmarshal(metadata, &meta) != nil || meta.Version != 1 {
+			return captured, errors.New("native usage capture metadata invalid")
 		}
-		return nil
+		capture.MembershipID = meta.MembershipID
+		capture.Verified = meta.AccountVerified && meta.ExactIdentity
+		captured.AccountVerified = meta.AccountVerified
+		captured.ExactIdentity = meta.ExactIdentity
+		captured.CoverageMembership = meta.MembershipID
 	}
+	if p.coverage == nil {
+		return captured, errors.New("native source consumer unavailable")
+	}
+	observed, err := p.coverage.ObserveUsageWithRecord(context.Background(), raw, capture)
 	if err != nil {
-		return err
+		return captured, err
 	}
-	var credential measurement.NativeCredential
-	if err = json.Unmarshal(body, &credential); err != nil {
-		return err
-	}
-	record, err := measurement.FromNative(raw, credential, p.measurementSource)
-	if err != nil {
-		p.metricError(err)
-		return err
-	}
-	if _, err = p.measurement.PutRecord(context.Background(), record); err != nil {
-		p.metricError(err)
-		return err
+	record := observed.Record
+	if record.Attribution.AccountID != captured.Account {
+		return captured, errors.New("persisted native attribution mismatch")
 	}
 	if p.policyEvidence != nil && record.Policy.SelectedTTL != "" {
 		_, evidenceErr := p.policyEvidence.Observe(context.Background(), record)
@@ -121,7 +187,22 @@ func (p *Plugin) recordUsage(raw []byte) error {
 	if !record.Activity.Partial {
 		err = p.chats.CacheActivityForAuth(record.RequestID, identity.AuthID, record.StartedAt, record.Success, record.Activity.PrimaryPrefix, record.Activity.ProtectionTTL.Duration())
 	}
-	return err
+	return captured, err
+}
+
+func (p *Plugin) observeUsageCaptured(c credential, headers http.Header, clocks map[string]time.Time, requested time.Time) {
+	if c.Account == "" || p.observer == nil {
+		return
+	}
+	var samples []observation.Window
+	if len(clocks) > 0 {
+		samples = observation.HeadersCaptured(c.Provider, headers, clocks)
+	} else if !requested.IsZero() {
+		samples = observation.Headers(c.Provider, headers, requested)
+	}
+	if len(samples) > 0 {
+		p.storeObservations(c, samples)
+	}
 }
 
 func (p *Plugin) metricError(err error) {
@@ -176,15 +257,37 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 // Analyze outside scheduler.pick. Missing, over-limit or stale reports never
 // become zero burn or an invented account size.
 func (p *Plugin) refreshMeasurements() {
+	p.refreshSourceCoverage()
 	p.mu.Lock()
+	generation := p.coverageGeneration
+	consumer := p.coverage
+	memberships := map[string]string{}
+	for account, g := range p.coverageGroups {
+		memberships[account] = g.MembershipID
+	}
 	creds := map[string]credential{}
 	for _, c := range p.creds {
 		creds[c.Account] = c
 	}
 	p.mu.Unlock()
 	reports := map[string]measurement.Report{}
-	for account, c := range creds {
-		r, err := p.measurement.Measure(context.Background(), measurement.Query{Provider: c.Provider, AccountID: account, Scope: "all", BookID: measurement.DefaultPriceBook().ID, Since: p.now().Add(-21 * 24 * time.Hour), AsOf: p.now(), MaxRecords: 10000})
+	accounts := make([]string, 0, len(creds))
+	for account := range creds {
+		accounts = append(accounts, account)
+	}
+	sort.Strings(accounts)
+	for _, account := range accounts {
+		c := creds[account]
+		q := measurement.Query{Provider: c.Provider, AccountID: account, Scope: "all", BookID: measurement.DefaultPriceBook().ID, Since: p.now().Add(-21 * 24 * time.Hour), AsOf: p.now(), MaxRecords: 10000, RequireSourceCoverage: true}
+		if consumer != nil {
+			var err error
+			q, err = consumer.BeforeMeasure(context.Background(), q, memberships)
+			if err != nil {
+				p.metricError(err)
+				continue
+			}
+		}
+		r, err := p.measurement.Measure(context.Background(), q)
 		if err != nil {
 			p.metricError(err)
 			continue
@@ -192,6 +295,8 @@ func (p *Plugin) refreshMeasurements() {
 		reports[account] = r
 	}
 	p.mu.Lock()
-	p.measurements = reports
+	if generation == p.coverageGeneration {
+		p.measurements = reports
+	}
 	p.mu.Unlock()
 }

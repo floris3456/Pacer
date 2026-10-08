@@ -29,6 +29,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyevidence"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/usagecoverage"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -53,6 +54,8 @@ type Config struct {
 type credential struct {
 	ID, Index, Provider, Account, Alias string
 	AccountVerified                     bool // Host billing identity, not a credential-only fallback.
+	ExactIdentity                       bool
+	CoverageMembership                  string
 }
 type attempt struct {
 	Model, PreviousAccount     string
@@ -65,35 +68,41 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
-	policyEvidence    *policyevidence.Store
-	reports           *historyreports.Reader
-	reportSlots       chan struct{}
-	routingEligible   bool // Private rollout gate: false in every runtime constructor/configuration.
-	policy            *policyadapter.Adapter
-	selections        map[string]pluginapi.CachePolicy
-	history           *history.Store
-	observationMu     sync.Mutex
-	measurement       *measurement.Store
-	measurements      map[string]measurement.Report
-	measurementErrors int64
-	measurementSource string
-	mu                sync.Mutex
-	Host              Host
-	now               func() time.Time
-	db                *sql.DB
-	chats             *tracker.Store
-	observer          *observation.Store
-	cfg               Config
-	creds             map[string]credential
-	requests          map[string]attempt
-	decisionErrors    int64
-	workerOnce        sync.Once
-	workerDone        chan struct{}
-	workerWait        sync.WaitGroup
-	refreshMu         sync.Mutex
-	discoverMu        sync.Mutex
-	lastDiscover      time.Time
-	stopped           bool
+	coverage           *usagecoverage.Consumer
+	coverageGroups     map[string]coverageGroup
+	coverageMu         sync.Mutex
+	coverageCursor     string
+	coverageGeneration uint64
+	coverageStats      coverageDiagnostics
+	policyEvidence     *policyevidence.Store
+	reports            *historyreports.Reader
+	reportSlots        chan struct{}
+	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
+	policy             *policyadapter.Adapter
+	selections         map[string]pluginapi.CachePolicy
+	history            *history.Store
+	observationMu      sync.Mutex
+	measurement        *measurement.Store
+	measurements       map[string]measurement.Report
+	measurementErrors  int64
+	measurementSource  string
+	mu                 sync.Mutex
+	Host               Host
+	now                func() time.Time
+	db                 *sql.DB
+	chats              *tracker.Store
+	observer           *observation.Store
+	cfg                Config
+	creds              map[string]credential
+	requests           map[string]attempt
+	decisionErrors     int64
+	workerOnce         sync.Once
+	workerDone         chan struct{}
+	workerWait         sync.WaitGroup
+	refreshMu          sync.Mutex
+	discoverMu         sync.Mutex
+	lastDiscover       time.Time
+	stopped            bool
 }
 
 func New(host Host) *Plugin {
@@ -419,7 +428,8 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
-		if err := p.recordUsage(raw); err != nil {
+		captured, err := p.recordUsageCaptured(raw)
+		if err != nil {
 			return nil, pluginabi.NewError("pacer_usage_unavailable", "Native usage could not be durably recorded", 503)
 		}
 		var req struct {
@@ -427,10 +437,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			ResponseHeadersObservedAt map[string]time.Time
 		}
 		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, err
+			p.coverageFailure("usage_envelope_invalid", captured.Account)
+			return nil, pluginabi.NewError("pacer_usage_unavailable", "Native usage envelope is invalid", 503)
 		}
 		if len(req.ResponseHeadersObservedAt) > 0 {
-			p.observeCaptured(req.AuthID, req.ResponseHeaders, req.ResponseHeadersObservedAt)
+			p.observeUsageCaptured(captured, req.ResponseHeaders, req.ResponseHeadersObservedAt, req.RequestedAt)
 			return struct{}{}, nil
 		}
 		// Older hosts do not supply the response-capture clock. Absolute headers
@@ -442,7 +453,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 				delete(h, key)
 			}
 		}
-		p.observeAuth(req.AuthID, h, req.RequestedAt)
+		p.observeUsageCaptured(captured, h, nil, req.RequestedAt)
 		return struct{}{}, nil
 	}
 	return nil, fmt.Errorf("unsupported Pacer method %s", method)

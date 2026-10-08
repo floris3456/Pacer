@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -15,6 +16,7 @@ import (
 // merge aliases; email labels are not account identity. Tokens are never retained.
 func (p *Plugin) discover(force ...bool) {
 	if p.Host == nil {
+		p.discoveryFailed()
 		return
 	}
 	p.discoverMu.Lock()
@@ -25,15 +27,18 @@ func (p *Plugin) discover(force ...bool) {
 	p.lastDiscover = p.now()
 	raw, err := p.Host("host.auth.list", map[string]any{})
 	if err != nil {
+		p.discoveryFailed()
 		return
 	}
 	var list struct {
 		Files []pluginapi.HostAuthFileEntry `json:"files"`
 	}
-	if json.Unmarshal(raw, &list) != nil {
+	if len(raw) > 1<<20 || json.Unmarshal(raw, &list) != nil || list.Files == nil || len(list.Files) > maxCoverageInventory {
+		p.discoveryFailed()
 		return
 	}
 	found := map[string]credential{}
+	indices := map[string]bool{}
 	for _, file := range list.Files {
 		provider := file.Provider
 		if provider == "" {
@@ -59,8 +64,18 @@ func (p *Plugin) discover(force ...bool) {
 			id = file.Name
 		}
 		if id == "" || file.AuthIndex == "" {
+			p.coverageFailure("inventory_identity_missing", "")
 			continue
 		}
+		if len(id) > 512 || len(file.AuthIndex) > 128 || indices[file.AuthIndex] {
+			p.discoveryFailed()
+			return
+		}
+		if _, exists := found[id]; exists {
+			p.discoveryFailed()
+			return
+		}
+		indices[file.AuthIndex] = true
 		identity := "credential:" + id
 		verified := false
 		if raw, err = p.Host("host.auth.get", map[string]string{"auth_index": file.AuthIndex}); err == nil {
@@ -70,29 +85,48 @@ func (p *Plugin) discover(force ...bool) {
 					AccountID   string `json:"account_id"`
 				} `json:"json"`
 			}
-			if json.Unmarshal(raw, &result) == nil {
-				if provider == "claude" && result.JSON.AccountUUID != "" {
+			if len(raw) <= 1<<20 && json.Unmarshal(raw, &result) == nil {
+				if provider == "claude" && validBillingMetadata(result.JSON.AccountUUID) {
 					identity = "account:" + result.JSON.AccountUUID
 					verified = true
 				}
-				if provider == "codex" && result.JSON.AccountID != "" {
+				if provider == "codex" && validBillingMetadata(result.JSON.AccountID) {
 					identity = "account:" + result.JSON.AccountID
 					verified = true
 				}
 			}
 		}
+		if !verified {
+			p.coverageFailure("billing_mapping_unverified", provider+":"+tracker.Digest(provider+":"+identity))
+		}
 		alias := strings.TrimSpace(file.Label)
 		if alias == "" {
 			alias = provider + " " + tracker.Digest(id)[:8]
 		}
-		found[id] = credential{ID: id, Index: file.AuthIndex, Provider: provider, Account: provider + ":" + tracker.Digest(provider+":"+identity), Alias: alias, AccountVerified: verified}
+		found[id] = credential{ID: id, Index: file.AuthIndex, Provider: provider, Account: provider + ":" + tracker.Digest(provider+":"+identity), Alias: alias, AccountVerified: verified, ExactIdentity: file.ID != ""}
 	}
+	groups := p.persistCoverageInventory(found)
 	p.mu.Lock()
 	p.creds = found
+	p.coverageGroups = groups
+	p.coverageGeneration++
+	p.measurements = map[string]measurement.Report{}
 	p.mu.Unlock()
 	for _, c := range found {
 		if _, exists, err := p.observer.Status(c.Account); err == nil && !exists {
 			_ = p.observer.Queue(c.Account, observation.Endpoint(c.Provider), observation.ReasonSeed, time.Time{})
 		}
 	}
+}
+
+func validBillingMetadata(v string) bool {
+	if len(v) == 0 || len(v) > 256 {
+		return false
+	}
+	for _, r := range v {
+		if r < 33 || r > 126 {
+			return false
+		}
+	}
+	return true
 }

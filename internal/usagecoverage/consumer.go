@@ -136,24 +136,36 @@ type Capture struct {
 // have been durably accepted. Missing correlation or unrecordable input is an
 // error for the acknowledged host hook, never a successful dropped callback.
 func (c *Consumer) ObserveUsage(ctx context.Context, raw []byte, capture Capture) (measurement.PutResult, error) {
+	observed, err := c.ObserveUsageWithRecord(ctx, raw, capture)
+	return observed.Result, err
+}
+
+// ObservedUsage contains the very record accepted by the authoritative store.
+// Optional projections must use it, not reconstruct a different native identity.
+type ObservedUsage struct {
+	Record measurement.Record
+	Result measurement.PutResult
+}
+
+func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, capture Capture) (ObservedUsage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.ready(ctx); err != nil {
-		return measurement.PutResult{}, err
+		return ObservedUsage{}, err
 	}
 	r, err := measurement.FromNative(raw, capture.Credential, c.source)
 	if err != nil {
 		if failure := c.fault(ctx, ""); failure != nil {
-			return measurement.PutResult{}, failure
+			return ObservedUsage{}, failure
 		}
-		return measurement.PutResult{}, err
+		return ObservedUsage{}, err
 	}
 	se := r.Native.SourceEvidence
 	verified := false
 	if capture.Verified && capture.MembershipID != "" && se != nil && se.SourceRef != "" {
 		m, e := c.store.SourceMembership(ctx, capture.MembershipID)
 		if e != nil {
-			return measurement.PutResult{}, c.storageResult(e)
+			return ObservedUsage{}, c.storageResult(e)
 		}
 		if m.SourceID == c.source && m.Provider == capture.Credential.Provider && m.AccountID == capture.Credential.AccountID && m.Verified && !r.RequestedAt.Before(m.From) && r.RequestedAt.Before(m.Through) {
 			for _, member := range m.Members {
@@ -167,23 +179,34 @@ func (c *Consumer) ObserveUsage(ctx context.Context, raw []byte, capture Capture
 	r.Native.BillingMappingVerified = verified
 	if !verified || se == nil || !se.Tracked || se.SourceRef == "" {
 		if err = c.fault(ctx, r.Attribution.AccountID); err != nil {
-			return measurement.PutResult{}, err
+			return ObservedUsage{}, err
 		}
 	}
 	if se != nil && se.SourceRef != "" && (se.Gap || !se.Tracked) {
 		if err = c.store.InvalidateSource(ctx, se.SourceRef, se.ManagerID, "", se.InvalidFrom); err != nil {
-			return measurement.PutResult{}, c.storageResult(err)
+			return ObservedUsage{}, c.storageResult(err)
 		}
 	}
 	result, err := c.store.PutRecord(ctx, r)
 	if err != nil {
 		c.storageResult(err)
 		if failure := c.fault(ctx, r.Attribution.AccountID); failure != nil {
-			return measurement.PutResult{}, failure
+			return ObservedUsage{}, failure
 		}
-		return measurement.PutResult{}, err
+		return ObservedUsage{}, err
 	}
-	return result, nil
+	return ObservedUsage{Record: r, Result: result}, nil
+}
+
+// Invalidate is for an ingestion/discovery failure before record correlation is
+// available. Empty account faults this entire consumer; failures remain latched.
+func (c *Consumer) Invalidate(ctx context.Context, account string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ready(ctx); err != nil {
+		return err
+	}
+	return c.fault(ctx, account)
 }
 
 // ApplyCheckpoint is called with the exact requested tuple, not a scope selected

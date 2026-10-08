@@ -58,8 +58,12 @@ func (s *Store) StartSourceConsumer(ctx context.Context, id, source string, at t
 		}
 		var previous int64
 		err = tx.QueryRowContext(ctx, `SELECT started_at FROM measurement_source_consumers WHERE source_id=? AND active=1`, source).Scan(&previous)
-		if err == nil && at.UnixNano() <= previous {
-			return ErrConflict
+		// A coarse or regressed wall clock must not prevent durable ingestion on
+		// reload. The new consumer is poisoned instead of borrowing prior proof.
+		poisoned := err == nil && at.UnixNano() <= previous
+		start := at.UnixNano()
+		if poisoned {
+			start = previous
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -70,7 +74,7 @@ func (s *Store) StartSourceConsumer(ctx context.Context, id, source string, at t
 		if _, err = tx.ExecContext(ctx, `UPDATE measurement_source_consumers SET active=0 WHERE source_id=? AND active=1`, source); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO measurement_source_consumers VALUES(?,?,?,1,0)`, id, source, at.UnixNano())
+		_, err = tx.ExecContext(ctx, `INSERT INTO measurement_source_consumers VALUES(?,?,?,1,?)`, id, source, start, poisoned)
 		return err
 	})
 }
@@ -90,7 +94,7 @@ func (s *Store) PoisonSourceConsumer(ctx context.Context, id string) error {
 }
 
 func canonicalMembership(m SourceMembership) (SourceMembership, []byte, error) {
-	if !nativeID(m.ID) || !nativeID(m.SourceID) || m.Provider != "claude" || !nativeID(m.AccountID) || m.Revision < 1 || !validTime(m.From) || !validTime(m.Through) || !m.From.Before(m.Through) || len(m.Members) > MaxSourceMembers {
+	if !nativeID(m.ID) || !nativeID(m.SourceID) || m.Provider != "claude" || !nativeID(m.AccountID) || m.Revision < 1 || !validTime(m.From) || !validTime(m.Through) || m.Through.Before(m.From) || m.Complete && m.From.Equal(m.Through) || len(m.Members) > MaxSourceMembers {
 		return m, nil, ErrInvalid
 	}
 	if m.Verified && !nativeID(m.MappingEvidenceRef) {
@@ -194,6 +198,18 @@ func sourceMembership(ctx context.Context, tx *sql.Tx, id string) (SourceMembers
 func (s *Store) SourceMembership(ctx context.Context, id string) (SourceMembership, error) {
 	var raw []byte
 	err := s.db.QueryRowContext(ctx, `SELECT body FROM measurement_source_memberships WHERE id=?`, id).Scan(&raw)
+	var m SourceMembership
+	if err == nil {
+		err = json.Unmarshal(raw, &m)
+	}
+	return m, err
+}
+
+// CurrentSourceMembership reads the indexed inventory head, not event history.
+// A discovery adapter may reuse an unchanged incomplete point snapshot.
+func (s *Store) CurrentSourceMembership(ctx context.Context, source, provider, account string) (SourceMembership, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT m.body FROM measurement_source_membership_heads h JOIN measurement_source_memberships m ON m.id=h.id WHERE h.source_id=? AND h.provider=? AND h.account_id=?`, source, provider, account).Scan(&raw)
 	var m SourceMembership
 	if err == nil {
 		err = json.Unmarshal(raw, &m)
