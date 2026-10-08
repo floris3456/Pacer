@@ -26,6 +26,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyadapter"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyevidence"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	_ "github.com/mattn/go-sqlite3"
@@ -64,6 +65,7 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	policyEvidence    *policyevidence.Store
 	reports           *historyreports.Reader
 	reportSlots       chan struct{}
 	routingEligible   bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -229,6 +231,12 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, err
 	}
 	p.measurement = measure
+	// Optional marker telemetry does not authorize policy operations and must
+	// never turn an evidence-store failure into a policy reset or fake readback.
+	p.policyEvidence, err = policyevidence.Open(db, p.now)
+	if err != nil {
+		p.measurementErrors++
+	}
 	p.measurements = map[string]measurement.Report{}
 	if cfg.HistoryPath != "" {
 		if _, err = os.Stat(cfg.HistoryPath); err != nil {
@@ -314,6 +322,20 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return nil, pluginabi.NewError("pacer_cache_unavailable", "Managed cache policy is not configured", 503)
 		}
 		result, err := p.policy.Dispatch(context.Background(), method, raw)
+		if method == pluginabi.MethodCachePolicyHandle && err == nil && p.policyEvidence != nil {
+			var request pluginapi.CachePolicyRequest
+			if json.Unmarshal(raw, &request) == nil && request.Method == http.MethodGet {
+				if response, ok := result.(pluginapi.CachePolicyResponse); ok && response.StatusCode == http.StatusOK {
+					body, evidenceErr := p.policyEvidence.AugmentAuthorized(context.Background(), request.Scope.CallerScope, response.Body)
+					if evidenceErr == nil {
+						response.Body = body
+						result = response
+					} else {
+						p.metricError(evidenceErr)
+					}
+				}
+			}
+		}
 		if method == pluginabi.MethodCachePolicyResolve && err == nil {
 			var request struct {
 				RequestID string `json:"request_id"`

@@ -114,6 +114,10 @@ func (p *Plugin) recordUsage(raw []byte) error {
 		p.metricError(err)
 		return err
 	}
+	if p.policyEvidence != nil && record.Policy.SelectedTTL != "" {
+		_, evidenceErr := p.policyEvidence.Observe(context.Background(), record)
+		p.metricError(evidenceErr) // Optional projection cannot acknowledge delivery.
+	}
 	if !record.Activity.Partial {
 		err = p.chats.CacheActivityForAuth(record.RequestID, identity.AuthID, record.StartedAt, record.Success, record.Activity.PrimaryPrefix, record.Activity.ProtectionTTL.Duration())
 	}
