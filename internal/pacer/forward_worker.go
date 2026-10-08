@@ -124,7 +124,7 @@ func (w *forwardPublisher) turn() (bool, string) {
 		if err != nil {
 			return false, "forward_source_unavailable"
 		}
-		selection, err := w.store.NativeForwardSelection(ctx, w.book)
+		selection, err := w.store.ForwardSelection(ctx, w.book)
 		if err != nil {
 			return false, "forward_selection_unavailable"
 		}
@@ -287,12 +287,22 @@ func (w *forwardPublisher) turn() (bool, string) {
 		}
 		w.lastFingerprint = fingerprint
 		w.cycle = nil
+		// Status only: a failed read keeps the previous cutover counts.
+		var cutover *historyreports.ForwardCutoverStatus
+		if c.selection.BaseDigest != "" {
+			if v, e := forwardCutoverStatus(buildCtx, w.store, pin.Generation); e == nil {
+				cutover = v
+			}
+		}
 		w.update(func(s *ForwardRuntimeStatus) {
 			s.State = "ready"
 			s.Phase = ""
 			s.Latest = pin.Generation
 			s.ReportAt = c.selection.At
 			s.TargetAt = time.Time{}
+			if cutover != nil {
+				s.Cutover = cutover
+			}
 		})
 		// Recheck the durable head after publication without creating an idle
 		// self-wake loop for records with future starts relative to frozen T.

@@ -99,20 +99,45 @@ func (p *Plugin) openForward(cfg Config) (*forwardPublisher, error) {
 	if err != nil {
 		return nil, errors.New("configured forward store unavailable; initialize it offline first")
 	}
-	if _, err = s.NativeForwardSelection(ctx, cfg.ForwardReportBook); err != nil {
+	// Native-only stores, or a frozen baseline accepted by the prepared cutover
+	// gate. The runtime never imports a baseline, seeds profiles or edits origins.
+	selection, err := s.ForwardSelection(ctx, cfg.ForwardReportBook)
+	if err != nil {
 		s.Close()
-		return nil, errors.New("configured forward book or native-only preparation is unavailable")
+		return nil, errors.New("configured forward book or native-only/accepted-baseline preparation is unavailable")
 	}
 	status, at, err := s.PreparedForwardHead(ctx)
 	if err != nil {
 		s.Close()
 		return nil, errors.New("configured forward head is unavailable")
 	}
+	var cutover *historyreports.ForwardCutoverStatus
+	if selection.BaseDigest != "" {
+		if cutover, err = forwardCutoverStatus(ctx, s, status.Latest); err != nil {
+			s.Close()
+			return nil, errors.New("configured forward cutover is unavailable")
+		}
+	}
 	w := newForwardPublisher(p, s, cfg.ForwardReportBook)
 	w.status.Latest = status.Latest
 	w.status.ReportAt = at
 	w.status.Projected = status.Through
+	w.status.Cutover = cutover
 	return w, nil
+}
+
+// The recorded H/N0 plus the latest sealed generation's cutover counts, if any.
+func forwardCutoverStatus(ctx context.Context, s *historyreports.ForwardStore, generation string) (*historyreports.ForwardCutoverStatus, error) {
+	if generation != "" {
+		if v, err := s.GenerationCutover(ctx, generation); err != nil || v != nil {
+			return v, err
+		}
+	}
+	cut, err := s.PreparedCutover(ctx)
+	if err != nil || cut == nil {
+		return nil, ErrForwardUnavailable
+	}
+	return &historyreports.ForwardCutoverStatus{ForwardCutover: *cut}, nil
 }
 
 func (p *Plugin) startForward() {
