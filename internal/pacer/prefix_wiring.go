@@ -2,8 +2,12 @@ package pacer
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/prefixevidence"
@@ -121,4 +125,34 @@ func (p *Plugin) augmentPrefixReadback(raw []byte, result any) any {
 	}
 	response.Body = body
 	return response
+}
+
+// prefixEvidencePath is the dedicated prefix-evidence database beside state_path.
+func prefixEvidencePath(statePath string) string {
+	return filepath.Join(filepath.Dir(statePath), "prefix-evidence.sqlite")
+}
+
+// openPrefixEvidence opens the optional prefix-evidence store in its own file.
+// Any failure returns (nil, nil): the evidence is optional and never blocks
+// startup, policy or measurement.
+func openPrefixEvidence(statePath string, now func() time.Time) (*sql.DB, *prefixevidence.Store) {
+	path := prefixEvidencePath(statePath)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, nil
+	}
+	if err = file.Close(); err != nil {
+		return nil, nil
+	}
+	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	if err != nil {
+		return nil, nil
+	}
+	db.SetMaxOpenConns(1)
+	store, err := prefixevidence.Open(db, now)
+	if err != nil {
+		db.Close()
+		return nil, nil
+	}
+	return db, store
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -344,5 +345,49 @@ func TestPrefixEvidenceDoesNotChangeTrackerActivity(t *testing.T) {
 	}
 	if with.tracker != without.tracker {
 		t.Fatalf("tracker state changed by prefix evidence:\n with    %q\n without %q", with.tracker, without.tracker)
+	}
+}
+
+// Regression (lab reload 2026-10-08): prefix tables created inside the state
+// database changed its DDL generation after the guarded measurement feed
+// boundary, and the next start refused with "report feed integrity
+// unavailable". The evidence must live in its own file and a restart must leave
+// the state database's schema generation untouched.
+func TestPrefixEvidenceNeverChangesStateSchemaAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.sqlite")
+	p := startPlugin(t, path)
+	if p.prefixEvidence == nil {
+		t.Fatal("prefix evidence store not opened")
+	}
+	p.Close()
+	version := func() (v int64, prefixTables int64) {
+		db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if err = db.QueryRow(`PRAGMA schema_version`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name LIKE 'prefix%'`).Scan(&prefixTables); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	before, tables := version()
+	if tables != 0 {
+		t.Fatalf("state database contains %d prefix objects", tables)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "prefix-evidence.sqlite")); err != nil {
+		t.Fatal("dedicated prefix evidence database missing", err)
+	}
+	p = startPlugin(t, path)
+	defer p.Close()
+	if p.prefixEvidence == nil || p.measurement == nil {
+		t.Fatal("restart lost prefix evidence or measurement")
+	}
+	after, tables := version()
+	if after != before || tables != 0 {
+		t.Fatalf("state schema generation changed across restart: %d -> %d (prefix objects %d)", before, after, tables)
 	}
 }

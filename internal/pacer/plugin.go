@@ -87,6 +87,7 @@ type Plugin struct {
 	coverageStats      coverageDiagnostics
 	policyEvidence     *policyevidence.Store
 	prefixEvidence     *prefixevidence.Store
+	prefixDB           *sql.DB
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
 	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -269,9 +270,12 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		p.measurementErrors++
 	}
 	// Prefix evidence is equally optional: an open failure only counts as a
-	// measurement error and leaves the policy path untouched.
-	p.prefixEvidence, err = prefixevidence.Open(db, p.now)
-	if err != nil {
+	// measurement error and leaves the policy path untouched. It lives in its own
+	// SQLite file: adding its tables to the state database would change that
+	// database's DDL generation after the guarded measurement feed boundary,
+	// which the feed integrity witness (correctly) refuses.
+	p.prefixDB, p.prefixEvidence = openPrefixEvidence(cfg.StatePath, p.now)
+	if p.prefixEvidence == nil {
 		p.measurementErrors++
 	}
 	measure, err := p.openMeasurements(db)
@@ -323,6 +327,10 @@ func (p *Plugin) Close() {
 	p.workerWait.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.prefixDB != nil {
+		_ = p.prefixDB.Close()
+		p.prefixDB, p.prefixEvidence = nil, nil
+	}
 	if p.db != nil {
 		_ = p.db.Close()
 		p.db = nil
