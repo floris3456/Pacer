@@ -36,7 +36,7 @@ func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome
 	if !enabled || t.Key == "" || t.Decision.Reason == "" {
 		return
 	}
-	entry := decisionEntry{At: p.now(), Chat: t.Key, Provider: c.Provider, Model: t.Model, PreviousAccount: t.PreviousAccount, ActualAuth: c.ID, Proposed: t.Decision, Outcome: outcome}
+	entry := decisionEntry{At: p.now(), Chat: t.Key, RequestID: request, Provider: c.Provider, Model: t.Model, PreviousAccount: t.PreviousAccount, ActualAuth: c.ID, ActualAccount: c.Account, Proposed: t.Decision, Outcome: outcome}
 	body, err := json.Marshal(entry)
 	if err != nil {
 		return
