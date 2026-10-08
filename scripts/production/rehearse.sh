@@ -468,21 +468,29 @@ start_replica() {
   log "run $RUN: replica up (style $STYLE)"
 }
 
-daily_report() {  # runs the reviewed unit's ExecStart (timer mode), then --latest and --day today
-  local exec_line args
+daily_report() {  # runs the reviewed unit's ExecStart (timer mode), then --latest, --day today and --check
+  local exec_line args mounts
   exec_line=$(sed -n 's/^ExecStart=//p' "$RELEASE/systemd/pacer-dry-run-daily.service")
   args=${exec_line#/usr/bin/python3 }
   mkdir -p "$ROOT/reports/pacer-dry-run"
-  local mounts="-v $RELEASE:$RELEASE:ro -v $ROOT/plugins/pacer:$ROOT/plugins/pacer -v $ROOT/reports/pacer-dry-run:$ROOT/reports/pacer-dry-run"
+  mounts="-v $RELEASE:$RELEASE:ro -v $CADDY:$CADDY:ro -v $ROOT/reports/pacer-dry-run:$ROOT/reports/pacer-dry-run"
+  local envs="-e PHASE1_CADDY_DIR=$CADDY -e PHASE1_CPA_URL=http://pacer-rehearsal-cpa:8317"
   # shellcheck disable=SC2086
-  step report-timer-mode 0 docker run --rm --name pacer-rehearsal-tmp-report-1 --network none $mounts "$TOOL_IMAGE" python3 $args
+  step report-timer-mode 0 docker run --rm --name pacer-rehearsal-tmp-report-1 --network "$NET" $envs $mounts "$TOOL_IMAGE" python3 $args
   # shellcheck disable=SC2086
-  step report-latest 0 docker run --rm --name pacer-rehearsal-tmp-report-2 --network none $mounts "$TOOL_IMAGE" python3 $args --latest
+  step report-latest 0 docker run --rm --name pacer-rehearsal-tmp-report-2 --network "$NET" $envs $mounts "$TOOL_IMAGE" python3 $args --latest
   # shellcheck disable=SC2086
-  step report-today 0 docker run --rm --name pacer-rehearsal-tmp-report-3 --network none $mounts "$TOOL_IMAGE" python3 $args --day "$(date -u +%F)"
+  step report-today 0 docker run --rm --name pacer-rehearsal-tmp-report-3 --network "$NET" $envs $mounts "$TOOL_IMAGE" python3 $args --day "$(date -u +%F)"
+  # shellcheck disable=SC2086
+  step report-check 0 docker run --rm --name pacer-rehearsal-tmp-report-4 --network "$NET" $envs $mounts "$TOOL_IMAGE" python3 $args --check
   cp "$ROOT/reports/pacer-dry-run/pacer-dry-run-latest.json" "$OUT/report-latest.json"
-  expect assert-report "$OUT/report-latest.json" \
-    "r['routing_mode'] == 'dry-run' and r['placements']['decisions'] >= 1 and r['placements']['handled'] + r['agreement'].get('no_proposal', 0) == r['placements']['decisions'] and r['integrity']['decision_parse_errors'] == 0"
+  cp "$ROOT/reports/pacer-dry-run/pacer-dry-run-$(date -u +%F).json" "$OUT/report-today.json"
+  expect assert-report-latest "$OUT/report-latest.json" \
+    "r['meta']['day'] == '$(date -u +%F)' and 'day_in_progress' in r['meta']['reasons'] and r['meta']['decisions'] >= 1 and r['meta']['complete'] is False"
+  expect assert-report-today "$OUT/report-today.json" \
+    "r['meta']['complete'] is False and r['meta']['chats'] >= 1 and len(r['placements']) >= 1"
+  expect assert-report-check "$OUT/report-check.out" \
+    "r['status'] == 200 and r['error'] is None and 'day_in_progress' in r['reasons']"
 }
 
 # ------------------------------------------------------------------ one run

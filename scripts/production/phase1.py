@@ -131,7 +131,7 @@ EXIT_OK, EXIT_ERROR, EXIT_REFUSED, EXIT_NOT_IDLE, EXIT_ROLLED_BACK, EXIT_ROLLBAC
 DOCKERFILE = 'ARG BASE\nFROM ${BASE}\nCOPY CLIProxyAPI /CLIProxyAPI/CLIProxyAPI\n'
 UNITS = {
     UNIT_SERVICE: '''[Unit]
-Description=Pacer dry-run daily report (reads Pacer state, writes one report per UTC day)
+Description=Pacer dry-run daily report (archives Pacer's report route, one file per UTC day)
 After=docker.service
 
 [Service]
@@ -139,7 +139,7 @@ Type=oneshot
 UMask=0077
 Nice=10
 NoNewPrivileges=yes
-ExecStart=/usr/bin/python3 -B {release}/dry-run-daily.py --state {state} --out {reports}
+ExecStart=/usr/bin/python3 -B {release}/dry-run-daily.py --out {reports}
 ''',
     TIMER: '''[Unit]
 Description=Daily Pacer dry-run report
@@ -722,18 +722,13 @@ def caddy(action):
 
 
 def units():
-    fields = {'release': RELEASE, 'state': PACER_STATE, 'reports': REPORT_DIR}
+    fields = {'release': RELEASE, 'reports': REPORT_DIR}
     return {name: text.format(**fields) for name, text in UNITS.items()}
 
 
 def daily_check():
-    args = ['--state', str(PACER_STATE), '--check']
-    if SQLITE_IMAGE:
-        cmd = ['docker', 'run', '--rm', '--name', unique('daily'), '--network', 'none',
-               '-v', '%s:%s:ro' % (RELEASE, RELEASE), '-v', '%s:%s' % (PACER_DIR, PACER_DIR),
-               SQLITE_IMAGE, 'python3', '-B', str(RELEASE / 'dry-run-daily.py')] + args
-    else:
-        cmd = [sys.executable, '-B', str(RELEASE / 'dry-run-daily.py')] + args
+    """Run the bundled archiver's --check: it GETs Pacer's report route for today."""
+    cmd = [sys.executable, '-B', str(RELEASE / 'dry-run-daily.py'), '--check']
     out = run(cmd, check=False, timeout=120)
     return out.returncode == 0, jbody(out.stdout) or {'stderr': out.stderr.strip()[-200:]}
 
@@ -991,7 +986,8 @@ def verify_candidate(st, pre, since, inference_session=None):
     c['others_unchanged'] = v['others'] == pre['others']
     c['cpamp_unchanged'] = container_status(CPAMP) == pre['cpamp']
     ok, v['daily_check'] = daily_check()
-    c['daily_report_check'] = ok and v['daily_check'].get('routing_mode') == mode
+    c['daily_report_check'] = (ok and v['daily_check'].get('status') == 200
+                               and 'day_in_progress' in (v['daily_check'].get('reasons') or []))
     if SYSTEMD:
         c['timer_enabled'] = run(['systemctl', 'is-enabled', TIMER], check=False).stdout.strip() == 'enabled'
     return finish_checks(v, c)
@@ -1232,6 +1228,7 @@ def cutover(args):
             r['result'] = 'rolled back' if ok else 'ROLLBACK INCOMPLETE'
             return EXIT_ROLLED_BACK if ok else EXIT_ROLLBACK_FAILED
         r['result'] = 'deployed'
+        r['cutover_day'] = r['started'][:10]
         return EXIT_OK
     except Refused as e:
         r['result'] = 'refused: %s' % e
