@@ -17,7 +17,7 @@ func TestDryRunTracePreservesActualVersusProposedWithoutPrivateHeaders(t *testin
 	}
 	ticket := attempt{Key: "opaque-chat-digest", Caller: "private-caller", Session: "private-session", Model: "claude-opus-5-5", PreviousAccount: "prior-account", Decision: routing.Decision{Auth: "a", Account: p.creds["a"].Account, Handled: true, Reason: "cold_move"}}
 	for i := 0; i < 210; i++ {
-		p.recordDecision(ticket, p.creds["b"], "admitted")
+		p.recordDecision("request", ticket, p.creds["b"], "admitted")
 	}
 	p.Close()
 	p = startPlugin(t, path)
@@ -36,7 +36,7 @@ func TestDryRunTracePreservesActualVersusProposedWithoutPrivateHeaders(t *testin
 	if err = p.setMode("off"); err != nil {
 		t.Fatal(err)
 	}
-	p.recordDecision(ticket, p.creds["a"], "admitted")
+	p.recordDecision("request", ticket, p.creds["a"], "admitted")
 	var count int
 	if err = p.db.QueryRow(`SELECT count(*) FROM pacer_decisions`).Scan(&count); err != nil || count != 210 {
 		t.Fatal(count, err)

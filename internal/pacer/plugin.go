@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/capacity"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/dryrun"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
@@ -92,6 +93,9 @@ type Plugin struct {
 	capacityStore      *capacity.Store
 	capacityDB         *sql.DB
 	capacityViews      map[string]capacityState
+	dryRun             *dryrun.Ledger
+	dryRunDB           *sql.DB
+	dryRunPruned       time.Time
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
 	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -208,6 +212,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		}
 		cfg.Routing.Mode = mode
 		p.cfg = cfg
+		p.dryRunMarkLocked()
 		return registration(p.policy != nil), nil
 	}
 	forward, err := p.openForward(cfg)
@@ -330,6 +335,16 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if p.capacityStore == nil {
 		p.measurementErrors++
 	}
+	// The dry-run evidence ledger (installation chat_ref secret and mode marks)
+	// is separate for the same reason; without it the report route refuses.
+	if p.dryRunDB != nil {
+		_ = p.dryRunDB.Close()
+	}
+	p.dryRunDB, p.dryRun = openDryRunEvidence(cfg.StatePath, p.now)
+	if p.dryRun == nil {
+		p.measurementErrors++
+	}
+	p.dryRunMarkLocked()
 	return registration(p.policy != nil), nil
 }
 
@@ -338,6 +353,7 @@ func (p *Plugin) Close() {
 	if !p.stopped {
 		p.stopped = true
 		close(p.workerDone)
+		p.dryRunMarkLocked()
 	}
 	p.mu.Unlock()
 	p.stopForward(true)
@@ -351,6 +367,10 @@ func (p *Plugin) Close() {
 	if p.capacityDB != nil {
 		_ = p.capacityDB.Close()
 		p.capacityDB, p.capacityStore = nil, nil
+	}
+	if p.dryRunDB != nil {
+		_ = p.dryRunDB.Close()
+		p.dryRunDB, p.dryRun = nil, nil
 	}
 	if p.db != nil {
 		_ = p.db.Close()
@@ -387,6 +407,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if !p.stopped {
 			p.stopped = true
 			close(p.workerDone)
+			p.dryRunMarkLocked()
 		}
 		p.mu.Unlock()
 		p.stopForward(false)
@@ -445,7 +466,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return result, err
 	case pluginabi.MethodManagementRegister:
-		result := map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}, reportRoutes()...)}
+		result := map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}, {"Method": "GET", "Path": "/plugins/pacer/dry-run-report"}}, reportRoutes()...)}
 		result["routes"] = append(result["routes"].([]map[string]string), p.registerForwardManagement(raw)...)
 		return result, nil
 	case pluginabi.MethodManagementHandle:
@@ -688,7 +709,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
-					p.recordDecision(t, c, e.Code)
+					p.recordDecision(req.RequestID, t, c, e.Code)
 					return refuse(e.Code, e.Message)
 				}
 				return refuse("quota_state_unavailable", "Pacer binding state is unavailable")
@@ -697,7 +718,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			t.Key, t.Auth, t.Binding = key, auth, b
 			p.requests[req.RequestID] = t
 			p.mu.Unlock()
-			p.recordDecision(t, c, "admitted")
+			p.recordDecision(req.RequestID, t, c, "admitted")
 		}
 	}
 	clear := []string{controlHeader, requestHeader, "X-Quota-Binding", "X-Quota-Protocol"}
@@ -759,6 +780,9 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	}
 	if (req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/observations") || (req.Method == "POST" && req.Path == "/v0/management/plugins/pacer/observations/reconcile") {
 		return p.quotaAPI(req)
+	}
+	if req.Method == "GET" && req.Path == dryRunReportRoute {
+		return p.dryRunReport(req)
 	}
 	if req.Method == "GET" && req.Path == "/v0/resource/plugins/pacer/index.html" {
 		return pluginapi.ManagementResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/html; charset=utf-8"}, "Cache-Control": {"no-store"}, "Content-Security-Policy": {"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'"}}, Body: management.Page}
