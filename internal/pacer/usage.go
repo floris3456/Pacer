@@ -98,7 +98,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			}
 			policy = map[string]any{"protocol": 1, "contract_revision": 2, "endpoint": "/v1/plugins/pacer/cache-policy", "ttls": []string{"5m", "1h"}, "provider_routes": routes, "transports": []string{"http"}, "formats": []string{"claude", "openai-response"}, "enforced": true}
 		}
-		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy})
+		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy, "auxiliary_ack": map[string]any{"version": 1, "kinds": []string{"compaction", "title", "generate"}}})
 	}
 	token := strings.TrimPrefix(authorization, "Bearer ")
 	if token == authorization || len(token) == 0 || len(token) > 8192 {

@@ -369,7 +369,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return nil, err
 		}
 		p.observe(req.RequestID, req.Metadata, req.ResponseHeaders, p.now())
-		return pluginapi.ResponseInterceptResponse{Headers: p.ack(req.RequestID)}, nil
+		return pluginapi.ResponseInterceptResponse{Headers: p.ack(req.RequestID), ClearHeaders: quotaAckHeaders()}, nil
 	case pluginabi.MethodResponseInterceptStreamChunk:
 		var req pluginapi.StreamChunkInterceptRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -377,7 +377,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		if req.ChunkIndex == -1 {
 			p.observe(req.RequestID, req.Metadata, req.ResponseHeaders, p.now())
-			return pluginapi.StreamChunkInterceptResponse{Headers: p.ack(req.RequestID)}, nil
+			return pluginapi.StreamChunkInterceptResponse{Headers: p.ack(req.RequestID), ClearHeaders: quotaAckHeaders()}, nil
 		}
 		return pluginapi.StreamChunkInterceptResponse{}, nil
 	case pluginabi.MethodRequestComplete:
@@ -590,11 +590,28 @@ func (p *Plugin) ack(id string) http.Header {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	t := p.requests[id]
-	if t.Claim == nil || t.Binding.Key == "" {
+	if t.Claim == nil || t.Key == "" || t.Auth == "" {
+		return nil
+	}
+	if t.Binding.Key == "" {
+		// First auxiliaries on a separate provider route have no primary binding
+		// to acknowledge. Admit has authenticated their claim without creating
+		// one. Prove only this helper request; never invent a generation/alias.
+		switch t.Claim.Kind {
+		case "compaction", "title", "generate":
+			raw, _ := json.Marshal(map[string]any{"protocol": 1, "kind": t.Claim.Kind, "request": t.Claim.Request})
+			return http.Header{"X-Quota-Protocol": {"1"}, "X-Quota-Auxiliary": {base64.RawURLEncoding.EncodeToString(raw)}}
+		}
 		return nil
 	}
 	raw, _ := json.Marshal(map[string]any{"protocol": 1, "generation": t.Binding.Generation, "alias": t.Binding.Alias})
 	return http.Header{"X-Quota-Protocol": {"1"}, "X-Quota-Binding": {base64.RawURLEncoding.EncodeToString(raw)}}
+}
+
+// Upstream responses cannot supply coordinator acknowledgements. The host
+// removes these before applying the exact headers from this admitted attempt.
+func quotaAckHeaders() []string {
+	return []string{"X-Quota-Protocol", "X-Quota-Binding", "X-Quota-Auxiliary"}
 }
 
 func refuse(code, message string) pluginapi.RequestInterceptResponse {
