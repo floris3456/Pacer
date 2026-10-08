@@ -80,6 +80,15 @@ when the newest observation postdates the state's revision.
   The oldest overflow to `pending_overflow`, and age goes to `settlement_timeout`.
   A closed attempt never promotes, even if its counterpart arrives later.
 - Durable across restart. The schema is version 1 and is validated on reopen.
+- Retention, run by each `sweep` (at most 1000 deleted rows per call, anchors first,
+  then attempts, oldest first):
+  - anchors whose primary start is older than 2 h are deleted. A warming attempt that
+    arrives after its anchor was removed gets `no_primary_anchor`;
+  - terminal attempts (both sides present, or closed) whose start is older than 7 days
+    are deleted, except the newest attempt of each (caller, installation, session,
+    route, epoch). Age falls back to arrival time for a settlement without a fact;
+  - pending rows are never deleted.
+  `Observe` and `Settle` each run two sweeps, so a single call can delete up to 2000 rows.
 
 ## Verification
 

@@ -13,6 +13,12 @@ const (
 	pendingLimit = 1024
 	// pendingAge bounds how long a one-sided attempt may wait for its counterpart.
 	pendingAge = 15 * time.Minute
+	// anchorRetention keeps anchors for 2h by primary start: max TTL 1h plus slack.
+	anchorRetention = 2 * time.Hour
+	// attemptRetention keeps terminal attempts for 7 days by upstream start.
+	attemptRetention = 7 * 24 * time.Hour
+	// retentionCap bounds the rows one sweep() call deletes, across both kinds.
+	retentionCap = 1000
 )
 
 // Store borrows db. It never closes it or changes its connection settings, and
@@ -469,9 +475,11 @@ func dependents(ctx context.Context, tx *sql.Tx, k anchorKey) ([]string, error) 
 
 // sweep closes one-sided attempts older than pendingAge, then the oldest one-sided
 // attempts beyond pendingLimit. Closed attempts are terminal: a late counterpart
-// is recorded but never promotes them.
+// is recorded but never promotes them. It then deletes retired rows, at most
+// retentionCap in total: anchors first, then terminal attempts. Pending rows are
+// never retired.
 func sweep(ctx context.Context, tx *sql.Tx, now int64) error {
-	aged, err := pendingIDs(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) AND arrived_ns<=? ORDER BY arrived_ns, rowid`, now-int64(pendingAge))
+	aged, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) AND arrived_ns<=? ORDER BY arrived_ns, rowid`, now-int64(pendingAge))
 	if err != nil {
 		return err
 	}
@@ -485,7 +493,7 @@ func sweep(ctx context.Context, tx *sql.Tx, now int64) error {
 		return dbError(ctx, err)
 	}
 	if excess := open - pendingLimit; excess > 0 {
-		overflow, err := pendingIDs(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) ORDER BY arrived_ns, rowid LIMIT ?`, int64(excess))
+		overflow, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts WHERE closed='' AND ((fact<>'') <> (outcome<>'')) ORDER BY arrived_ns, rowid LIMIT ?`, int64(excess))
 		if err != nil {
 			return err
 		}
@@ -495,11 +503,64 @@ func sweep(ctx context.Context, tx *sql.Tx, now int64) error {
 			}
 		}
 	}
+	budget := retentionCap
+	n, err := deleteAnchors(ctx, tx, now-int64(anchorRetention), budget)
+	if err != nil {
+		return err
+	}
+	budget -= n
+	if budget > 0 {
+		if _, err := deleteTerminal(ctx, tx, now-int64(attemptRetention), budget); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func pendingIDs(ctx context.Context, tx *sql.Tx, query string, arg int64) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, query, arg)
+// deleteAnchors removes up to limit anchors whose primary start is before cutoff,
+// oldest first. A warming attempt that arrives later finds no anchor and gets
+// no_primary_anchor, which is the conservative outcome.
+func deleteAnchors(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (int, error) {
+	res, err := tx.ExecContext(ctx, `DELETE FROM prefix_anchors WHERE rowid IN (SELECT rowid FROM prefix_anchors WHERE started_ns<? ORDER BY started_ns, rowid LIMIT ?)`, cutoff, limit)
+	if err != nil {
+		return 0, dbError(ctx, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, dbError(ctx, err)
+	}
+	return int(n), nil
+}
+
+// deleteTerminal removes up to limit terminal attempts (both sides present, or
+// closed) whose age is before cutoff, oldest first. Age is the upstream start, or
+// the arrival time for a settlement without a fact. The newest attempt of each
+// (scope, epoch) is always kept so readback still has its last observation.
+func deleteTerminal(ctx context.Context, tx *sql.Tx, cutoff int64, limit int) (int, error) {
+	const age = `(CASE WHEN started_ns>0 THEN started_ns ELSE arrived_ns END)`
+	ids, err := idsOf(ctx, tx, `SELECT attempt_id FROM prefix_attempts
+ WHERE (closed<>'' OR (fact<>'' AND outcome<>'')) AND `+age+`<?
+   AND attempt_id NOT IN (
+     SELECT attempt_id FROM (
+       SELECT attempt_id, ROW_NUMBER() OVER (PARTITION BY caller, installation, session, route, epoch ORDER BY started_ns DESC, attempt_id DESC) AS rn
+       FROM prefix_attempts WHERE fact<>'')
+     WHERE rn=1)
+ ORDER BY `+age+`, rowid LIMIT ?`, cutoff, int64(limit))
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM prefix_attempts WHERE attempt_id=?`, id); err != nil {
+			return 0, dbError(ctx, err)
+		}
+	}
+	return len(ids), nil
+}
+
+// idsOf collects the ids of a query before any write, because the single
+// transaction connection cannot run a write while a result set is open.
+func idsOf(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, dbError(ctx, err)
 	}
