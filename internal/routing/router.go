@@ -22,6 +22,7 @@ type Account struct {
 	Budgets          []Budget
 	Size, ShortValue float64 // dollars per percent; zero means unmeasured
 	WarmBurn         float64 // dollars/hour from compatible, observed warm stretches
+	RunwayUnknown    bool    // measured capacity exists, but outstanding warm load is unbounded
 	KeyWarm          bool
 }
 
@@ -55,8 +56,8 @@ type Decision struct {
 
 type score struct {
 	Account
-	pace, room       float64
-	known, hard, fit bool
+	pace, room               float64
+	known, hard, fit, runway bool
 }
 
 func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
@@ -77,12 +78,17 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 		return chosen(*current, "protected", false)
 	}
 	eligible := make([]score, 0, len(scores))
+	runwayBlocked := false
 	for _, s := range scores {
-		if s.known && !s.hard {
+		runwayBlocked = runwayBlocked || (s.known && !s.hard && !s.runway)
+		if s.known && !s.hard && (forced || s.runway) {
 			eligible = append(eligible, s)
 		}
 	}
 	if len(eligible) == 0 {
+		if runwayBlocked {
+			return Decision{Reason: "placement_runway_unknown_or_exhausting", Forced: forced}
+		}
 		return Decision{Reason: "no_known_budget", Forced: forced}
 	}
 	// Compare tie candidates to a fixed maximum (not pairwise tolerance, which
@@ -140,7 +146,7 @@ func chosen(s score, reason string, forced bool) Decision {
 }
 
 func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
-	s := score{Account: a, known: len(a.Budgets) > 0, fit: true, room: math.Inf(1), pace: math.Inf(1)}
+	s := score{Account: a, known: len(a.Budgets) > 0, fit: true, runway: !a.RunwayUnknown, room: math.Inf(1), pace: math.Inf(1)}
 	longest := int64(0)
 	for _, b := range a.Budgets {
 		if b.Seconds > longest {
@@ -193,6 +199,7 @@ func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
 		}
 		if a.ShortValue > 0 && a.WarmBurn > 0 && a.WarmBurn*b.Reset.Sub(now).Hours() > room {
 			s.fit = false
+			s.runway = false
 		}
 	}
 	if math.IsInf(s.room, 1) {

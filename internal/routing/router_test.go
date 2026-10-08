@@ -70,11 +70,32 @@ func TestPlacementFitRunwayAndFallbackDoNotEvictWarmChats(t *testing.T) {
 		t.Fatal(d)
 	}
 	b.Budgets[0].Remaining = 10
+	if d := Pick(Default(), instant, Chat{ExpectedValue: 50}, []Account{a, b}); d.Auth != "b" {
+		t.Fatal("most-room fallback bypassed the runway guard", d)
+	}
+	a.WarmBurn = 0 // With a verified zero load the ordinary fit fallback remains valid.
 	if d := Pick(Default(), instant, Chat{ExpectedValue: 50}, []Account{a, b}); d.Auth != "a" {
 		t.Fatal(d)
 	}
 	if d := Pick(Default(), instant, Chat{Account: "b", ExpectedValue: 50}, []Account{a, b}); d.Auth != "b" {
 		t.Fatal("fallback caused discretionary move", d)
+	}
+}
+
+func TestUnknownOrExhaustingRunwayCannotAcceptNewPlacements(t *testing.T) {
+	a := account("a", 80, 1)
+	a.ShortValue = .4
+	a.WarmBurn = 20
+	if d := Pick(Default(), instant, Chat{}, []Account{a}); d.Handled {
+		t.Fatal("all-overloaded fallback placed new chat", d)
+	}
+	a.WarmBurn = 0
+	a.RunwayUnknown = true
+	if d := Pick(Default(), instant, Chat{}, []Account{a}); d.Handled {
+		t.Fatal("unknown load became zero burn", d)
+	}
+	if d := Pick(Default(), instant, Chat{Account: "a", ProtectedUntil: instant.Add(time.Hour)}, []Account{a}); !d.Handled || d.Auth != "a" || d.Forced {
+		t.Fatal("runway uncertainty evicted warm context", d)
 	}
 }
 

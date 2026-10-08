@@ -17,15 +17,35 @@
 <script>
 (() => {
   'use strict';
-  let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [];
+  let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
+  const pending = new Map();let allowBridge=true;
   const root = '/v0/management/plugins/pacer';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  function bridgeCall(path,method,body){
+    if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
+    return new Promise((resolve,reject)=>{
+      const id='p'+Date.now().toString(36)+'_'+(++sequence);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},15000);
+      pending.set(id,{resolve,reject,timer});
+      window.parent.postMessage({type:'pacer:request',version:1,id,method,path,...(body===undefined?{}:{body})},location.origin);
+    });
+  }
+  window.addEventListener('message',event=>{
+    if(window.parent===window||event.source!==window.parent||event.origin!==location.origin)return;
+    const data=event.data;if(!data||data.version!==1)return;
+    if(data.type==='pacer:bridge-ready'&&allowBridge&&!key&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
+    if(data.type!=='pacer:response'||typeof data.id!=='string')return;
+    const call=pending.get(data.id);if(!call)return;pending.delete(data.id);clearTimeout(call.timer);
+    if(data.ok===true)call.resolve(data.data);else call.reject(Error(typeof data.error==='string'?data.error.slice(0,500):'Management request failed'));
+  });
   async function api(path, method='GET', body) {
     if (!allowed.has(method+' '+path)) throw Error('Management operation is not allowed');
+    const startedGeneration=generation;
+    if(bridge){const data=await bridgeCall(path,method,body);if(startedGeneration!==generation)throw Error('Management connection changed');return data}
     const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
     if (!response.ok) {const details=await response.json().catch(()=>({}));throw Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.')}
-    return response.json();
+    const data=await response.json();if(startedGeneration!==generation)throw Error('Management connection changed');return data;
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
   function row(target, values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value??'Unknown';tr.append(td)}el(target).append(tr);return tr}
@@ -52,9 +72,9 @@
     else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.'}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
-  el('signin').onsubmit=async event=>{event.preventDefault();key=el('key').value;try{await api(root+'/state');el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  el('disconnect').onclick=()=>{key='';el('workspace').hidden=true;el('login').hidden=false;message('Disconnected')};
-  document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(key)refresh()});
+  el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
+  el('disconnect').onclick=()=>{key='';allowBridge=false;bridge=false;connected=false;generation++;for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];for(const id of ['accounts','windows','key-rows','catalogue'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')};
+  document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
@@ -78,5 +98,6 @@
   }
   el('model-form').onsubmit=event=>{event.preventDefault();saveModel()};
   el('model-reset').onclick=()=>saveModel(true);
+  if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
 })();
 </script></body></html>

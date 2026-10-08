@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
@@ -50,23 +51,27 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
-	mu             sync.Mutex
-	Host           Host
-	now            func() time.Time
-	db             *sql.DB
-	chats          *tracker.Store
-	observer       *observation.Store
-	cfg            Config
-	creds          map[string]credential
-	requests       map[string]attempt
-	decisionErrors int64
-	workerOnce     sync.Once
-	workerDone     chan struct{}
-	workerWait     sync.WaitGroup
-	refreshMu      sync.Mutex
-	discoverMu     sync.Mutex
-	lastDiscover   time.Time
-	stopped        bool
+	observationMu     sync.Mutex
+	measurement       *measurement.Store
+	measurements      map[string]measurement.Report
+	measurementErrors int64
+	mu                sync.Mutex
+	Host              Host
+	now               func() time.Time
+	db                *sql.DB
+	chats             *tracker.Store
+	observer          *observation.Store
+	cfg               Config
+	creds             map[string]credential
+	requests          map[string]attempt
+	decisionErrors    int64
+	workerOnce        sync.Once
+	workerDone        chan struct{}
+	workerWait        sync.WaitGroup
+	refreshMu         sync.Mutex
+	discoverMu        sync.Mutex
+	lastDiscover      time.Time
+	stopped           bool
 }
 
 func New(host Host) *Plugin {
@@ -164,6 +169,13 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		db.Close()
 		return nil, err
 	}
+	measure, err := p.openMeasurements(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	p.measurement = measure
+	p.measurements = map[string]measurement.Report{}
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
 	return registration(), nil
@@ -367,7 +379,20 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		if readErr != nil {
 			continue
 		}
-		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(provider, req.Model, windows, p.now())})
+		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(provider, req.Model, windows, p.now())}
+		if report, ok := p.measurements[c.Account]; ok && p.now().Sub(report.AsOf) < time.Minute {
+			if report.SevenDay.Known {
+				account.Size = report.SevenDay.USDPerPercent
+			}
+			if report.FiveHour.Known {
+				account.ShortValue = report.FiveHour.USDPerPercent
+				account.RunwayUnknown = !report.WarmBurn.Bounded
+			}
+			if report.WarmBurn.Bounded {
+				account.WarmBurn = report.WarmBurn.HighUSDPerHour
+			}
+		}
+		accounts = append(accounts, account)
 	}
 	p.mu.Unlock()
 	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active}, accounts)
@@ -483,10 +508,18 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			if err != nil {
 				return resource(503, map[string]string{"error": "observation_unavailable"})
 			}
-			accounts = append(accounts, map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}})
+			row:=map[string]any{"id": c.ID, "auth_index":c.Index,"alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
+			base:=routing.Account{Auth:c.ID,Account:c.Account,Budgets:routingBudgets(c.Provider,"",windows,p.now())}
+			row["pace_unit"]="%/h · equal sizes"
+			if report,ok:=p.measurements[c.Account];ok {
+				row["measurement"]=map[string]any{"as_of":report.AsOf,"five_hour":report.FiveHour,"seven_day":report.SevenDay,"warm_burn":report.WarmBurn,"coverage":report.Coverage}
+				if report.SevenDay.Known && p.now().Sub(report.AsOf)<time.Minute{base.Size=report.SevenDay.USDPerPercent;row["pace_unit"]="$/h"}
+			}
+			if d:=routing.Pick(routing.Default(),p.now(),routing.Chat{},[]routing.Account{base});d.Handled {row["pace"]=d.Pace}
+			accounts = append(accounts,row)
 		}
 		sort.Slice(accounts, func(i, j int) bool { return fmt.Sprint(accounts[i]["id"]) < fmt.Sprint(accounts[j]["id"]) })
-		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors})
+		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors,"measurement":map[string]any{"delivery":"native-in-memory-best-effort","coverage":"No drained delivery watermark: account-size estimates remain unmeasured.","errors":p.measurementErrors}})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/routing" {
 		if len(req.Body) > 1024 {

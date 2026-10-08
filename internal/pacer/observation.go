@@ -61,7 +61,7 @@ func (p *Plugin) observeAuth(auth string, headers http.Header, at time.Time) {
 	}
 	samples := observation.Headers(c.Provider, headers, at)
 	if len(samples) > 0 {
-		_ = observer.Observe(c.Account, c.Provider, samples)
+		p.storeObservations(c, samples)
 	}
 }
 
@@ -75,7 +75,7 @@ func (p *Plugin) observeCaptured(auth string, headers http.Header, captured map[
 	}
 	samples := observation.HeadersCaptured(c.Provider, headers, captured)
 	if len(samples) > 0 {
-		_ = observer.Observe(c.Account, c.Provider, samples)
+		p.storeObservations(c, samples)
 	}
 }
 
@@ -93,6 +93,7 @@ func (p *Plugin) startWorker() {
 				case <-ticker.C:
 					p.discover()
 					p.reconcile()
+					p.refreshMeasurements()
 				}
 			}
 		}()
@@ -200,5 +201,5 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if err != nil {
 		return
 	}
-	_ = p.observer.Observe(c.Account, c.Provider, windows)
+	p.storeObservations(c, windows)
 }
