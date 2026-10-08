@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
@@ -54,7 +55,18 @@ func (p *Plugin) captureUsageCredential(request string, c credential) error {
 		return err
 	}
 	_, err = p.db.Exec(`INSERT INTO pacer_usage_credentials(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, request, c.ID, raw)
-	return err
+	if err != nil {
+		return err
+	}
+	var stored []byte
+	if err = p.db.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, request, c.ID).Scan(&stored); err != nil {
+		return err
+	}
+	var original measurement.NativeCredential
+	if json.Unmarshal(stored, &original) != nil || original != value {
+		return errors.New("credential identity changed within logical dispatch")
+	}
+	return nil
 }
 
 func (p *Plugin) recordUsage(raw []byte) error {

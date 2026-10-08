@@ -18,6 +18,14 @@ func TestDelayedNativeUsageKeepsItsCapturedAccountAndSourceAfterRestart(t *testi
 	if err := p.captureUsageCredential("logical", c); err != nil {
 		t.Fatal(err)
 	}
+	changed := c
+	changed.Account = "replacement-account"
+	if err := p.captureUsageCredential("logical", changed); err == nil {
+		t.Fatal("a retry rebound immutable account identity")
+	}
+	if err := p.captureUsageCredential("logical", c); err != nil {
+		t.Fatal("original identity retry refused", err)
+	}
 	p.Close()
 	p = startPlugin(t, path)
 	defer p.Close()

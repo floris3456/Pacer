@@ -527,6 +527,9 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		c, known = p.creds[auth]
 		p.mu.Unlock()
 	}
+	if ok && !known && (managed || t.Claim != nil) {
+		return refuse("quota_state_unavailable", "Selected credential identity could not be verified")
+	}
 	if ok && known {
 		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
 			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
