@@ -59,12 +59,14 @@ type realCoverage struct {
 	Kept  int `json:"kept"`
 }
 
-// realBoundary is the part of real-boundary.json the parity gate reads.
+// realBoundary is the part of real-boundary.json the parity gate reads. GoArch
+// is the GOARCH the original code ran under.
 type realBoundary struct {
 	Cases      int                     `json:"cases"`
 	CaseCounts map[string]int          `json:"case_counts"`
 	Caps       map[string]int          `json:"caps"`
 	Coverage   map[string]realCoverage `json:"coverage"`
+	GoArch     string                  `json:"goarch"`
 }
 
 // realParityGate lists every reason the run cannot count as a pass. A green run
@@ -88,6 +90,11 @@ func realParityGate(cases []historicalCase, report realParityReport, b realBound
 	}
 	if !reflect.DeepEqual(counts, b.CaseCounts) {
 		reasons = append(reasons, "per-view case counts differ from boundary")
+	}
+	// The compiler fuses x*y+z on arm64 but not on amd64, so float outputs are
+	// only comparable when the oracle and this replay share one GOARCH.
+	if b.GoArch != runtime.GOARCH {
+		reasons = append(reasons, fmt.Sprintf("oracle ran under GOARCH %q, replay under %q", b.GoArch, runtime.GOARCH))
 	}
 	views := make([]string, 0, len(b.Caps))
 	for view := range b.Caps {
@@ -289,7 +296,8 @@ func realCompareCase(ctx context.Context, r *Reader, tc historicalCase, exports 
 }
 
 // realDomainDiff compares the domain value exactly as exactJSON does: marshal the
-// Pacer value and compare with the compacted original bytes.
+// Pacer value and compare with the compacted original bytes. A history report is
+// compared up to the order the original leaves undefined (realHistoryJSON).
 func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 	b, e := json.Marshal(got)
 	if e != nil {
@@ -299,10 +307,14 @@ func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 	if json.Compact(&compact, want) != nil {
 		return "/oracle-invalid", true
 	}
-	if bytes.Equal(b, compact.Bytes()) {
+	w := compact.Bytes()
+	if _, ok := got.(LegacyHistoryReport); ok {
+		b, w = realHistoryOrder(b, w, realHistoryJSON)
+	}
+	if bytes.Equal(b, w) {
 		return "", false
 	}
-	if p, ok := realJSONPointer(b, compact.Bytes()); ok {
+	if p, ok := realJSONPointer(b, w); ok {
 		return p, true
 	}
 	// Bytes differ but the documents are structurally equal (formatting only).
@@ -311,8 +323,16 @@ func realDomainDiff(got any, want json.RawMessage) (string, bool) {
 
 // realExportDiff compares export bodies bytewise, except for CSV views the
 // historical test already compares as row multisets (the original Go map
-// iteration order is not a semantic difference there).
+// iteration order is not a semantic difference there), and history exports,
+// compared up to the order the original leaves undefined.
 func realExportDiff(format, view string, got, want []byte) (string, bool) {
+	if view == "history" {
+		canonical := realHistoryJSON
+		if format == "csv" {
+			canonical = realHistoryCSV
+		}
+		got, want = realHistoryOrder(got, want, canonical)
+	}
 	if format == "json" {
 		if bytes.Equal(got, want) {
 			return "", false
@@ -367,6 +387,137 @@ func realCSVRows(b []byte) ([]string, error) {
 		sort.Strings(out[1:])
 	}
 	return out, nil
+}
+
+// realHistoryTie is what fixes a window's place in an original history report.
+// Derive ranges over a map and sorts one account's windows by reset_ms with
+// sort.Slice; Report appends current_pools in that order and stable-sorts
+// windows by current-first, then reset_ms. Adjacent windows of one account that
+// agree on reset_ms and on being current therefore have no defined order.
+type realHistoryTie struct {
+	Account string `json:"account"`
+	Status  string `json:"status"`
+	Reset   int64  `json:"reset_ms"`
+}
+
+func (a realHistoryTie) same(b realHistoryTie) bool {
+	return a.Account == b.Account && a.Reset == b.Reset && (a.Status == "current") == (b.Status == "current")
+}
+
+// realSortTies sorts, by bytes, each run of adjacent items whose ties are the
+// same. Nothing moves across a run boundary.
+func realSortTies(items [][]byte, ties []realHistoryTie) {
+	for i := 0; i < len(items); {
+		j := i + 1
+		for j < len(items) && ties[j].same(ties[i]) {
+			j++
+		}
+		run := items[i:j]
+		sort.Slice(run, func(x, y int) bool { return bytes.Compare(run[x], run[y]) < 0 })
+		i = j
+	}
+}
+
+// realHistoryOrder canonicalizes both sides, or neither when either side cannot
+// be, so a malformed body still meets the exact comparison.
+func realHistoryOrder(got, want []byte, canonical func([]byte) ([]byte, bool)) ([]byte, []byte) {
+	g, okGot := canonical(got)
+	w, okWant := canonical(want)
+	if !okGot || !okWant {
+		return got, want
+	}
+	return g, w
+}
+
+// realHistoryJSON returns a history report document with the tie runs of
+// windows and current_pools sorted. Every other byte is kept: ok is false unless
+// rebuilding doc without sorting reproduces it exactly.
+func realHistoryJSON(doc []byte) ([]byte, bool) {
+	d := json.NewDecoder(bytes.NewReader(doc))
+	if t, e := d.Token(); e != nil || t != json.Delim('{') {
+		return nil, false
+	}
+	array := func(items [][]byte) []byte {
+		return append(append([]byte{'['}, bytes.Join(items, []byte{','})...), ']')
+	}
+	var same, sorted bytes.Buffer
+	same.WriteByte('{')
+	sorted.WriteByte('{')
+	for first := true; d.More(); first = false {
+		t, e := d.Token()
+		key, isKey := t.(string)
+		var value json.RawMessage
+		if e != nil || !isKey || d.Decode(&value) != nil {
+			return nil, false
+		}
+		name, _ := json.Marshal(key)
+		if !first {
+			name = append([]byte{','}, name...)
+		}
+		name = append(name, ':')
+		same.Write(name)
+		sorted.Write(name)
+		if key != "windows" && key != "current_pools" {
+			same.Write(value)
+			sorted.Write(value)
+			continue
+		}
+		var raw []json.RawMessage
+		if json.Unmarshal(value, &raw) != nil {
+			return nil, false
+		}
+		items := make([][]byte, len(raw))
+		ties := make([]realHistoryTie, len(raw))
+		for i, item := range raw {
+			if json.Unmarshal(item, &ties[i]) != nil {
+				return nil, false
+			}
+			items[i] = item
+		}
+		same.Write(array(items))
+		realSortTies(items, ties)
+		sorted.Write(array(items))
+	}
+	if t, e := d.Token(); e != nil || t != json.Delim('}') {
+		return nil, false
+	}
+	rest := doc[d.InputOffset():]
+	same.WriteByte('}')
+	same.Write(rest)
+	sorted.WriteByte('}')
+	sorted.Write(rest)
+	if !bytes.Equal(same.Bytes(), doc) {
+		return nil, false
+	}
+	return sorted.Bytes(), true
+}
+
+// realHistoryCSV is realHistoryJSON for the history CSV export, whose rows list
+// windows and end in the window's JSON. The header row stays first.
+func realHistoryCSV(doc []byte) ([]byte, bool) {
+	rows, e := csv.NewReader(bytes.NewReader(doc)).ReadAll()
+	if e != nil || len(rows) == 0 {
+		return nil, false
+	}
+	items := make([][]byte, len(rows))
+	ties := make([]realHistoryTie, len(rows))
+	for i, row := range rows {
+		var b bytes.Buffer
+		w := csv.NewWriter(&b)
+		if w.Write(row) != nil {
+			return nil, false
+		}
+		w.Flush()
+		items[i] = b.Bytes()
+		if i > 0 && json.Unmarshal([]byte(row[len(row)-1]), &ties[i]) != nil {
+			return nil, false
+		}
+	}
+	if !bytes.Equal(bytes.Join(items, nil), doc) {
+		return nil, false
+	}
+	realSortTies(items[1:], ties[1:])
+	return bytes.Join(items, nil), true
 }
 
 // realJSONPointer returns the first differing RFC 6901 pointer. Object keys are

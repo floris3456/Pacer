@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -104,7 +105,10 @@ func TestGenerateRealOracle(t *testing.T) {
 	for _, item := range realChildTests {
 		cmd := exec.CommandContext(ctx, "go", "test", "-count=1", "-timeout=55m", "-overlay", overlayPath, "-run", "^"+item.test+"$", "-v", "./internal/"+item.pkg+"/usagehistory")
 		cmd.Dir = module
+		// The original code is built for this binary's GOARCH (float results differ
+		// between arm64 and amd64); real-boundary.json records it for the gate.
 		cmd.Env = append(os.Environ(),
+			"GOARCH="+runtime.GOARCH,
 			"PACER_REAL_ORACLE_OUT="+out,
 			"PACER_REAL_DB="+db,
 			"PACER_REAL_PIN="+pin,
