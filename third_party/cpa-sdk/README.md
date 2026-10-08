@@ -13,6 +13,11 @@ import; it is not a current whole-SDK assertion. Native C ABI remains 1; schema-
 contracts were added subsequently. This is not a Go `-buildmode=plugin` module.
 Review per-file provenance and the ABI before updating this snapshot.
 
+`INVENTORY-PROVENANCE.json` records two additive files for the
+`host.auth.inventory_checkpoint` RPC (`sdk/pluginabi/auth_inventory.go`,
+`sdk/pluginapi/auth_inventory.go`). They were written from the approved capacity
+contract before the CPA commit existed, so the commit reads `pending-cpa-inventory`.
+
 The later additive schema-7 physical checkpoint subset is pinned separately in
 `PHYSICAL-PROVENANCE.json`: `usage_checkpoint.go` and `usage_physical.go` are copied
 byte-for-byte from CPA `df794f421de43c861272b2a6b5247286be3c4f07`. This supplement
