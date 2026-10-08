@@ -93,6 +93,7 @@ func (p *Plugin) startWorker() {
 				case <-ticker.C:
 					p.discover()
 					p.reconcile()
+					p.recoverCooldowns()
 					p.refreshMeasurements()
 				}
 			}

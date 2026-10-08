@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
@@ -34,6 +35,7 @@ type Config struct {
 	Enabled         bool   `yaml:"enabled"`
 	Priority        int    `yaml:"priority"`
 	StatePath       string `yaml:"state_path"`
+	HistoryPath     string `yaml:"history_path"`
 	CompactOnSwitch bool   `yaml:"compact_on_switch"`
 	UsageAuthURL    string `yaml:"usage_auth_url"`
 	Routing         struct {
@@ -51,6 +53,7 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	history           *history.Store
 	observationMu     sync.Mutex
 	measurement       *measurement.Store
 	measurements      map[string]measurement.Report
@@ -123,6 +126,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.db != nil {
+		if p.cfg.HistoryPath != cfg.HistoryPath {
+			return nil, errors.New("history_path change requires idle reload")
+		}
 		if p.cfg.StatePath != cfg.StatePath {
 			return nil, errors.New("state_path change requires idle reload")
 		}
@@ -176,6 +182,18 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	p.measurement = measure
 	p.measurements = map[string]measurement.Report{}
+	if cfg.HistoryPath != "" {
+		if _, err = os.Stat(cfg.HistoryPath); err != nil {
+			db.Close()
+			return nil, errors.New("configured history archive is unavailable; import it offline first")
+		}
+		h, err := history.Open(cfg.HistoryPath)
+		if err != nil {
+			db.Close()
+			return nil, errors.New("configured history archive is incompatible")
+		}
+		p.history = h
+	}
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
 	return registration(), nil
@@ -194,6 +212,10 @@ func (p *Plugin) Close() {
 	if p.db != nil {
 		_ = p.db.Close()
 		p.db = nil
+	}
+	if p.history != nil {
+		_ = p.history.Close()
+		p.history = nil
 	}
 }
 
@@ -223,7 +245,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	}
 	switch method {
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}}}, nil
+		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}}}, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -471,6 +493,9 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 }
 
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/keys" {
+		return p.keysView()
+	}
 	if (req.Method == "GET" && req.Path == "/v0/management/plugins/pacer/quota") || (req.Method == "POST" && req.Path == "/v0/management/plugins/pacer/quota/reconcile") {
 		return p.quotaAPI(req)
 	}
@@ -508,18 +533,23 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			if err != nil {
 				return resource(503, map[string]string{"error": "observation_unavailable"})
 			}
-			row:=map[string]any{"id": c.ID, "auth_index":c.Index,"alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
-			base:=routing.Account{Auth:c.ID,Account:c.Account,Budgets:routingBudgets(c.Provider,"",windows,p.now())}
-			row["pace_unit"]="%/h · equal sizes"
-			if report,ok:=p.measurements[c.Account];ok {
-				row["measurement"]=map[string]any{"as_of":report.AsOf,"five_hour":report.FiveHour,"seven_day":report.SevenDay,"warm_burn":report.WarmBurn,"coverage":report.Coverage}
-				if report.SevenDay.Known && p.now().Sub(report.AsOf)<time.Minute{base.Size=report.SevenDay.USDPerPercent;row["pace_unit"]="$/h"}
+			row := map[string]any{"id": c.ID, "auth_index": c.Index, "alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
+			base := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now())}
+			row["pace_unit"] = "%/h · equal sizes"
+			if report, ok := p.measurements[c.Account]; ok {
+				row["measurement"] = map[string]any{"as_of": report.AsOf, "five_hour": report.FiveHour, "seven_day": report.SevenDay, "warm_burn": report.WarmBurn, "coverage": report.Coverage}
+				if report.SevenDay.Known && p.now().Sub(report.AsOf) < time.Minute {
+					base.Size = report.SevenDay.USDPerPercent
+					row["pace_unit"] = "$/h"
+				}
 			}
-			if d:=routing.Pick(routing.Default(),p.now(),routing.Chat{},[]routing.Account{base});d.Handled {row["pace"]=d.Pace}
-			accounts = append(accounts,row)
+			if d := routing.Pick(routing.Default(), p.now(), routing.Chat{}, []routing.Account{base}); d.Handled {
+				row["pace"] = d.Pace
+			}
+			accounts = append(accounts, row)
 		}
 		sort.Slice(accounts, func(i, j int) bool { return fmt.Sprint(accounts[i]["id"]) < fmt.Sprint(accounts[j]["id"]) })
-		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors,"measurement":map[string]any{"delivery":"native-in-memory-best-effort","coverage":"No drained delivery watermark: account-size estimates remain unmeasured.","errors":p.measurementErrors}})
+		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-in-memory-best-effort", "coverage": "No drained delivery watermark: account-size estimates remain unmeasured.", "errors": p.measurementErrors}})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/routing" {
 		if len(req.Body) > 1024 {

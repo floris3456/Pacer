@@ -13,6 +13,8 @@ CGO_ENABLED=1 go build -mod=readonly -trimpath -buildvcs=false \
   -o "$out/pacer-v${version}.so" ./cmd/plugin
 CGO_ENABLED=1 go build -mod=readonly -trimpath -buildvcs=false \
   -ldflags='-s -w -buildid=' -o "$out/pacer-state" ./cmd/pacer-state
+CGO_ENABLED=1 go build -mod=readonly -tags sqlite_fts5 -trimpath -buildvcs=false \
+  -ldflags='-s -w -buildid=' -o "$out/history-import" ./cmd/history-import
 cc -Wall -Wextra -Werror -o "$out/native-probe" tests/native-probe.c -ldl
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/pacer-probe.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
