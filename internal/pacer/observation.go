@@ -180,6 +180,8 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if json.Unmarshal(opRaw, &op) != nil || op.ID == "" {
 		return
 	}
+	// Local host reads only, bracketing this one scheduled provider read.
+	sandwich := p.capacityBefore(c)
 	cancelled := make(chan struct{})
 	timer := time.AfterFunc(5*time.Second, func() { _, _ = p.Host("host.http.cancel", map[string]string{"operation_id": op.ID}); close(cancelled) })
 	raw, err = p.Host("host.http.do", map[string]any{"operation_id": op.ID, "method": "GET", "url": url, "headers": requestHeaders})
@@ -190,6 +192,7 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if err != nil {
 		return
 	}
+	p.capacityAfter(sandwich)
 	var response pluginapi.HTTPResponse
 	if json.Unmarshal(raw, &response) != nil {
 		return
@@ -203,4 +206,5 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 		return
 	}
 	p.storeObservations(c, windows)
+	p.capacitySample(sandwich, at, windows)
 }

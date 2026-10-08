@@ -304,4 +304,5 @@ func (p *Plugin) refreshMeasurements() {
 		p.measurements = reports
 	}
 	p.mu.Unlock()
+	p.refreshCapacity()
 }

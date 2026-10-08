@@ -192,34 +192,43 @@ func openPrefixEvidence(statePath string, now func() time.Time) (*sql.DB, *prefi
 		// filepath.Dir("") is ".", which would put the database in the working directory.
 		return nil, nil
 	}
-	path := prefixEvidencePath(statePath)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
+	db := openOwnerOnlySQLite(prefixEvidencePath(statePath))
+	if db == nil {
 		return nil, nil
 	}
-	if err = file.Close(); err != nil {
-		return nil, nil
-	}
-	// An existing file keeps its mode, so tighten anything wider than 0600. If that
-	// fails, do not open the file at all.
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, nil
-	}
-	if info.Mode().Perm()&^0600 != 0 {
-		if err = os.Chmod(path, 0600); err != nil {
-			return nil, nil
-		}
-	}
-	db, err := sql.Open("sqlite3", prefixDSN(path))
-	if err != nil {
-		return nil, nil
-	}
-	db.SetMaxOpenConns(1)
 	store, err := prefixevidence.Open(db, now)
 	if err != nil {
 		db.Close()
 		return nil, nil
 	}
 	return db, store
+}
+
+// openOwnerOnlySQLite opens an optional evidence database in its own file, or
+// returns nil on any failure.
+func openOwnerOnlySQLite(path string) *sql.DB {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil
+	}
+	if err = file.Close(); err != nil {
+		return nil
+	}
+	// An existing file keeps its mode, so tighten anything wider than 0600. If that
+	// fails, do not open the file at all.
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	if info.Mode().Perm()&^0600 != 0 {
+		if err = os.Chmod(path, 0600); err != nil {
+			return nil
+		}
+	}
+	db, err := sql.Open("sqlite3", prefixDSN(path))
+	if err != nil {
+		return nil
+	}
+	db.SetMaxOpenConns(1)
+	return db
 }

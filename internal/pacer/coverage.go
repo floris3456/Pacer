@@ -198,38 +198,48 @@ func (p *Plugin) refreshSourceCoverage() {
 		}
 		t := tasks[(start+i)%len(tasks)]
 		p.coverageCursor = t.key
-		var raw json.RawMessage
-		var err error
-		if host == nil {
-			err = errors.New("host unavailable")
-		} else {
-			raw, err = host(pluginabi.MethodHostUsageCheckpoint, pluginapi.HostUsageCheckpointRequest{Scope: t.scope})
-		}
-		p.mu.Lock()
-		p.coverageStats.Calls++
-		p.mu.Unlock()
-		var response pluginapi.HostUsageCheckpointResponse
-		if err == nil && (len(raw) == 0 || len(raw) > maxCheckpointBytes) {
-			err = errors.New("invalid checkpoint size")
-		}
-		if err == nil {
-			err = json.Unmarshal(raw, &response)
-		}
-		if err != nil {
-			p.metricError(consumer.CheckpointFailed(context.Background(), t.membership))
-			p.coverageFailure("checkpoint_unavailable", t.account)
-			continue
-		}
-		err = consumer.ApplyCheckpoint(context.Background(), t.membership, t.scope, response)
-		// Cached reports cannot outlive any new invalidation, including stale
-		// responses which persist gaps before rejecting sequence advancement.
-		p.clearMeasurementCache()
-		if errors.Is(err, measurement.ErrStaleSource) {
-			p.mu.Lock()
-			p.coverageStats.Stale++
-			p.mu.Unlock()
-		} else if err != nil {
-			p.coverageFailure("checkpoint_rejected", t.account)
-		}
+		p.sourceCheckpoint(consumer, host, t.account, t.membership, t.scope)
 	}
+}
+
+// sourceCheckpoint reads and applies one host checkpoint. The caller holds
+// coverageMu, never p.mu. It returns the response and "" when the consumer
+// accepted it, or the failure reason.
+func (p *Plugin) sourceCheckpoint(consumer *usagecoverage.Consumer, host Host, account, membership string, scope pluginapi.UsageSourceScope) (pluginapi.HostUsageCheckpointResponse, string) {
+	var raw json.RawMessage
+	var err error
+	if host == nil {
+		err = errors.New("host unavailable")
+	} else {
+		raw, err = host(pluginabi.MethodHostUsageCheckpoint, pluginapi.HostUsageCheckpointRequest{Scope: scope})
+	}
+	p.mu.Lock()
+	p.coverageStats.Calls++
+	p.mu.Unlock()
+	var response pluginapi.HostUsageCheckpointResponse
+	if err == nil && (len(raw) == 0 || len(raw) > maxCheckpointBytes) {
+		err = errors.New("invalid checkpoint size")
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &response)
+	}
+	if err != nil {
+		p.metricError(consumer.CheckpointFailed(context.Background(), membership))
+		p.coverageFailure("checkpoint_unavailable", account)
+		return pluginapi.HostUsageCheckpointResponse{}, "checkpoint_unavailable"
+	}
+	err = consumer.ApplyCheckpoint(context.Background(), membership, scope, response)
+	// Cached reports cannot outlive any new invalidation, including stale
+	// responses which persist gaps before rejecting sequence advancement.
+	p.clearMeasurementCache()
+	if errors.Is(err, measurement.ErrStaleSource) {
+		p.mu.Lock()
+		p.coverageStats.Stale++
+		p.mu.Unlock()
+		return response, "checkpoint_stale"
+	} else if err != nil {
+		p.coverageFailure("checkpoint_rejected", account)
+		return response, "checkpoint_rejected"
+	}
+	return response, ""
 }

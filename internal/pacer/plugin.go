@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/capacity"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
@@ -88,6 +89,9 @@ type Plugin struct {
 	policyEvidence     *policyevidence.Store
 	prefixEvidence     *prefixevidence.Store
 	prefixDB           *sql.DB
+	capacityStore      *capacity.Store
+	capacityDB         *sql.DB
+	capacityViews      map[string]capacityState
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
 	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -317,6 +321,15 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if p.prefixEvidence == nil {
 		p.measurementErrors++
 	}
+	// The capacity ledger is optional in the same way and for the same reason.
+	if p.capacityDB != nil {
+		_ = p.capacityDB.Close()
+	}
+	p.capacityDB, p.capacityStore = openCapacityEvidence(cfg.StatePath, p.now)
+	p.capacityViews = map[string]capacityState{}
+	if p.capacityStore == nil {
+		p.measurementErrors++
+	}
 	return registration(p.policy != nil), nil
 }
 
@@ -334,6 +347,10 @@ func (p *Plugin) Close() {
 	if p.prefixDB != nil {
 		_ = p.prefixDB.Close()
 		p.prefixDB, p.prefixEvidence = nil, nil
+	}
+	if p.capacityDB != nil {
+		_ = p.capacityDB.Close()
+		p.capacityDB, p.capacityStore = nil, nil
 	}
 	if p.db != nil {
 		_ = p.db.Close()
@@ -787,6 +804,8 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			if d := routing.Pick(routing.Default(), p.now(), routing.Chat{}, []routing.Account{base}); d.Handled {
 				row["pace"] = d.Pace
 			}
+			// Additive readback only: a lower bound never reaches routing.
+			row["capacity"] = p.capacityView(c)
 			accounts = append(accounts, row)
 		}
 		sort.Slice(accounts, func(i, j int) bool { return fmt.Sprint(accounts[i]["id"]) < fmt.Sprint(accounts[j]["id"]) })
@@ -795,7 +814,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			pin := p.reports.DefaultPin()
 			historyCoverage = fmt.Sprintf("Frozen reports at %s, event checkpoint %d. Native future usage is separate. Legacy views, real-data migration and retirement gates remain unverified.", time.UnixMilli(pin.At).UTC().Format(time.RFC3339), pin.Through)
 		}
-		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "Account membership history and physical carry-in remain unproven; capacity stays unmeasured.", "errors": p.measurementErrors, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
+		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "Account membership history and physical carry-in remain unproven; capacity stays unmeasured.", "errors": p.measurementErrors, "capacity_known": false, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/routing" {
 		if len(req.Body) > 1024 {
