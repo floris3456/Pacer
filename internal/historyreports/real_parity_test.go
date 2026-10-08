@@ -17,12 +17,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp/exports"
 )
 
 // realParityFailure is one mismatching comparison. A case can produce up to three
@@ -500,12 +503,23 @@ func TestPrepareRealSmokeArtifact(t *testing.T) {
 // is a distinct way a green result could hide missing or capped evidence.
 func TestRealParityGate(t *testing.T) {
 	two := []historicalCase{{View: "profiles"}, {View: "history"}}
-	clean := realBoundary{
-		Cases:      2,
-		CaseCounts: map[string]int{"profiles": 1, "history": 1},
-		Caps:       map[string]int{"profiles": 20},
-		Coverage:   map[string]realCoverage{"profiles": {Found: 3, Kept: 3}},
+	// Boundaries are decoded from JSON, the way real-boundary.json is read.
+	boundary := func(goarch string) realBoundary {
+		arch := ""
+		if goarch != "" {
+			arch = `,"goarch":"` + goarch + `"`
+		}
+		var b realBoundary
+		if e := json.Unmarshal([]byte(`{"cases":2,"case_counts":{"profiles":1,"history":1},"caps":{"profiles":20},"coverage":{"profiles":{"found":3,"kept":3}}`+arch+`}`), &b); e != nil {
+			t.Fatal(e)
+		}
+		return b
 	}
+	other := "amd64"
+	if runtime.GOARCH == other {
+		other = "arm64"
+	}
+	clean := boundary(runtime.GOARCH)
 	okReport := realParityReport{Cases: 2, Passed: 2, Failed: []realParityFailure{}}
 	for _, tc := range []struct {
 		name     string
@@ -520,6 +534,11 @@ func TestRealParityGate(t *testing.T) {
 		{"boundary case total mismatch fails", two, okReport, withCases(clean, 3), true},
 		{"per-view case count mismatch fails", two, okReport, withCounts(clean, map[string]int{"profiles": 2}), true},
 		{"capped view without coverage fails", two, okReport, withCaps(clean, map[string]int{"profiles": 20, "accounts": 20}), true},
+		// arm64 contracts x*y+z into fused multiply-add and amd64 (v1) does not, so
+		// the same original code yields different last bits; such an oracle is not
+		// comparable with this replay.
+		{"oracle under another GOARCH fails", two, okReport, boundary(other), true},
+		{"oracle without recorded GOARCH fails", two, okReport, boundary(""), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reasons := realParityGate(tc.cases, tc.report, tc.boundary)
@@ -579,5 +598,85 @@ func TestRealForecastPagesAgree(t *testing.T) {
 		if one[i].Forecast.ID != paged[i].Forecast.ID {
 			t.Fatalf("forecast %d differs between page sizes", i)
 		}
+	}
+}
+
+// TestRealHistoryTieOrder: CPAMP leaves the order of one account's history
+// windows with equal reset_ms undefined. Derive ranges over a Go map and then
+// sorts by reset_ms alone with sort.Slice, and Report keeps that relative order
+// (SliceStable on current-first, reset_ms) in windows and in current_pools. Two
+// original runs on one scratch copy list such windows differently. The
+// comparator must accept exactly that permutation in the domain value and both
+// exports, and still reject every wider one.
+func TestRealHistoryTieOrder(t *testing.T) {
+	w := func(id, account, status string, reset, end int64) cpamp.Window {
+		return cpamp.Window{ID: id, Account: account, Status: status, Kind: "5h", Scope: "scope-" + id, Reset: reset, AttributionEnd: end, ObservationIDs: []string{"obs-" + id}, Notes: []string{}}
+	}
+	a1 := w("a1", "acct-a", "current", 2000, 2000)
+	a2 := w("a2", "acct-a", "current", 2000, 1500)
+	b1 := w("b1", "acct-b", "current", 2000, 2000)
+	b2 := w("b2", "acct-b", "superseded", 2000, 1800)
+	a3 := w("a3", "acct-a", "closed", 1000, 1000)
+	a4 := w("a4", "acct-a", "superseded", 1000, 900)
+	report := func(pools, windows []cpamp.Window) LegacyHistoryReport {
+		return LegacyHistoryReport{Version: "synthetic", APIKeys: []cpamp.APIKey{}, Accounts: []cpamp.Account{}, ManualQuotaProviders: []string{"meta"}, CurrentPools: pools, Windows: windows}
+	}
+	// Original order: accounts a then b; current first; reset_ms descending.
+	oracle := report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, b2, a3, a4})
+	changed := a2
+	changed.AttributionEnd = 1600
+	// csvEqual differs from wantEqual only where current_pools alone changed:
+	// the CSV export lists windows and nothing else.
+	for _, tc := range []struct {
+		name      string
+		got       LegacyHistoryReport
+		wantEqual bool
+		csvEqual  bool
+	}{
+		{"same order", oracle, true, true},
+		{"same-account equal-reset windows swapped", report([]cpamp.Window{a2, a1, b1}, []cpamp.Window{a2, a1, b1, b2, a4, a3}), true, true},
+		{"accounts interleaved", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, b1, a2, b2, a3, a4}), false, false},
+		{"current pool moved to another account", report([]cpamp.Window{a1, b1, a2}, []cpamp.Window{a1, a2, b1, b2, a3, a4}), false, true},
+		{"current and non-current of one reset swapped", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b2, b1, a3, a4}), false, false},
+		{"reset order broken", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, a3, b2, a4}), false, false},
+		{"value changed inside a tie", report([]cpamp.Window{changed, a1, b1}, []cpamp.Window{changed, a1, b1, b2, a4, a3}), false, false},
+		{"tie member duplicated", report([]cpamp.Window{a1, a1, b1}, []cpamp.Window{a1, a1, b1, b2, a3, a4}), false, false},
+		{"tie member dropped", report([]cpamp.Window{a1, a2, b1}, []cpamp.Window{a1, a2, b1, b2, a3}), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, _ := json.Marshal(oracle)
+			if _, differ := realDomainDiff(tc.got, want); differ == tc.wantEqual {
+				t.Errorf("domain: differ=%t, want %t", differ, !tc.wantEqual)
+			}
+			var gotJSON, wantJSON, gotCSV, wantCSV bytes.Buffer
+			_ = json.NewEncoder(&gotJSON).Encode(tc.got)
+			_ = json.NewEncoder(&wantJSON).Encode(oracle)
+			for _, x := range []struct {
+				v   LegacyHistoryReport
+				out *bytes.Buffer
+			}{{tc.got, &gotCSV}, {oracle, &wantCSV}} {
+				c := csv.NewWriter(x.out)
+				exports.WriteHistoryReport(c, x.v)
+				c.Flush()
+			}
+			if _, differ := realExportDiff("json", "history", gotJSON.Bytes(), wantJSON.Bytes()); differ == tc.wantEqual {
+				t.Errorf("json export: differ=%t, want %t", differ, !tc.wantEqual)
+			}
+			if _, differ := realExportDiff("csv", "history", gotCSV.Bytes(), wantCSV.Bytes()); differ == tc.csvEqual {
+				t.Errorf("csv export: differ=%t, want %t", differ, !tc.csvEqual)
+			}
+			// Views whose original order is fully defined stay strictly ordered.
+			if !tc.wantEqual || tc.name == "same order" {
+				return
+			}
+			for _, view := range []string{"profiles", "history-proof", "quota"} {
+				if _, differ := realExportDiff("json", view, gotJSON.Bytes(), wantJSON.Bytes()); !differ {
+					t.Errorf("%s json export accepted a reordering", view)
+				}
+			}
+			if _, differ := realExportDiff("csv", "quota", gotCSV.Bytes(), wantCSV.Bytes()); !differ {
+				t.Error("quota csv export accepted a reordering")
+			}
+		})
 	}
 }
