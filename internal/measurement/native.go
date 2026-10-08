@@ -117,6 +117,17 @@ var prefixSectionRank = map[string]int{"tools": 0, "system": 1, "messages": 2}
 var prefixReasons = map[string]bool{"automatic_marker": true, "typed_tool": true, "hidden_processing": true,
 	"thinking": true, "non_text_content": true, "server_tool": true, "no_endpoint": true, "invalid_marker": true}
 
+// decodeNativePrefix decodes and validates one present prefix member. Any JSON
+// decode error (wrong type at any depth) is treated as an invalid snapshot, so
+// the caller drops the snapshot and keeps the record.
+func decodeNativePrefix(raw json.RawMessage) *PrefixSnapshot {
+	var w nativePrefixSnapshot
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil
+	}
+	return validNativePrefix(w)
+}
+
 // validNativePrefix returns a fresh, fully validated copy of w, or nil if any
 // rule fails. Unknown wire members were already ignored by the decoder.
 func validNativePrefix(w nativePrefixSnapshot) *PrefixSnapshot {
@@ -227,8 +238,10 @@ type nativePolicyEvidence struct {
 	BreakpointCount   int                   `json:"breakpoint_count"`
 	Dispatched        bool                  `json:"dispatched"`
 	UpstreamStartedAt time.Time             `json:"upstream_started_at"`
-	// Prefix is optional CPA evidence; nil when absent. Validated in FromNative.
-	Prefix *nativePrefixSnapshot `json:"prefix"`
+	// Prefix is optional CPA evidence. It is kept raw so a malformed member
+	// (wrong JSON type anywhere inside) cannot fail the whole envelope decode.
+	// It is decoded separately by decodeNativePrefix.
+	Prefix json.RawMessage `json:"prefix"`
 }
 type nativeSelectedPolicy struct {
 	Protocol int `json:"protocol"`
@@ -342,9 +355,10 @@ func FromNative(rawJSON []byte, credential NativeCredential, sourceID string) (R
 	}
 	if p := n.CachePolicy; p != nil {
 		m.Dispatched, m.BreakpointCount = p.Dispatched, p.BreakpointCount
-		if p.Prefix != nil {
-			// Optional evidence: an invalid snapshot is dropped with a fixed code, never rejects the record.
-			if m.PrefixSnapshot = validNativePrefix(*p.Prefix); m.PrefixSnapshot == nil {
+		// Optional evidence: absent (or JSON null) is silent; anything present but
+		// invalid is dropped with a fixed code and never rejects the record.
+		if raw := p.Prefix; len(raw) > 0 && string(raw) != "null" {
+			if m.PrefixSnapshot = decodeNativePrefix(raw); m.PrefixSnapshot == nil {
 				m.Diagnostics = append(m.Diagnostics, "prefix_snapshot_invalid")
 			}
 		}

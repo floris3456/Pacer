@@ -256,6 +256,68 @@ func TestNativePrefixAbsentRecordMarshalsIdentically(t *testing.T) {
 	}
 }
 
+// A wrong JSON type anywhere inside the optional member must drop only the
+// snapshot. It must never reject the record or change anything else.
+func TestNativePrefixMalformedWireIsDroppedNotRejected(t *testing.T) {
+	plain := parseNative(t, nativeWithPrefix(t, nil))
+	plainRaw := mustMarshal(t, plain)
+
+	wrongVersion := prefixWire()
+	wrongVersion["version"] = "1"
+	wrongEndpoints := prefixWire()
+	wrongEndpoints["endpoints"] = "x"
+	wrongEndpointElem := prefixWire()
+	wrongEndpointElem["endpoints"] = []any{"x"}
+	wrongReasons := prefixWire()
+	wrongReasons["shape"] = "unsupported"
+	wrongReasons["reasons"] = "typed_tool"
+	wrongAutomatic := prefixWire()
+	wrongAutomatic["automatic"] = "no"
+	wrongOrdinal := prefixWire()
+	wrongOrdinal["endpoints"] = []map[string]any{{"ordinal": "0", "section": "tools", "ttl": "1h", "tag": prefixHash('b')}}
+
+	cases := []struct {
+		name string
+		wire any
+	}{
+		{"prefix is a string", json.RawMessage(`"x"`)},
+		{"prefix is a number", json.RawMessage(`1`)},
+		{"prefix is an array", json.RawMessage(`[]`)},
+		{"version is a string", wrongVersion},
+		{"endpoints is a string", wrongEndpoints},
+		{"endpoint element is a string", wrongEndpointElem},
+		{"reasons is a string", wrongReasons},
+		{"automatic is a string", wrongAutomatic},
+		{"ordinal is a string", wrongOrdinal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := parseNative(t, nativeWithPrefix(t, tc.wire))
+			if r.Native.PrefixSnapshot != nil {
+				t.Fatalf("malformed snapshot retained: %+v", r.Native.PrefixSnapshot)
+			}
+			if !has(r.Native.Diagnostics, "prefix_snapshot_invalid") {
+				t.Fatalf("missing prefix_snapshot_invalid in %v", r.Native.Diagnostics)
+			}
+			if !bytes.Equal(mustMarshal(t, withoutPrefixDiagnostic(r)), plainRaw) {
+				t.Fatal("malformed snapshot altered the rest of the record")
+			}
+		})
+	}
+}
+
+// JSON null is the explicit absent form: no snapshot and no diagnostic.
+func TestNativePrefixJSONNullIsAbsent(t *testing.T) {
+	plain := parseNative(t, nativeWithPrefix(t, nil))
+	r := parseNative(t, nativeWithPrefix(t, json.RawMessage(`null`)))
+	if r.Native.PrefixSnapshot != nil || has(r.Native.Diagnostics, "prefix_snapshot_invalid") {
+		t.Fatalf("null prefix treated as present: snapshot=%+v diagnostics=%v", r.Native.PrefixSnapshot, r.Native.Diagnostics)
+	}
+	if !bytes.Equal(mustMarshal(t, r), mustMarshal(t, plain)) {
+		t.Fatal("null prefix changed the record")
+	}
+}
+
 func TestNativePrefixUnknownMembersIgnoredButCannotValidate(t *testing.T) {
 	plain := parseNative(t, nativeWithPrefix(t, nil))
 
