@@ -30,3 +30,11 @@ and a serialized parent acceptance window. It also checks authorization, absent
 public aliases, pin/cursor/input refusals and unchanged fake-provider call counts.
 Do not run it while a client/browser worker owns the lab. `test_history_checker.py`
 tests only the offline comparison logic and never contacts the lab.
+
+`check-coverage.py` requires `PACER_COVERAGE_READY=1`, `PACER_EVIDENCE`, and a parent
+window on the corrected scoped-hook candidate. It waits at most 45 seconds for the
+30-second worker, requires two explicit **unknown** native reports, then verifies
+they survive a real unchanged inventory refresh. Missing reports are failures, not
+proof of unknown coverage. It neither infers nor changes provider/fixture state.
+Native acceptance runners preserve accumulated fixture attempts; any reset must
+be a separately authorized operation with prior evidence retention, not a preamble.
