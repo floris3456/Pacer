@@ -16,7 +16,9 @@ import urllib.request
 import uuid
 
 BASE = "http://pacer-lab-cpa.orb.local:8317"
-UPSTREAM = "http://pacer-upstream.orb.local:8080"
+UPSTREAM = os.environ.get("PACER_FIXTURE_UPSTREAM", "http://pacer-upstream.orb.local:8080")
+if UPSTREAM not in ("http://pacer-upstream.orb.local:8080", "http://pacer-upstream-tier.orb.local:8080"):
+    raise SystemExit("Only the explicitly owned offline fixture origins are allowed")
 ROOT = "/v8/management/plugins/pacer/reports/forward/"
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -80,11 +82,11 @@ def check_value(added, before, after, expected_tier):
     assert usage["cache_create_5m"] == 25 and usage["cache_create_1h"] == 75
     if expected_tier == "unknown":
         assert added["value"] is None and "charged_tier_unknown" in added["issues"]
-        assert not origin["native_provenance"].get("charged_service_tier")
+        assert not origin["native_provenance"].get("response_service_tier")
         assert after["valued_count"] == before["valued_count"]
         assert after["valued_subset"] == before["valued_subset"]
         return None
-    assert origin["native_provenance"]["charged_service_tier"] == "standard"
+    assert origin["native_provenance"]["response_service_tier"] == "standard"
     value = added["value"]
     assert value is not None
     assert value["tokens"]["cache_write_5m"] == 25 and value["tokens"]["cache_write_1h"] == 75

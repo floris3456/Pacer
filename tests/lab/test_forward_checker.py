@@ -21,10 +21,10 @@ class ForwardCheckerTest(unittest.TestCase):
         value = {"low_nano_usd": 945000, "high_nano_usd": 945000,
                  "tokens": {"cache_write_5m": 25, "cache_write_1h": 75, "cache_write_unknown": 0}}
         row["value"] = value
-        row["origins"][0]["native_provenance"]["charged_service_tier"] = "standard"
+        row["origins"][0]["native_provenance"]["response_service_tier"] = "standard"
         after = {"valued_count": 1, "valued_subset": {"low_nano_usd": 945000, "high_nano_usd": 945000}}
         self.assertEqual(CHECK(row, totals, after, "standard"), 945000)
-        row["origins"][0]["native_provenance"]["charged_service_tier"] = "auto"
+        row["origins"][0]["native_provenance"]["response_service_tier"] = "auto"
         with self.assertRaises(AssertionError):
             CHECK(row, totals, after, "standard")
 
