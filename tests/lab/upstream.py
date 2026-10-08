@@ -16,6 +16,7 @@ exhausted = set()
 analytics_calls = 0
 active_messages = 0
 reply_text = "Pacer fixture OK"
+response_service_tier = None
 release_stream = threading.Event()
 release_stream.set()
 short_reset = int(time.time()) + 18000
@@ -36,6 +37,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/_test/activity":
             with lock:
                 return self.reply(200, {"active_messages": active_messages})
+        if self.path == "/_test/service-tier":
+            with lock:
+                return self.reply(200, {"service_tier": response_service_tier})
         if self.path == "/api/oauth/usage":
             with lock:
                 analytics_calls += 1
@@ -60,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
                     active_messages -= 1
 
     def post(self):
-        global reply_text
+        global reply_text, response_service_tier
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1024 * 1024:
             return self.reply(413, {"error": "too_large"})
@@ -99,6 +103,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(409, {"error": "fixture_busy"})
                 reply_text = text
             return self.reply(200, {"ok": True})
+        if self.path == "/_test/service-tier":
+            # An explicitly assigned dummy response tier, independent of request
+            # service_tier. Missing/null clears it; no fixture history is reset.
+            tier = body.get("service_tier")
+            if set(body) - {"service_tier"} or tier not in (None, "standard", "priority"):
+                return self.reply(400, {"error": "invalid_fixture_service_tier"})
+            with lock:
+                if active_messages:
+                    return self.reply(409, {"error": "fixture_busy"})
+                response_service_tier = tier
+                return self.reply(200, {"service_tier": response_service_tier})
         if self.path in ("/_test/exhaust", "/_test/recover"):
             accounts = body.get("accounts")
             if set(body) != {"accounts"} or not isinstance(accounts, list) or not accounts or len(accounts) > 2 or any(a not in ("a", "b") for a in accounts):
@@ -124,6 +139,7 @@ class Handler(BaseHTTPRequestHandler):
                              "coordination_leaked": any(k.lower().startswith(("x-quota-", "x-pacer-")) for k in self.headers)})
             limited = account in exhausted
             text = reply_text
+            tier = response_service_tier
         if limited:
             return self.reply(429, {"error": {"type": "rate_limit_error", "message": "fixture exhausted"}})
         message = {"id": "msg_pacer_fixture", "type": "message", "role": "assistant",
@@ -134,7 +150,9 @@ class Handler(BaseHTTPRequestHandler):
                              "cache_creation_input_tokens": 100,
                              "cache_read_input_tokens": 500,
                              "cache_creation": {"ephemeral_5m_input_tokens": 25,
-                                                "ephemeral_1h_input_tokens": 75}}}
+                                                 "ephemeral_1h_input_tokens": 75}}}
+        if tier is not None:
+            message["usage"]["service_tier"] = tier
         if body.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")

@@ -16,8 +16,10 @@ class FixtureTests(unittest.TestCase):
         self.base = "http://127.0.0.1:" + str(self.server.server_port)
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.assertEqual(200, self.call("/_test/reset", {})[0])
+        self.assertEqual(200, self.call("/_test/service-tier", {})[0])
 
     def tearDown(self):
+        self.assertEqual(200, self.call("/_test/service-tier", {})[0])
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
@@ -76,6 +78,57 @@ class FixtureTests(unittest.TestCase):
             self.assertEqual({"b"}, upstream.exhausted)
         self.assertEqual(200, self.call("/v1/messages", {"messages": []})[0])
         self.assertEqual(0, json.loads(self.call("/_test/activity")[1])["active_messages"])
+
+    def test_assigned_service_tier_is_opt_in_and_independent_of_request(self):
+        self.assertEqual({"service_tier": None}, json.loads(self.call("/_test/service-tier")[1]))
+        for tier in (None, "standard", "priority", None):
+            status, raw = self.call("/_test/service-tier", {"service_tier": tier})
+            self.assertEqual(200, status)
+            self.assertEqual({"service_tier": tier}, json.loads(raw))
+            for requested in ("auto", "standard_only", "priority"):
+                for stream in (False, True):
+                    status, raw = self.call("/v1/messages", {"messages": [], "service_tier": requested, "stream": stream})
+                    self.assertEqual(200, status)
+                    if stream:
+                        events = [json.loads(line[6:]) for line in raw.decode().splitlines() if line.startswith("data: ")]
+                        usage = events[0]["message"]["usage"]
+                        self.assertEqual({"output_tokens": 4}, next(e["usage"] for e in events if e["type"] == "message_delta"))
+                    else:
+                        usage = json.loads(raw)["usage"]
+                    if tier is None:
+                        self.assertNotIn("service_tier", usage)
+                    else:
+                        self.assertEqual(tier, usage["service_tier"])
+                    self.assertEqual(10, usage["input_tokens"])
+                    self.assertEqual(500, usage["cache_read_input_tokens"])
+                    self.assertEqual({"ephemeral_5m_input_tokens": 25, "ephemeral_1h_input_tokens": 75}, usage["cache_creation"])
+
+    def test_service_tier_control_preserves_history_and_other_controls(self):
+        self.assertEqual(200, self.call("/_test/response", {"text": "retained reply"})[0])
+        self.assertEqual(200, self.call("/v1/messages", {"messages": []})[0])
+        self.assertEqual(200, self.call("/_test/exhaust", {"accounts": ["b"]})[0])
+        self.assertEqual(200, self.call("/_test/hold", {})[0])
+        before = self.call("/_test/attempts")[1]
+        try:
+            for body in ({"service_tier": "standard"}, {"service_tier": None}, {"service_tier": "priority"}, {}):
+                self.assertEqual(200, self.call("/_test/service-tier", body)[0])
+                self.assertEqual(before, self.call("/_test/attempts")[1])
+                self.assertEqual("retained reply", upstream.reply_text)
+                self.assertEqual({"b"}, upstream.exhausted)
+                self.assertFalse(upstream.release_stream.is_set())
+            for value in ("auto", "standard_only", "batch", "STANDARD", " standard ", "", 1, True, [], {}):
+                self.assertEqual(400, self.call("/_test/service-tier", {"service_tier": value})[0])
+            self.assertEqual(400, self.call("/_test/service-tier", {"service_tier": "standard", "extra": 1})[0])
+            with upstream.lock:
+                upstream.active_messages = 1
+            try:
+                self.assertEqual(409, self.call("/_test/service-tier", {"service_tier": "standard"})[0])
+                self.assertEqual({"service_tier": None}, json.loads(self.call("/_test/service-tier")[1]))
+            finally:
+                with upstream.lock:
+                    upstream.active_messages = 0
+        finally:
+            self.call("/_test/release", {})
 
 
 if __name__ == "__main__":
