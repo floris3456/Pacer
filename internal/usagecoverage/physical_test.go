@@ -649,3 +649,17 @@ func TestPhysicalMembershipChangeRekeysEpochAndNeverSpansIt(t *testing.T) {
 		t.Fatal("stale callback moved the lower edge", lower, err)
 	}
 }
+
+// A through cut timed before this consumer started is never adopted: records
+// before it may have been delivered while nothing listened.
+func TestPhysicalCutBeforeConsumerStartIsNotAdopted(t *testing.T) {
+	f := openFixture(t, t.TempDir()+"/usage.sqlite", epoch.Add(time.Hour))
+	m := membership("members-a", "a", "a")
+	m.Complete, m.Through = false, m.From
+	must(t, f.c.PutMembership(ctx, m))
+	r := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r))
+	if lower, err := f.c.PhysicalLower(ctx, physicalSelection(f, m.ID, r).Through); err != nil || lower != nil {
+		t.Fatal("cut before consumer start adopted", lower, err)
+	}
+}
