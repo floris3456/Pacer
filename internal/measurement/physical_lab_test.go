@@ -89,8 +89,14 @@ func TestNativePhysicalStoredSelections(t *testing.T) {
 			if err = json.Unmarshal(raw, &r); err != nil {
 				t.Fatal(err)
 			}
-			if r.Native == nil || r.Native.BillingMappingVerified || r.Activity.PrimaryPrefix || !r.Activity.Partial || r.EndTimeBasis != "source_final_usage_observation" {
-				t.Fatal("native local proof manufactured billing/prefix/producer-end evidence")
+			if r.Native == nil || r.Native.BillingMappingVerified {
+				t.Fatal("native local cut cannot prove complete billing mapping")
+			}
+			if r.Activity.PrimaryPrefix || r.Activity.PrefixRef != "" || r.Activity.ProtectionTTL != "" || !r.Activity.Partial {
+				t.Fatalf("native markers manufactured primary-prefix evidence: %+v", r.Activity)
+			}
+			if r.EndTimeBasis != "source_final_usage_observation" {
+				t.Fatal("final usage observation was relabeled as producer end")
 			}
 			if r.Usage.CacheCreate5m == nil || *r.Usage.CacheCreate5m != 25 || r.Usage.CacheCreate1h == nil || *r.Usage.CacheCreate1h != 75 {
 				t.Fatal("independent native 25/75 cache-write split changed")
