@@ -1,8 +1,9 @@
 // Overlaid into original controllers by TestGenerateRealOracle. In-memory HTTP
 // recorders only: no listening server, network or external auth. The case list
-// comes from real-oracle.json written by the service overlay. The caller's
-// scratch DB receives one admin credential row through the test helper, which
-// the reports never read.
+// comes from real-oracle.json written by the service overlay. Authentication uses
+// a separate throwaway store holding only the test admin credential, so the real
+// scratch copy's own credential row is never read, replaced or needed (a real
+// backup already has one, and the helper never overwrites an existing row).
 package usagehistory
 
 import (
@@ -46,12 +47,17 @@ func TestPacerRealExportOracle(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer st.Close()
-	testutil.EnsureAdminCredential(t, st)
+	auth, e := store.Open(filepath.Join(t.TempDir(), "auth.sqlite"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer auth.Close()
+	testutil.EnsureAdminCredential(t, auth)
 	s := history.New(st, nil)
 	if e = s.Init(context.Background()); e != nil {
 		t.Fatal(e)
 	}
-	h := Handler{App: &app.Context{UsageHistoryService: s, AdminAuthService: adminauth.New(config.Config{}, st)}}
+	h := Handler{App: &app.Context{UsageHistoryService: s, AdminAuthService: adminauth.New(config.Config{}, auth)}}
 	outputs := map[string]string{}
 	for _, item := range cases {
 		// The forecasts view has no controller export in the original API.
