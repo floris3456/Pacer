@@ -26,8 +26,9 @@ func (s *ForwardStore) objectNamed(ctx context.Context, kind, name string, v any
 }
 
 // SeedFrozenForwardProfiles assigns branch revision 1 from the frozen artifact's
-// own profile configuration at H and records its provenance. The frozen
-// profiles are read-only afterwards; EditProfiles refuses to change them.
+// own profile configuration at H and records its provenance. Revision 1 is
+// never replaced; EditProfiles may change or archive the copied profile IDs,
+// always as a new forward revision.
 func (s *ForwardStore) SeedFrozenForwardProfiles(ctx context.Context, r *Reader, baseDigest string) (int64, ForwardProfileSeed, error) {
 	if r == nil || !validHash(baseDigest) {
 		return 0, ForwardProfileSeed{}, ErrInput
@@ -256,25 +257,4 @@ func (s *ForwardStore) forwardCutoverStatus(ctx context.Context, m forwardManife
 		return nil, err
 	}
 	return st, tx.Commit()
-}
-
-// Profiles in a frozen-provenance revision 1 are read-only. nil without a seed.
-func forwardFrozenProfileIDs(ctx context.Context, tx *sql.Tx) (map[string]bool, error) {
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM forward_objects WHERE kind='profile_seed' AND name='1'`).Scan(&n); err != nil || n == 0 {
-		return nil, err
-	}
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT body FROM forward_objects WHERE kind='profiles' AND name='1'`).Scan(&raw); err != nil {
-		return nil, err
-	}
-	var c ForwardProfileConfig
-	if json.Unmarshal(raw, &c) != nil {
-		return nil, ErrSource
-	}
-	ids := map[string]bool{}
-	for _, p := range c.Profiles {
-		ids[p.ID] = true
-	}
-	return ids, nil
 }

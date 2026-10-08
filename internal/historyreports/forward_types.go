@@ -2,7 +2,6 @@ package historyreports
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
@@ -16,10 +15,6 @@ const ForwardConverterVersion = "cpa-normalized-v2-cpamp-e849-v1"
 
 var ErrForwardConflict = errors.New("forward reports: immutable reference conflict")
 var ErrForwardPending = errors.New("forward reports: projection not ready")
-
-// ErrForwardFrozenProfile is an ErrForwardConflict: profiles copied from the
-// frozen artifact are never edited; new memberships use new forward profiles.
-var ErrForwardFrozenProfile = fmt.Errorf("%w: frozen profile is read-only", ErrForwardConflict)
 
 // ErrForwardCoverageGap refuses N0 > H unless the gap [H,N0) is declared.
 var ErrForwardCoverageGap = errors.New("forward reports: native coverage starts after H without a declared coverage gap")

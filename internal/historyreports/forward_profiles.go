@@ -160,11 +160,6 @@ func (s *ForwardStore) EditProfiles(ctx context.Context, expected int64, edit Fo
 		if current == math.MaxInt64 {
 			return ErrLimit
 		}
-		if frozen, e := forwardFrozenProfileIDs(ctx, tx); e != nil {
-			return e
-		} else if frozen[edit.ArchiveID] || frozen[edit.Profile.ID] {
-			return ErrForwardFrozenProfile
-		}
 		var raw []byte
 		if e := tx.QueryRowContext(ctx, `SELECT body FROM forward_objects WHERE kind='profiles' AND name=?`, strconv.FormatInt(current, 10)).Scan(&raw); e != nil {
 			return e
