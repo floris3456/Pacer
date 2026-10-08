@@ -14,6 +14,11 @@ lock = threading.Lock()
 attempts = []
 exhausted = set()
 analytics_calls = 0
+active_messages = 0
+release_stream = threading.Event()
+release_stream.set()
+short_reset = int(time.time()) + 18000
+long_reset = int(time.time()) + 604800
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -27,17 +32,33 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/_test/analytics":
             with lock:
                 return self.reply(200, {"calls": analytics_calls})
+        if self.path == "/_test/activity":
+            with lock:
+                return self.reply(200, {"active_messages": active_messages})
         if self.path == "/api/oauth/usage":
             with lock:
                 analytics_calls += 1
-            return self.reply(200, {"five_hour": {"utilization": 20, "resets_at": time.time() + 18000},
-                                    "seven_day": {"utilization": 30, "resets_at": time.time() + 604800}})
+            return self.reply(200, {"five_hour": {"utilization": 20, "resets_at": short_reset},
+                                    "seven_day": {"utilization": 30, "resets_at": long_reset}})
         if self.path == "/_test/attempts":
             with lock:
                 return self.reply(200, attempts)
         return self.reply(404, {"error": "not_found"})
 
     def do_POST(self):
+        global active_messages
+        inference = self.path.split("?", 1)[0] == "/v1/messages"
+        if inference:
+            with lock:
+                active_messages += 1
+        try:
+            return self.post()
+        finally:
+            if inference:
+                with lock:
+                    active_messages -= 1
+
+    def post(self):
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1024 * 1024:
             return self.reply(413, {"error": "too_large"})
@@ -45,6 +66,19 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
         except (ValueError, UnicodeDecodeError):
             return self.reply(400, {"error": "invalid_json"})
+        if self.path == "/_test/hold":
+            release_stream.clear()
+            return self.reply(200, {"ok": True})
+        if self.path == "/_test/release":
+            release_stream.set()
+            return self.reply(200, {"ok": True})
+        if self.path == "/_test/reset":
+            with lock:
+                if active_messages:
+                    return self.reply(409, {"error": "fixture_busy"})
+                exhausted.clear()
+                attempts.clear()
+            return self.reply(200, {"ok": True})
         if self.path == "/_test/exhaust":
             with lock:
                 exhausted.update(body.get("accounts", []))
@@ -86,6 +120,10 @@ class Handler(BaseHTTPRequestHandler):
                       ("message_stop", {"type": "message_stop"})]
             for kind, data in events:
                 self.wfile.write(("event: " + kind + "\ndata: " + json.dumps(data) + "\n\n").encode())
+                self.wfile.flush()
+                if kind == "message_start" and "PACER_HOLD" in json.dumps(body):
+                    if not release_stream.wait(30):
+                        return  # intentional fixture truncation, not a complete stream
             return
         return self.reply(200, message)
 
@@ -101,9 +139,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def quota_headers(self):
         self.send_header("anthropic-ratelimit-unified-5h-utilization", "0.2")
-        self.send_header("anthropic-ratelimit-unified-5h-reset", str(int(time.time()) + 18000))
+        self.send_header("anthropic-ratelimit-unified-5h-reset", str(short_reset))
         self.send_header("anthropic-ratelimit-unified-7d-utilization", "0.3")
-        self.send_header("anthropic-ratelimit-unified-7d-reset", str(int(time.time()) + 604800))
+        self.send_header("anthropic-ratelimit-unified-7d-reset", str(long_reset))
 
 
 if __name__ == "__main__":

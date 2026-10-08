@@ -134,3 +134,74 @@ func TestLateUsageFromOldCheckpointCannotWarmCompactedPrefix(t *testing.T) {
 		t.Fatal(b, err)
 	}
 }
+
+func TestAsyncActivityAfterCompletionAndRestartUsesCapturedAccountCheckpointAndStart(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "state.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	now := start
+	s, err := Open(db, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := Claim{Protocol: 1, Installation: "i", Session: "s", Route: "r", Request: "q", Kind: "primary", Capability: Digest("private"), Checkpoint: "old"}
+	key := Key("caller", "claude", q)
+	if _, err = s.Admit("logical", key, Selection{Auth: "a", Account: "a"}, &q, false); err != nil {
+		t.Fatal(err)
+	}
+	s.Complete("logical")
+	now = start.Add(20 * time.Minute)
+	s, err = Open(db, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CacheActivityForAuth("logical", "a", start, true, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := s.Get(key)
+	if err != nil || !b.ProtectedUntil.Equal(start.Add(time.Hour)) || b.UnknownWarmth {
+		t.Fatal(b, err)
+	}
+	q.Checkpoint = "new"
+	if _, err = s.Admit("next", key, Selection{Auth: "a", Account: "a"}, &q, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CacheActivityForAuth("logical", "a", start, true, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = s.Get(key)
+	if err != nil || !b.ProtectedUntil.IsZero() || !b.UnknownWarmth {
+		t.Fatal("late old checkpoint warmed replacement", b, err)
+	}
+	if err = s.CacheActivityForAuth("next", "b", now, true, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = s.Get(key)
+	if err != nil || !b.UnknownWarmth {
+		t.Fatal("foreign account activity warmed context", b, err)
+	}
+	if err = s.CacheActivityForAuth("next", "a", now, false, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = s.Get(key)
+	if err != nil || !b.UnknownWarmth {
+		t.Fatal("failed activity warmed context", b, err)
+	}
+	if _, err = s.Admit("away", key, Selection{Auth: "b", Account: "b"}, &q, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Admit("back", key, Selection{Auth: "a", Account: "a"}, &q, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CacheActivityForAuth("next", "a", now, true, true, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = s.Get(key)
+	if err != nil || !b.UnknownWarmth {
+		t.Fatal("returning to an old account transferred old cache activity", b, err)
+	}
+}

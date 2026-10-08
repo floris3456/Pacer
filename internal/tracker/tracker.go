@@ -67,6 +67,7 @@ type Binding struct {
 
 type Flight struct {
 	ID, Key, Auth, Account, Kind, Checkpoint string
+	Generation                               int
 	Started                                  time.Time
 }
 
@@ -91,6 +92,9 @@ func Open(db *sql.DB, now func() time.Time) (*Store, error) {
 	}
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS pacer_chats (key TEXT PRIMARY KEY, capability TEXT NOT NULL, route TEXT NOT NULL, body BLOB NOT NULL)`)
 	if err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS pacer_activity_contexts (request_id TEXT NOT NULL, auth TEXT NOT NULL, body BLOB NOT NULL, PRIMARY KEY(request_id,auth))`); err != nil {
 		return nil, err
 	}
 	return &Store{db: db, now: now, flights: map[string]Flight{}}, nil
@@ -188,8 +192,54 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 	if err = s.save(b); err != nil {
 		return Binding{}, err
 	}
-	s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Checkpoint: b.Consumed, Started: s.now()}
+	s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Checkpoint: b.Consumed, Generation: b.Generation, Started: s.now()}
+	raw, err := json.Marshal(s.flights[id])
+	if err != nil {
+		return Binding{}, err
+	}
+	if _, err = s.db.Exec(`INSERT INTO pacer_activity_contexts(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, id, c.Auth, raw); err != nil {
+		return Binding{}, err
+	}
 	return b, nil
+}
+
+// CacheActivityForAuth is for asynchronous usage: the logical request may have
+// completed and another physical retry may have selected a different account.
+// Retained context fences late activity against the exact checkpoint/account.
+func (s *Store) CacheActivityForAuth(id, auth string, started time.Time, success, qualifying bool, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !success || !qualifying || ttl <= 0 || started.IsZero() {
+		return nil
+	}
+	var raw []byte
+	err := s.db.QueryRow(`SELECT body FROM pacer_activity_contexts WHERE request_id=? AND auth=?`, id, auth).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var flight Flight
+	if err = json.Unmarshal(raw, &flight); err != nil {
+		return err
+	}
+	if flight.Kind != "primary" || started.Before(flight.Started) {
+		return nil
+	}
+	b, err := s.read(flight.Key)
+	if err != nil {
+		return err
+	}
+	if b.Account != flight.Account || b.Consumed != flight.Checkpoint || b.Generation != flight.Generation {
+		return nil
+	}
+	until := started.Add(ttl)
+	if until.After(b.ProtectedUntil) {
+		b.ProtectedUntil = until
+	}
+	b.UnknownWarmth = false
+	return s.save(b)
 }
 
 // CacheActivity accepts only confirmed same-prefix read/write evidence. The
@@ -206,7 +256,7 @@ func (s *Store) CacheActivity(id string, success, qualifying bool, ttl time.Dura
 	if err != nil {
 		return err
 	}
-	if b.Account != f.Account || b.Consumed != f.Checkpoint {
+	if b.Account != f.Account || b.Consumed != f.Checkpoint || b.Generation != f.Generation {
 		return nil
 	}
 	until := f.Started.Add(ttl)
