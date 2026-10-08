@@ -28,6 +28,8 @@ type coverageGroup struct {
 type coverageDiagnostics struct {
 	Calls, Errors, Stale uint64
 	Reason               string
+	catalogSeen          bool
+	catalogGeneration    uint64
 }
 
 func sourceScope(c credential) pluginapi.UsageSourceScope {

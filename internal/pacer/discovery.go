@@ -32,10 +32,14 @@ func (p *Plugin) discover(force ...bool) {
 		return
 	}
 	var list struct {
-		Files []pluginapi.HostAuthFileEntry `json:"files"`
+		Files   []pluginapi.HostAuthFileEntry `json:"files"`
+		Catalog *startupCatalog               `json:"catalog"`
 	}
 	if len(raw) > 1<<20 || json.Unmarshal(raw, &list) != nil || list.Files == nil || len(list.Files) > maxCoverageInventory {
 		p.discoveryFailed()
+		return
+	}
+	if !p.acceptStartupCatalog(list.Catalog) {
 		return
 	}
 	found := map[string]credential{}
