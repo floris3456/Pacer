@@ -57,6 +57,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/pacer"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
@@ -86,7 +87,12 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	result, err := plugin.Handle(C.GoString(method), raw)
 	env := pluginabi.Envelope{OK: err == nil}
 	if err != nil {
-		env.Error = &pluginabi.Error{Code: "quota_plugin_error", Message: err.Error(), HTTPStatus: 503}
+		var policyError *pluginabi.Error
+		if errors.As(err, &policyError) {
+			env.Error = policyError
+		} else {
+			env.Error = &pluginabi.Error{Code: "pacer_plugin_error", Message: err.Error(), HTTPStatus: 503}
+		}
 	} else {
 		env.Result, _ = json.Marshal(result)
 	}

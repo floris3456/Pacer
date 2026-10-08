@@ -4,6 +4,7 @@ package pacer
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyadapter"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	_ "github.com/mattn/go-sqlite3"
@@ -32,12 +35,13 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
-	Enabled         bool   `yaml:"enabled"`
-	Priority        int    `yaml:"priority"`
-	StatePath       string `yaml:"state_path"`
-	HistoryPath     string `yaml:"history_path"`
-	CompactOnSwitch bool   `yaml:"compact_on_switch"`
-	UsageAuthURL    string `yaml:"usage_auth_url"`
+	CachePolicy     PolicyConfig `yaml:"cache_policy"`
+	Enabled         bool         `yaml:"enabled"`
+	Priority        int          `yaml:"priority"`
+	StatePath       string       `yaml:"state_path"`
+	HistoryPath     string       `yaml:"history_path"`
+	CompactOnSwitch bool         `yaml:"compact_on_switch"`
+	UsageAuthURL    string       `yaml:"usage_auth_url"`
 	Routing         struct {
 		Mode      string   `yaml:"mode"`
 		Providers []string `yaml:"providers"`
@@ -53,6 +57,7 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	policy            *policyadapter.Adapter
 	history           *history.Store
 	observationMu     sync.Mutex
 	measurement       *measurement.Store
@@ -81,13 +86,19 @@ func New(host Host) *Plugin {
 	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, workerDone: make(chan struct{})}
 }
 
-func registration() any {
-	return map[string]any{"schema_version": 6, "metadata": pluginapi.Metadata{Name: "pacer", Version: "0.2.0-dev", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true}}
+func registration(policyEnabled ...bool) any {
+	schema := 6
+	enabled := len(policyEnabled) > 0 && policyEnabled[0]
+	if enabled {
+		schema = 7
+	}
+	return map[string]any{"schema_version": schema, "metadata": pluginapi.Metadata{Name: "pacer", Version: "0.2.0-dev", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true, "cache_policy": enabled}}
 }
 
 func (p *Plugin) configure(raw []byte) (any, error) {
 	var request struct {
-		ConfigYAML []byte `json:"config_yaml"`
+		ConfigYAML    []byte `json:"config_yaml"`
+		SchemaVersion int    `json:"schema_version"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return nil, err
@@ -103,6 +114,13 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	if cfg.StatePath == "" {
 		return nil, errors.New("state_path is required")
+	}
+	policyOpts, err := p.policyOptions(cfg.CachePolicy)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.CachePolicy.Enabled && request.SchemaVersion < 7 {
+		return nil, errors.New("managed cache policy requires CPA schema 7")
 	}
 	usageURL, err := validateUsageURL(cfg.UsageAuthURL)
 	if err != nil {
@@ -126,6 +144,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.db != nil {
+		if !reflect.DeepEqual(p.cfg.CachePolicy, cfg.CachePolicy) {
+			return nil, errors.New("cache_policy changes require an idle reload")
+		}
 		if p.cfg.HistoryPath != cfg.HistoryPath {
 			return nil, errors.New("history_path change requires idle reload")
 		}
@@ -138,12 +159,16 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		}
 		cfg.Routing.Mode = mode
 		p.cfg = cfg
-		return registration(), nil
+		return registration(p.policy != nil), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(cfg.StatePath, os.O_CREATE|os.O_RDWR, 0600)
+	flags := os.O_CREATE | os.O_RDWR
+	if cfg.CachePolicy.Enabled {
+		flags = os.O_RDWR
+	}
+	file, err := os.OpenFile(cfg.StatePath, flags, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +180,14 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	var policy *policyadapter.Adapter
+	if cfg.CachePolicy.Enabled {
+		policy, err = policyadapter.Open(context.Background(), db, policyOpts)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	if err := openDecisions(db); err != nil {
 		db.Close()
 		return nil, err
@@ -196,7 +229,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
-	return registration(), nil
+	p.policy = policy
+	return registration(p.policy != nil), nil
 }
 
 func (p *Plugin) Close() {
@@ -244,6 +278,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		return nil, errors.New("Pacer state unavailable")
 	}
 	switch method {
+	case pluginabi.MethodCachePolicyHandle, pluginabi.MethodCachePolicyResolve, pluginabi.MethodCachePolicyAttempt:
+		if p.policy == nil {
+			return nil, pluginabi.NewError("pacer_cache_unavailable", "Managed cache policy is not configured", 503)
+		}
+		return p.policy.Dispatch(context.Background(), method, raw)
 	case pluginabi.MethodManagementRegister:
 		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/quota"}, {"Method": "POST", "Path": "/plugins/pacer/quota/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}}}, nil
 	case pluginabi.MethodManagementHandle:
@@ -299,6 +338,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return pluginapi.StreamChunkInterceptResponse{}, nil
 	case pluginabi.MethodRequestComplete:
+		if p.policy != nil {
+			if _, err := p.policy.Dispatch(context.Background(), method, raw); err != nil {
+				return nil, err
+			}
+		}
 		var req pluginapi.RequestCompletion
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, err
