@@ -19,6 +19,19 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
+		return nil, err
+	}
+	var source [16]byte
+	if _, err = rand.Read(source[:]); err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec(`INSERT INTO pacer_usage_source(id,source) VALUES(1,?) ON CONFLICT(id) DO NOTHING`, hex.EncodeToString(source[:])); err != nil {
+		return nil, err
+	}
+	if err = db.QueryRow(`SELECT source FROM pacer_usage_source WHERE id=1`).Scan(&p.measurementSource); err != nil {
+		return nil, err
+	}
 	if err = m.RegisterPriceBook(ctx, measurement.DefaultPriceBook()); err != nil {
 		return nil, err
 	}
@@ -32,6 +45,60 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (p *Plugin) captureUsageCredential(request string, c credential) error {
+	value := measurement.NativeCredential{Provider: c.Provider, AccountID: c.Account, CredentialRef: tracker.Digest(c.Provider + "\x00" + c.ID + "\x00" + c.Index), AuthID: c.ID, AuthIndex: c.Index}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(`INSERT INTO pacer_usage_credentials(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, request, c.ID, raw)
+	return err
+}
+
+func (p *Plugin) recordUsage(raw []byte) error {
+	var identity struct {
+		LifecycleRequestID string
+		AuthID             string
+		Provider           string
+	}
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return err
+	}
+	if identity.Provider != "claude" && identity.Provider != "codex" {
+		return nil
+	}
+	// Older hosts cannot correlate final callback to the immutable per-request
+	// inventory. No mutable-discovery fallback: its record would be misattributed.
+	if identity.LifecycleRequestID == "" {
+		return nil
+	}
+	var body []byte
+	err := p.db.QueryRow(`SELECT body FROM pacer_usage_credentials WHERE request_id=? AND auth=?`, identity.LifecycleRequestID, identity.AuthID).Scan(&body)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var credential measurement.NativeCredential
+	if err = json.Unmarshal(body, &credential); err != nil {
+		return err
+	}
+	record, err := measurement.FromNative(raw, credential, p.measurementSource)
+	if err != nil {
+		p.metricError(err)
+		return err
+	}
+	if _, err = p.measurement.PutRecord(context.Background(), record); err != nil {
+		p.metricError(err)
+		return err
+	}
+	if !record.Activity.Partial {
+		err = p.chats.CacheActivityForAuth(record.RequestID, identity.AuthID, record.StartedAt, record.Success, record.Activity.PrimaryPrefix, record.Activity.ProtectionTTL.Duration())
+	}
+	return err
 }
 
 func (p *Plugin) metricError(err error) {

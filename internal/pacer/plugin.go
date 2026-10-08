@@ -63,6 +63,7 @@ type Plugin struct {
 	measurement       *measurement.Store
 	measurements      map[string]measurement.Report
 	measurementErrors int64
+	measurementSource string
 	mu                sync.Mutex
 	Host              Host
 	now               func() time.Time
@@ -353,6 +354,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
+		if err := p.recordUsage(raw); err != nil {
+			return nil, pluginabi.NewError("pacer_usage_unavailable", "Native usage could not be durably recorded", 503)
+		}
 		var req struct {
 			pluginapi.UsageRecord
 			ResponseHeadersObservedAt map[string]time.Time
@@ -487,6 +491,9 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		p.mu.Unlock()
 	}
 	if ok && known {
+		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
+			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
+		}
 		key := chatKey(t.Caller, c.Provider, req.Model, t.Session, t.Claim)
 		if key != "" {
 			// In off/dry-run CPA alone made the pick. A changed account therefore

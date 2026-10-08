@@ -21,7 +21,7 @@ int main(int argc,char **argv) {
   assert(plugin.call("plugin.register",(const uint8_t*)request,strlen(request),&response)==0);
   assert(response.ptr && response.len);
   char *json=calloc(response.len+1,1);memcpy(json,response.ptr,response.len);
-  assert(strstr(json,"quota_plugin_error") && strstr(json,"state_path"));
+  assert(strstr(json,"pacer_plugin_error") && strstr(json,"state_path"));
   plugin.free(response.ptr,response.len);free(json);
   FILE *config=fopen(argv[2],"rb"); assert(config);
   char payload[8192]={0}; size_t size=fread(payload,1,sizeof(payload)-1,config);

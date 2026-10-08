@@ -88,7 +88,17 @@ func (p *Plugin) legacyWindows(account, model string, all bool) ([]map[string]an
 func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	authorization := req.Headers.Get("Authorization")
 	if authorization == "" {
-		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": false})
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		var policy any = false
+		if p.policy != nil {
+			routes := []string{}
+			for _, route := range p.cfg.CachePolicy.Routes {
+				routes = append(routes, route.ID)
+			}
+			policy = map[string]any{"protocol": 1, "contract_revision": 2, "endpoint": "/v1/plugins/pacer/cache-policy", "ttls": []string{"5m", "1h"}, "provider_routes": routes, "transports": []string{"http"}, "formats": []string{"claude", "openai-response"}, "enforced": true}
+		}
+		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy})
 	}
 	token := strings.TrimPrefix(authorization, "Bearer ")
 	if token == authorization || len(token) == 0 || len(token) > 8192 {
