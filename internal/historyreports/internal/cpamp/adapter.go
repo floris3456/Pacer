@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,10 @@ type Service struct {
 	workspaceGate chan struct{}
 	cache         map[string]cachedReport
 	cacheClock    uint64
+	reportMu      sync.Mutex
+	reportKey     string
+	reportCache   Report
+	bounds        ProfileFilter
 }
 type cachedReport struct {
 	payload        []byte
@@ -70,6 +75,40 @@ func (s *Service) PrepareBook(ctx context.Context, cp HistoricalImportCheckpoint
 }
 func (s *Service) Book(ctx context.Context, id string) (ComparisonPriceBook, error) {
 	return s.comparisonPriceBook(ctx, id)
+}
+
+// PrepareLegacy performs the legacy price-book initialization only during the
+// explicit offline preparation step. Reads of old prepared artifacts fail rather
+// than trying to write through a read-only connection.
+func (s *Service) PrepareLegacy(ctx context.Context) error {
+	_, err := s.normalizationRules(ctx)
+	return err
+}
+func (s *Service) HistoryAt(ctx context.Context, f ProfileFilter, kind string) (Report, error) {
+	reader := New(s.db, f.At)
+	reader.PollInterval, reader.bounds = s.PollInterval, f
+	return reader.Report(ctx, f.Account, kind, f.From, f.To, f.APIKey)
+}
+func (s *Service) ForecastLedger(ctx context.Context, window string, f ProfileFilter) ([]ForecastEvidence, error) {
+	return s.forecastEvidence(ctx, window, f)
+}
+
+// Same input-only scenario checks as QuotaUsage, before expensive derivation.
+func ValidQuotaScenario(f QuotaUsageFilter) bool {
+	if !validCapacityRatio(f.CapacityRatio) {
+		return false
+	}
+	if f.CapacityRatio > 0 {
+		if _, ok := subscriptionTier(f.TargetPlan); !ok || f.WindowID == "" {
+			return false
+		}
+	}
+	if f.SourcePlan != "" {
+		if _, ok := subscriptionTier(f.SourcePlan); !ok || f.WindowID == "" {
+			return false
+		}
+	}
+	return true
 }
 func (s *Service) Workspace(ctx context.Context, f ProfileWorkspaceFilter) (ProfileWorkspaceReport, error) {
 	// Frozen pins need no worker/expiry refresh. Cache bytes rather than shared

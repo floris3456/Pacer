@@ -1,0 +1,17 @@
+{
+  "adaptations": [
+    "time.Now().UnixMilli() -\u003e explicit service at",
+    "raw Report SQL maxima -\u003e explicit service bounds",
+    "normalization initialized offline before readonly open",
+    "controller CSV map-backed groups use deterministic order; row bytes unchanged"
+  ],
+  "additional_roots": [
+    "ProfileReport",
+    "ProfileProof",
+    "Report",
+    "ProofAt",
+    "QuotaUsage",
+    "forecastEvidence"
+  ],
+  "source_commit": "e8492c245bf69144afdcf20b8b4ea8935f0476e5"
+}

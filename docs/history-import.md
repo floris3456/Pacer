@@ -227,8 +227,9 @@ checks supplement counts.
 
 Still required before retirement:
 
-1. Integrate the [native report adapter](history-reports.md), whose active-view
-   extraction is now oracle-verified, and close its listed unported-view gates.
+1. Integrate the [native report adapter](history-reports.md), whose active and
+   named historical read/export paths are now oracle-verified, respecting the
+   documented legacy CSV ordering exception and remaining runtime/UI gates.
    Connect measurement ingestion without duplicates or lost attribution.
 2. Validate a real approved frozen dataset and external report pins; compare exact
    fixed-interval totals/allocation/evidence (early resets, shared-pool key filters,

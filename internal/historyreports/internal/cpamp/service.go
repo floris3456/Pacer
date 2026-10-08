@@ -6,8 +6,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"math"
+
+	"sort"
+
+	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp/model"
 )
@@ -98,6 +104,111 @@ func (s *Service) evidence(ctx context.Context, account string, through, observa
 	err = rows.Err()
 	rows.Close()
 	return events, obs, err
+}
+func (s *Service) Report(ctx context.Context, account, kind string, from, to int64, keys ...string) (Report, error) {
+	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
+	if err := s.acquireHistory(ctx); err != nil {
+		return Report{}, err
+	}
+	defer s.releaseHistory()
+	r := Report{Version: Version, Generated: s.at, PollIntervalSeconds: int64(s.PollInterval / time.Second), ManualQuotaProviders: []string{"meta"}, Windows: []Window{}}
+	r.APIKeyFilter = optionalKey(keys)
+	r.CurrentPools = []Window{}
+	if !s.ready.Load() {
+		return r, errors.New("usage history is initializing")
+	}
+	var err error
+	r.Accounts, err = s.Accounts(ctx)
+	if err != nil {
+		return r, err
+	}
+	r.Through, r.ObservationThrough = s.bounds.Through, s.bounds.ObservationsThrough
+	if err != nil {
+		return r, err
+	}
+	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM usage_events WHERE id>?", r.Through).Scan(&r.Pending)
+	_ = s.db.QueryRowContext(ctx, "SELECT count(*) FROM analytics_events WHERE rowid>?", s.cursor(ctx, "event_keys")).Scan(&r.KeyBackfillPending)
+	r.APIKeys, err = s.apiKeys(ctx, r.Through)
+	if err != nil {
+		return r, err
+	}
+	cacheKey := fmt.Sprintf("%d|%d|%s|%s|%d|%d|%s|%d", r.Through, r.ObservationThrough, account, kind, from, to, r.APIKeyFilter, r.KeyBackfillPending)
+	if s.reportKey == cacheKey {
+		r.Windows = append([]Window(nil), s.reportCache.Windows...)
+		for i := range r.Windows {
+			w := &r.Windows[i]
+			if w.Status == "current" && r.Generated >= w.Reset {
+				w.Status = "closed"
+			}
+			if r.Generated-w.LastObserved > 600000 || w.Status != "current" {
+				w.Exhaustion = nil
+			}
+		}
+		for _, w := range s.reportCache.CurrentPools {
+			if w.Reset > r.Generated {
+				r.CurrentPools = append(r.CurrentPools, w)
+			}
+		}
+		return r, nil
+	}
+	for _, a := range r.Accounts {
+		if account != "" && account != a.ID {
+			continue
+		}
+		events, obs, err := s.evidence(ctx, a.ID, r.Through, r.ObservationThrough)
+		if err != nil {
+			return r, err
+		}
+		if r.APIKeyFilter != "" {
+			found := false
+			for _, e := range events {
+				if keyMatches(e, r.APIKeyFilter) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		for _, w := range Derive(a, obs, events, r.Generated) {
+			if w.Status == "current" {
+				r.CurrentPools = append(r.CurrentPools, w)
+			}
+			if kind != "" && w.Kind != kind {
+				continue
+			}
+			if from > 0 && w.Reset > 0 && w.Reset <= from {
+				continue
+			}
+			if to > 0 && w.Start >= to {
+				continue
+			}
+			r.Windows = append(r.Windows, filterWindow(w, events, r.APIKeyFilter))
+		}
+	}
+	sort.SliceStable(r.Windows, func(i, j int) bool {
+		a, b := r.Windows[i], r.Windows[j]
+		if (a.Status == "current") != (b.Status == "current") {
+			return a.Status == "current"
+		}
+		return a.Reset > b.Reset
+	})
+	s.reportKey = cacheKey
+	s.reportCache = r
+	return r, nil
+}
+
+func (s *Service) ProofAt(ctx context.Context, id string, through, observationThrough, at int64, keys ...string) (Proof, error) {
+	if err := s.acquireHistory(ctx); err != nil {
+		return Proof{}, err
+	}
+	defer s.releaseHistory()
+	return s.proofAt(ctx, id, through, observationThrough, at, keys...)
+}
+func (s *Service) proofAt(ctx context.Context, id string, through, observationThrough, at int64, keys ...string) (Proof, error) {
+	return s.proofForValue(ctx, id, through, observationThrough, at, ComparisonPriceBook{}, keys...)
 }
 
 func (s *Service) proofForValue(ctx context.Context, id string, through, observationThrough, at int64, book ComparisonPriceBook, keys ...string) (Proof, error) {

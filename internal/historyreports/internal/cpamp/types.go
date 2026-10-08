@@ -140,7 +140,21 @@ type Window struct {
 	CalibrationEnd     int64             `json:"calibration_end_ms"`
 	Notes              []string          `json:"notes"`
 }
-
+type Report struct {
+	APIKeys              []APIKey  `json:"api_keys"`
+	APIKeyFilter         string    `json:"api_key_filter"`
+	KeyBackfillPending   int64     `json:"key_backfill_pending"`
+	CurrentPools         []Window  `json:"current_pools"`
+	ManualQuotaProviders []string  `json:"manual_quota_providers"`
+	PollIntervalSeconds  int64     `json:"poll_interval_seconds"`
+	Version              string    `json:"version"`
+	Generated            int64     `json:"generated_at_ms"`
+	Through              int64     `json:"through_event_id"`
+	Pending              int64     `json:"pending_events"`
+	ObservationThrough   int64     `json:"through_observation_row"`
+	Accounts             []Account `json:"accounts"`
+	Windows              []Window  `json:"windows"`
+}
 type Proof struct {
 	BoundaryEvents   []Event                    `json:"boundary_events,omitempty"`
 	SharedEvents     []Event                    `json:"shared_events,omitempty"`

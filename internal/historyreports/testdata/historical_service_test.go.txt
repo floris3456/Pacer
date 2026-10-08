@@ -1,0 +1,368 @@
+// Overlaid into the original CPAMP package. No provider, queue or worker runs.
+package usagehistory
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
+)
+
+func TestPacerHistoricalOracle(t *testing.T) {
+	out := os.Getenv("PACER_ORACLE_OUT")
+	ctx := context.Background()
+	const H int64 = 1790812800000
+	st, e := store.Open(filepath.Join(out, "oracle.sqlite"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer st.Close()
+	s := New(st, nil)
+	if e = s.Init(ctx); e != nil {
+		t.Fatal(e)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := s.db.Exec(q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// Keep a source row beyond the explicit checkpoint even after adding 40 events.
+	exec(`UPDATE analytics_events SET event_id=10000,payload=json_set(payload,'$.id',10000) WHERE event_hash='beyond-checkpoint'`)
+	cfg, e := s.ProfileConfig(ctx, 7)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cfg.Revision = 8
+	cfg.Bindings = []Binding{{ID: "first", Profile: "main", Account: "a", Start: H - 10*86400000, End: H - 86400000}, {ID: "overlap", Profile: "partial", Account: "a", Start: H - 2*86400000, End: H}, {ID: "early", Profile: "early", Account: "b"}, {ID: "forecast", Profile: "main", Account: "forecast"}}
+	cfg.Profiles[0].ActiveAccount = "forecast"
+	cfg.Profiles[0].Memberships = append(cfg.Profiles[0].Memberships, ProfileMembership{Account: "forecast"})
+	cfg.Plans = []SubscriptionAssignment{{Account: "a", Plan: "claude-max-5"}, {Account: "forecast", Plan: "claude-pro"}, {Account: "codex", Plan: "codex-plus"}, {Account: "google", Plan: "google-pro"}}
+	exec(`INSERT INTO analytics_profile_revisions VALUES(8,?,'synthetic dated legacy bindings',?)`, H-86400000, string(encode(cfg)))
+	rules := NormalizationRules{ID: normalizationRuleID, Captured: H, Prices: map[string]model.ModelPrice{"test": {Prompt: 1}, "claude-opus-5-5": {Prompt: 4, Completion: 20, CacheRead: .4, CacheCreation: 5}}}
+	exec(`INSERT INTO analytics_normalization_rules VALUES(?,?,?)`, rules.ID, H, string(encode(rules)))
+	for _, a := range []Account{{ID: "forecast", Provider: "claude", Label: "=Forecast fixture"}, {ID: "codex", Provider: "codex", Label: "Codex"}, {ID: "google", Provider: "antigravity", Label: "Google"}} {
+		exec(`INSERT INTO analytics_accounts VALUES(?,?,?,?,?,?,0,'')`, a.ID, a.Provider, a.Label, "", "", H)
+		exec(`INSERT INTO analytics_credential_inventory VALUES(?,?,?)`, a.ID, H, "connected")
+	}
+	w, obs, events, _ := estimationFixture(40, func(i int) int64 {
+		if i > 22 {
+			return 1200000
+		}
+		return 1000000
+	})
+	shift := H - 3*3600000 - w.Start
+	w.Account = "forecast"
+	w.Start += shift
+	w.Reset += shift
+	w.AttributionEnd = w.Reset
+	w.ID = "forecast-window"
+	w.ObservationIDs = nil
+	const keyA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const keyB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for i := range obs {
+		o := &obs[i]
+		o.ID = fmt.Sprintf("forecast-%d", i)
+		o.Account = "forecast"
+		o.Start = w.Start
+		o.Reset = w.Reset
+		o.WindowID = w.ID
+		o.Observed += shift
+		o.Received += shift
+		o.TimeLow = o.Observed
+		o.TimeHigh = o.Observed
+		o.TimeSource = "synthetic_exact"
+		w.ObservationIDs = append(w.ObservationIDs, o.ID)
+		exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`, o.ID, o.Account, o.Observed, o.WindowID, string(encode(o)))
+	}
+	for i := range events {
+		v := &events[i]
+		v.ID += 200
+		v.Hash = fmt.Sprintf("forecast-event-%d", i)
+		v.Account = "forecast"
+		v.APIKeyHash = keyA
+		if i%2 == 1 {
+			v.APIKeyHash = keyB
+		}
+		v.Started += shift
+		v.Completed += shift
+		v.Recorded += shift
+		cost := v.Tokens.Total * 1000
+		v.CostNano = &cost
+		exec(`INSERT INTO analytics_events VALUES(?,?,?,?,?,?)`, v.Hash, v.ID, v.Account, v.Started, v.Completed, string(encode(v)))
+		exec(`INSERT INTO analytics_event_keys VALUES(?,?)`, v.Hash, v.APIKeyHash)
+	}
+	// Additional source scopes expose published/unknown/cross-provider tier rules.
+	for _, a := range []struct{ id, provider, scope string }{{"codex", "codex", "codex-main"}, {"google", "antigravity", "gemini"}} {
+		for i, p := range []float64{5, 45} {
+			at := H - 1800000 + int64(i)*1200000
+			o := Observation{ID: a.id + fmt.Sprint(i), Account: a.id, Provider: a.provider, Kind: "weekly", Scope: a.scope, WindowID: a.id + "-window", Start: H - 86400000, Reset: H + 86400000, Duration: 2 * 86400000, Used: &p, Observed: at, Received: at, TimeLow: at, TimeHigh: at, TimeSource: "synthetic_exact", Boundary: "explicit", Evidence: encode(map[string]any{"used_percent": p})}
+			exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`, o.ID, o.Account, o.Observed, o.WindowID, string(encode(o)))
+		}
+	}
+	for i, p := range []float64{10, 80} {
+		at := H - 2*86400000 + 1000
+		if i == 1 {
+			at = H - 2000
+		}
+		o := Observation{ID: fmt.Sprintf("missing-%d", i), Account: "gap", Provider: "claude", Kind: "weekly", Scope: "all", WindowID: "missing-window", Start: H - 2*86400000, Reset: H + 86400000, Duration: 3 * 86400000, Used: &p, Observed: at, Received: at, TimeLow: at, TimeHigh: at, TimeSource: "synthetic_exact", Boundary: "explicit"}
+		exec(`INSERT INTO analytics_observations VALUES(?,?,?,?,?)`, o.ID, o.Account, o.Observed, o.WindowID, string(encode(o)))
+	}
+	var throughObs int64
+	if e = s.db.QueryRow(`SELECT max(rowid) FROM analytics_observations`).Scan(&throughObs); e != nil {
+		t.Fatal(e)
+	}
+	exec(`UPDATE analytics_state SET value=240 WHERE name='events'`)
+	issued := obs[22].Observed + 2000
+	past := Derive(Account{ID: "forecast", Provider: "claude"}, obs[:23], events[:22], issued)[0]
+	points := quotaPoints(past, obs[:23], events[:22])
+	origin := points[len(points)-1]
+	for i, version := range []string{EstimatorV2, EstimatorVersion} {
+		comparison := compareWindowForEstimator(past, obs[:23], events[:22], rules, version)
+		if comparison.Calibration == nil {
+			t.Fatal("fixture lacks calibration")
+		}
+		f := QuotaForecast{ID: fmt.Sprintf("saved-%d", i), Account: "forecast", WindowID: w.ID, EstimatorID: version, RuleID: rules.ID, PriceHash: digest(string(encode(rules))), Issued: issued, Through: 222, ObservationsThrough: throughObs, Origin: origin, Window: past, Sample: *comparison.Calibration, Target: 40, RateUSD: *comparison.Calibration.PerPercent.Weighted / 1e6, Policy: estimatorPolicy, TargetKind: "forward_incremental_api_value", CycleProjection: comparison.ActualCycle, SavedBefore: issued + 1}
+		if !freezeKnownUsage(&f, events[:22], rules) {
+			t.Fatal("fixture forecast not prospective")
+		}
+		exec(`INSERT INTO analytics_forecasts VALUES(?,?,?,?,?,?)`, f.ID, f.Account, f.WindowID, f.Issued, f.Window.Reset, string(encode(f)))
+		derived := Derive(Account{ID: "forecast", Provider: "claude"}, obs, events, H)[0]
+		result := evaluateForecast(f, derived, obs, events, rules, H)
+		if result == nil || result.State != "verified" {
+			t.Fatalf("fixture verification: %+v", result)
+		}
+		result.ID = fmt.Sprintf("verified-%d", i)
+		result.Settled = H - 1000
+		result.Through = 240
+		result.ObservationsThrough = throughObs
+		exec(`INSERT INTO analytics_forecast_results VALUES(?,?,?,?,?)`, result.ID, f.ID, result.Settled, result.State, string(encode(result)))
+		if i == 1 {
+			revision := *result
+			revision.ID = "late-revision"
+			revision.State = "unscorable"
+			revision.Reason = "synthetic_late_conflicting_evidence"
+			revision.Settled = H
+			exec(`INSERT INTO analytics_forecast_results VALUES(?,?,?,?,?)`, revision.ID, f.ID, revision.Settled, revision.State, string(encode(revision)))
+		}
+	}
+	var original string
+	if e = s.db.QueryRow(`SELECT payload FROM analytics_forecasts WHERE id='saved-1'`).Scan(&original); e != nil {
+		t.Fatal(e)
+	}
+	for _, name := range []string{"future-issue", "future-events", "future-observations"} {
+		var f QuotaForecast
+		json.Unmarshal([]byte(original), &f)
+		f.ID = name
+		switch name {
+		case "future-issue":
+			f.Issued = H + 1
+		case "future-events":
+			f.Through = 10000
+		case "future-observations":
+			f.ObservationsThrough = throughObs + 1
+		}
+		exec(`INSERT INTO analytics_forecasts VALUES(?,?,?,?,?,?)`, f.ID, f.Account, f.WindowID, f.Issued, f.Window.Reset, string(encode(f)))
+	}
+	for _, name := range []string{"future-settlement", "future-result-events", "future-result-observations"} {
+		var raw string
+		s.db.QueryRow(`SELECT payload FROM analytics_forecast_results WHERE id='verified-1'`).Scan(&raw)
+		var result ForecastResult
+		json.Unmarshal([]byte(raw), &result)
+		result.ID = name
+		switch name {
+		case "future-settlement":
+			result.Settled = H + 1
+		case "future-result-events":
+			result.Through = 10000
+		case "future-result-observations":
+			result.ObservationsThrough = throughObs + 1
+		}
+		exec(`INSERT INTO analytics_forecast_results VALUES(?,?,?,?,?)`, result.ID, result.ForecastID, result.Settled, result.State, string(encode(result)))
+	}
+	base := ProfileFilter{At: H, Through: 240, ObservationsThrough: throughObs, Revision: 8, Estimator: EstimatorVersion, TokenEvidenceThrough: 1, ForecastsThrough: 5, VerificationsThrough: 6}
+	var v2book, v3book string
+	s.db.QueryRow(`SELECT id FROM analytics_normalization_rules WHERE id LIKE 'profile-api-value-v2:%'`).Scan(&v2book)
+	s.db.QueryRow(`SELECT id FROM analytics_normalization_rules WHERE id LIKE 'profile-api-value-v3:%'`).Scan(&v3book)
+	type result struct {
+		Name, View, Window, Kind string
+		Filter                   ProfileFilter
+		Quota                    *QuotaUsageFilter `json:",omitempty"`
+		Output                   json.RawMessage
+	}
+	results := []result{}
+	for _, name := range []string{"v3", "v2", "dated", "key", "missing", "initial", "forecast-old", "forecast-latest", "valuation-v2", "valuation-v3", "interval"} {
+		f := base
+		switch name {
+		case "v2":
+			f.Estimator = ""
+		case "dated":
+			f.Profile = "partial"
+		case "key":
+			f.APIKey = keyB
+		case "missing":
+			f.Account = "gap"
+		case "initial":
+			f.Revision = 0
+		case "forecast-old":
+			f.VerificationsThrough = 2
+		case "valuation-v2":
+			f.ValuationRule = v2book
+		case "valuation-v3":
+			f.ValuationRule = v3book
+		case "interval":
+			f.From = H - 86400000
+			f.To = H
+		}
+		r, e := s.ProfileReport(ctx, f)
+		if e != nil {
+			t.Fatal(name, e)
+		}
+		results = append(results, result{Name: name, View: "profiles", Filter: f, Output: encode(r)})
+		windows := []string{"a-week", "forecast-window"}
+		if name == "missing" {
+			windows = append(windows, "missing-window")
+		}
+		for _, id := range windows {
+			proof, e := s.ProfileProof(ctx, id, f)
+			if e != nil {
+				t.Fatal(name, id, e)
+			}
+			results = append(results, result{Name: name + "-" + id, View: "profile-proof", Window: id, Filter: f, Output: encode(proof)})
+		}
+	}
+	for _, name := range []string{"all", "key", "weekly"} {
+		f := base
+		kind := ""
+		if name == "key" {
+			f.APIKey = keyB
+		}
+		if name == "weekly" {
+			kind = "weekly"
+		}
+		r, e := s.Report(ctx, "", kind, 0, 0, f.APIKey)
+		if e != nil {
+			t.Fatal(e)
+		}
+		results = append(results, result{Name: "history-" + name, View: "history", Kind: kind, Filter: f, Output: encode(r)})
+		p, e := s.ProofAt(ctx, "forecast-window", f.Through, f.ObservationsThrough, f.At, f.APIKey)
+		if e != nil {
+			t.Fatal(e)
+		}
+		results = append(results, result{Name: "proof-" + name, View: "history-proof", Window: "forecast-window", Filter: f, Output: encode(p)})
+	}
+	for _, name := range []string{"current", "history", "dated", "key-outside", "key-gateway", "then", "scenario", "google", "codex", "model", "v2-rule", "v3-rule"} {
+		f := QuotaUsageFilter{ProfileFilter: base, Period: "history"}
+		switch name {
+		case "current":
+			f.Period = "current"
+		case "dated":
+			f.Profile = "partial"
+		case "key-outside":
+			f.APIKey = keyA
+		case "key-gateway":
+			f.APIKey = keyA
+			f.GatewayOnly = true
+		case "then":
+			f.Basis = "then"
+		case "scenario":
+			f.WindowID = "a-h"
+			f.SourcePlan = "claude-max-5"
+			f.TargetPlan = "claude-max-20"
+			f.CapacityRatio = 3
+		case "google":
+			f.Account = "google"
+		case "codex":
+			f.Account = "codex"
+		case "model":
+			f.Model = "claude-opus-5-5"
+		case "v2-rule":
+			f.ValuationRule = v2book
+		case "v3-rule":
+			f.ValuationRule = v3book
+		}
+		r, e := s.QuotaUsage(ctx, f)
+		if e != nil {
+			t.Fatal(name, e)
+		}
+		results = append(results, result{Name: name, View: "quota", Filter: base, Quota: &f, Output: encode(r)})
+	}
+	ledger, e := s.forecastEvidence(ctx, "forecast-window", base)
+	if e != nil {
+		t.Fatal(e)
+	}
+	results = append(results, result{Name: "forecast-ledger", View: "forecasts", Window: "forecast-window", Filter: base, Output: encode(ledger)})
+	raw, _ := json.MarshalIndent(results, "", "  ")
+	if e = os.WriteFile(filepath.Join(out, "historical-oracle.json"), append(raw, '\n'), 0600); e != nil {
+		t.Fatal(e)
+	}
+	meta, _ := json.MarshalIndent(map[string]any{"h_ms": H, "events_through": 240, "observations_through": throughObs, "forecasts_through": 5, "verifications_through": 6, "cases": len(results)}, "", "  ")
+	os.WriteFile(filepath.Join(out, "historical-boundary.json"), append(meta, '\n'), 0600)
+	// SQL snapshot is generated by the original SQLite driver, retaining rowids.
+	schema, e := os.ReadFile(os.Getenv("PACER_SCHEMA"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	names := []string{}
+	for _, m := range regexp.MustCompile(`(?i)create table if not exists ([a-z_]+)`).FindAllStringSubmatch(string(schema), -1) {
+		names = append(names, m[1])
+	}
+	sort.Strings(names)
+	var sqlout strings.Builder
+	for _, name := range names {
+		var ddl string
+		if e = s.db.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='table' AND name=?`, name).Scan(&ddl); e != nil {
+			t.Fatal(e)
+		}
+		sqlout.WriteString(ddl + ";\n")
+		rows, e := s.db.Query(`PRAGMA table_info("` + name + `")`)
+		if e != nil {
+			t.Fatal(e)
+		}
+		cols := []string{}
+		for rows.Next() {
+			var cid, nn, pk int
+			var n, typ string
+			var d any
+			if e = rows.Scan(&cid, &n, &typ, &nn, &d, &pk); e != nil {
+				t.Fatal(e)
+			}
+			cols = append(cols, n)
+		}
+		rows.Close()
+		targets := []string{"rowid"}
+		selects := []string{"quote(rowid)"}
+		for _, n := range cols {
+			targets = append(targets, `"`+n+`"`)
+			selects = append(selects, `quote("`+n+`")`)
+		}
+		rows, e = s.db.Query(`SELECT ` + strings.Join(selects, ",") + ` FROM "` + name + `" ORDER BY rowid`)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for rows.Next() {
+			values := make([]string, len(targets))
+			ptr := make([]any, len(values))
+			for i := range ptr {
+				ptr[i] = &values[i]
+			}
+			if e = rows.Scan(ptr...); e != nil {
+				t.Fatal(e)
+			}
+			sqlout.WriteString(`INSERT INTO "` + name + `" (` + strings.Join(targets, ",") + ") VALUES(" + strings.Join(values, ",") + ");\n")
+		}
+		rows.Close()
+	}
+	if e = os.WriteFile(filepath.Join(out, "historical-fixture.sql"), []byte(sqlout.String()), 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Logf("%d original historical reports/proofs/ledgers; %d observations", len(results), throughObs)
+}

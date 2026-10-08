@@ -5,6 +5,9 @@ package cpamp
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
+	"time"
 )
 
 type QuotaUsageFilter struct {
@@ -17,6 +20,11 @@ type QuotaUsageFilter struct {
 	TargetPlan    string  `json:"target_plan"`
 	CapacityRatio float64 `json:"capacity_ratio"`
 	GatewayOnly   bool    `json:"gateway_only"`
+}
+
+type QuotaUsageProfile struct {
+	Profile
+	Members []string `json:"members"`
 }
 
 type QuotaUsageWindow struct {
@@ -44,6 +52,19 @@ type QuotaUsageWindow struct {
 	PlanBasis      string                `json:"plan_basis"`
 	Comparisons    []TierComparison      `json:"comparisons"`
 	Notes          []string              `json:"notes"`
+}
+
+type QuotaUsageReport struct {
+	Version       string              `json:"version"`
+	Config        ProfileConfig       `json:"config"`
+	Filter        QuotaUsageFilter    `json:"filter"`
+	Profiles      []QuotaUsageProfile `json:"profiles"`
+	Credentials   []ProfileCredential `json:"credentials"`
+	APIKeys       []APIKey            `json:"api_keys"`
+	Tiers         []SubscriptionTier  `json:"tiers"`
+	Totals        ProfileTotals       `json:"totals"`
+	MatchedTotals ProfileTotals       `json:"matched_totals"`
+	Windows       []QuotaUsageWindow  `json:"windows"`
 }
 
 func quotaSelected(c ProfileConfig, f QuotaUsageFilter, account string, at int64) bool {
@@ -90,6 +111,218 @@ func quotaWindowSelected(c ProfileConfig, f QuotaUsageFilter, w Window) bool {
 		}
 	}
 	return f.Profile == "unassigned" && quotaSelected(c, f, w.Account, w.Start)
+}
+
+// QuotaUsage reads the retained ledger and observed windows directly. It does
+// not execute the legacy exhaustion estimator or mutate historical accounting.
+func (s *Service) QuotaUsage(ctx context.Context, f QuotaUsageFilter) (QuotaUsageReport, error) {
+	r := QuotaUsageReport{Version: "quota-usage-v1", Profiles: []QuotaUsageProfile{}, Credentials: []ProfileCredential{}, Windows: []QuotaUsageWindow{}, Tiers: subscriptionTiers()}
+	if !s.ready.Load() {
+		return r, errors.New("usage history is initializing")
+	}
+	if f.Kind != "" && f.Kind != "5h" && f.Kind != "weekly" {
+		return r, errors.New("unsupported window kind")
+	}
+	if f.Period == "" {
+		f.Period = "current"
+	}
+	if f.Period != "current" && f.Period != "history" {
+		return r, errors.New("invalid period")
+	}
+	if f.Basis == "" {
+		f.Basis = "today"
+	}
+	if f.Basis != "today" && f.Basis != "then" {
+		return r, errors.New("invalid comparison basis")
+	}
+	if !validCapacityRatio(f.CapacityRatio) {
+		return r, errors.New("invalid capacity ratio")
+	}
+	if f.CapacityRatio > 0 {
+		if _, ok := subscriptionTier(f.TargetPlan); !ok || f.WindowID == "" {
+			return r, errors.New("a scenario needs a target tier and one selected window")
+		}
+	}
+	if f.SourcePlan != "" {
+		if _, ok := subscriptionTier(f.SourcePlan); !ok || f.WindowID == "" {
+			return r, errors.New("source tier requires a selected window")
+		}
+	}
+	if err := s.acquireHistory(ctx); err != nil {
+		return r, err
+	}
+	defer s.releaseHistory()
+	initialRevision := f.At > 0 && f.Revision == 0
+	var err error
+	f.ProfileFilter, err = s.pinProfileFilter(ctx, f.ProfileFilter)
+	if err != nil {
+		return r, err
+	}
+	revision := f.Revision
+	if initialRevision {
+		revision = -1
+	}
+	r.Config, err = s.ProfileConfig(ctx, revision)
+	if err != nil {
+		return r, err
+	}
+	f.Revision = r.Config.Revision
+	found := f.Profile == "" || f.Profile == "all" || f.Profile == "unassigned"
+	for _, p := range r.Config.Profiles {
+		r.Profiles = append(r.Profiles, QuotaUsageProfile{Profile: p, Members: quotaProfileAccounts(r.Config, p)})
+		if p.ID == f.Profile {
+			found = true
+		}
+	}
+	if !found {
+		return r, errors.New("profile not found")
+	}
+	r.APIKeys, err = s.apiKeys(ctx, f.Through)
+	if err != nil {
+		return r, err
+	}
+	accounts, err := s.Accounts(ctx)
+	if err != nil {
+		return r, err
+	}
+	seen := map[string]bool{}
+	windowFound := f.WindowID == ""
+	for _, a := range accounts {
+		if err := ctx.Err(); err != nil {
+			return r, err
+		}
+		events, observations, err := s.evidence(ctx, a.ID, f.Through, f.ObservationsThrough)
+		if err != nil {
+			return r, err
+		}
+		cred := ProfileCredential{Account: a, Status: "unknown", Requests: int64(len(events))}
+		_ = s.db.QueryRowContext(ctx, `SELECT checked_ms,status FROM analytics_credential_inventory WHERE account=?`, a.ID).Scan(&cred.Checked, &cred.Status)
+		if cred.Checked == 0 || f.At-cred.Checked > max(int64(s.PollInterval/time.Millisecond)*2, 900000) {
+			cred.Status = "unknown"
+		}
+		if len(events) > 0 {
+			cred.First, cred.Last = events[0].Started, events[len(events)-1].Started
+		}
+		r.Credentials = append(r.Credentials, cred)
+		if f.Account != "" && f.Account != a.ID {
+			continue
+		}
+		windows := Derive(a, observations, events, f.At)
+		latest := map[string]string{}
+		if f.Period == "current" {
+			observed := map[string]int64{}
+			for _, w := range windows {
+				key := w.Kind + "|" + w.Scope
+				if w.Status == "current" && (latest[key] == "" || w.LastObserved > observed[key] || w.LastObserved == observed[key] && w.ID < latest[key]) {
+					latest[key], observed[key] = w.ID, w.LastObserved
+				}
+			}
+		}
+		for _, w := range windows {
+			if (w.Kind != "5h" && w.Kind != "weekly") || f.Kind != "" && f.Kind != w.Kind || !quotaWindowSelected(r.Config, f, w) {
+				continue
+			}
+			if f.Period == "current" && latest[w.Kind+"|"+w.Scope] != w.ID {
+				continue
+			}
+
+			if f.From > 0 && w.Reset <= f.From || f.To > 0 && w.Start >= f.To {
+				continue
+			}
+			selected := ProfileTotals{}
+			windowEvents := []Event{}
+			for _, e := range events {
+				if !inWindow(e, w) {
+					continue
+				}
+				windowEvents = append(windowEvents, e)
+				if !quotaSelected(r.Config, f, a.ID, e.Started) || !keyMatches(e, f.APIKey) || f.Model != "" && f.Model != e.Model {
+					continue
+				}
+				selected.add(e)
+				if !seen[e.Hash] {
+					seen[e.Hash] = true
+					r.MatchedTotals.add(e)
+				}
+			}
+			if f.WindowID == w.ID {
+				r.Totals = selected
+			}
+			qw := QuotaUsageWindow{ID: w.ID, Account: w.Account, Provider: w.Provider, Label: w.Label, Kind: w.Kind, Scope: w.Scope, Start: w.Start, Reset: w.Reset, LastObserved: w.LastObserved, Used: w.Final, Status: w.Status, Stale: f.At-w.LastObserved > 600000 && w.Status == "current", Assigned: !strings.HasPrefix(w.Scope, "unknown"), Selected: selected, AccountUsage: ProfileTotals{Tokens: w.Tokens, Requests: w.Requests, Failed: w.Failed, Unpriced: w.Unpriced, CostNano: w.CostNano}, Notes: w.Notes}
+			qw.AttributionEnd = w.AttributionEnd
+
+			qw.Notes = []string{"Requests are assigned by start time in [window start, reset). API costs use prices captured with each event; older prices may have been captured at ingestion, not at execution. Last observed quota is not necessarily the final reset reading."}
+			if w.BoundaryRevision {
+				qw.Notes = append(qw.Notes, "The provider revised this reset boundary; the earlier interval is retained as evidence.")
+			}
+			if w.Coverage != "observed interval" {
+				qw.Notes = append(qw.Notes, w.Coverage)
+			}
+			if w.Straddling > 0 || w.BoundaryUncertain > 0 {
+				qw.Notes = append(qw.Notes, "Some request timing overlaps a reset boundary; provider-side token allocation is unknown.")
+			}
+			if w.Tokens.Total > 0 && qw.Assigned {
+				v := float64(selected.Tokens.Total) * 100 / float64(w.Tokens.Total)
+				qw.TokenShare = &v
+			}
+			qw.Attribution = attributeKeyQuota(w, observations, windowEvents, f.APIKey, f.GatewayOnly)
+
+			if f.APIKey != "" && (f.Model != "" || !selectionCoversKey(r.Config, f, w, windowEvents)) {
+				qw.Attribution = QuotaAttribution{Status: "unavailable", Reason: "This selection covers only part of the key's account/window usage."}
+			}
+			qw.SourcePlan, qw.PlanBasis = planForWindow(r.Config, w), "recorded assignment"
+			if f.WindowID == w.ID {
+				windowFound = true
+				if f.SourcePlan != "" {
+					p, _ := subscriptionTier(f.SourcePlan)
+					if p.Provider != w.Provider {
+						return r, errors.New("source tier does not match window provider")
+					}
+					qw.SourcePlan, qw.PlanBasis = f.SourcePlan, "selected scenario"
+				}
+			}
+			used := w.Final
+			if f.APIKey == "" && selected.Requests != w.Requests {
+				used = nil
+			}
+			if f.APIKey != "" {
+				used = nil
+				if qw.Attribution.Status == "estimate" {
+					used = qw.Attribution.Percent
+				}
+			}
+			ratio, target := 0.0, ""
+			if f.WindowID == w.ID {
+				ratio, target = f.CapacityRatio, f.TargetPlan
+			}
+			qw.Comparisons = compareSubscription(w, qw.SourcePlan, used, f.Basis, target, ratio)
+			r.Windows = append(r.Windows, qw)
+		}
+	}
+	if !windowFound {
+		return r, errors.New("selected window is outside the current filters; choose another window")
+	}
+	if f.WindowID == "" {
+		r.Totals = r.MatchedTotals
+	}
+	sort.Slice(r.Windows, func(i, j int) bool {
+		a, b := r.Windows[i], r.Windows[j]
+		if a.Reset != b.Reset {
+			return a.Reset > b.Reset
+		}
+		return a.ID < b.ID
+	})
+	r.Filter = f
+	return r, nil
+}
+
+func selectionCoversKey(c ProfileConfig, f QuotaUsageFilter, w Window, events []Event) bool {
+	for _, e := range events {
+		if inWindow(e, w) && keyMatches(e, f.APIKey) && !quotaSelected(c, f, e.Account, e.Started) {
+			return false
+		}
+	}
+	return true
 }
 
 type QuotaUsageEvidence struct {

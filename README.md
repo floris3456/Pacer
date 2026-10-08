@@ -115,6 +115,11 @@ The follow-up [native report adapter](docs/history-reports.md) ports the active
 Profile Workspace, Compare and window-evidence calculations. Its frozen synthetic
 oracle checks original CPAMP service outputs and JSON/CSV exports byte-for-byte.
 
+Its historical extension also reads legacy profiles/proofs, exhaustion, saved
+forecast revisions and subscription-tier scenarios. Default historical aggregates
+are prepared offline; legacy CSV map-order differences and exact remaining gates
+are documented in the same contract.
+
 With Go 1.26, a C compiler and libc development headers:
 
 ```sh

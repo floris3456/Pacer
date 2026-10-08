@@ -5,10 +5,14 @@ package cpamp
 import (
 	"math"
 	"sort"
+	"strings"
 )
 
 const EstimatorV2 = "quota-estimator-v2"
 const EstimatorVersion = "quota-estimator-v3"
+const actualCycleTarget = "actual_cycle_final_api_value"
+const maxMeasurementSensitivity = 0.10
+const forecastMinimumLead = 11.0
 
 const quotaClockMarginMS = int64(5000)
 
@@ -108,3 +112,355 @@ func timedPoint(p quotaPoint) bool {
 	return p.TimeSource != "unknown" && p.TimeSource != "clock_conflict" && p.TimeLow > 0 && p.TimeHigh >= p.TimeLow
 }
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+func lastContinuous(points []quotaPoint) []quotaPoint {
+	start, high := 0, -1.0
+	plan := ""
+	for i, p := range points {
+		if high-*p.Used > 1.000001 || plan != "" && p.PlanType != "" && plan != p.PlanType {
+			start, high = i, *p.Used
+		}
+		if p.PlanType != "" {
+			plan = p.PlanType
+		}
+		high = math.Max(high, *p.Used)
+	}
+	return points[start:]
+}
+
+func validComponents(e Event) bool {
+	t := e.Tokens
+	return t.Input >= 0 && t.Output >= 0 && t.Cached >= 0 && t.CacheCreation >= 0 && t.Total >= 0 && t.Cached <= t.Input && t.CacheCreation <= t.Input-t.Cached
+}
+
+type pricedEvent struct {
+	event *Event
+	mix   TokenMix
+}
+
+func addMeasuredMix(dst *TokenMix, part TokenMix) {
+	dst.UncachedInput += part.UncachedInput
+	dst.Output += part.Output
+	dst.CacheRead += part.CacheRead
+	dst.CacheWrite += part.CacheWrite
+	dst.Total += part.Total
+	if dst.Weighted != nil && part.Weighted != nil {
+		*dst.Weighted += *part.Weighted
+	} else {
+		dst.Weighted = nil
+	}
+}
+
+func priceWindowEvents(events []Event, rules NormalizationRules, w Window, start, end int64) []pricedEvent {
+	priced := []pricedEvent{}
+	for i := range events {
+		e := &events[i]
+		if e.Completed < start || e.Started >= end || !matches(*e, w.Scope, w.Models) {
+			continue
+		}
+		mix, _ := tokenMix(events[i:i+1], rules)
+		priced = append(priced, pricedEvent{e, mix})
+	}
+	return priced
+}
+
+func observedPricedMeasurement(first, last quotaPoint, events []pricedEvent) *QuotaSample {
+	delta := *last.Used - *first.Used
+	if delta <= 0 || last.Observed <= first.Observed {
+		return nil
+	}
+	s := allocatedPricedUsage(first, last, events)
+	s.StartObservation, s.EndObservation, s.StartPercent, s.EndPercent, s.Delta = first.ID, last.ID, *first.Used, *last.Used, delta
+	s.DeltaLow, s.DeltaHigh = last.Low-first.High, last.High-first.Low
+	if first.Source != last.Source || first.Source == "mixed" {
+		s.DeltaLow--
+		s.DeltaHigh++
+	}
+	s.PerPercent = mixScale(*s.CalibrationMix, 1/delta)
+	point, lower, upper := s.CalibrationMix, s.MeasurementLow, s.MeasurementHigh
+	if point.Weighted != nil && *point.Weighted > 0 && lower.Weighted != nil && upper.Weighted != nil && s.DeltaLow > 0 {
+		center := *point.Weighted / delta
+		uncertainty := math.Max(1-(*lower.Weighted/s.DeltaHigh)/center, (*upper.Weighted/s.DeltaLow)/center-1)
+		s.RelativeSensitivity = &uncertainty
+	}
+	return s
+}
+
+func allocatedPricedUsage(first, last quotaPoint, events []pricedEvent) *QuotaSample {
+	s := &QuotaSample{Start: first.Observed, End: last.Observed, UsageStart: first.TimeHigh, TimingUncertain: !timedPoint(first) || !timedPoint(last)}
+	zeroLo, zeroHi := 0.0, 0.0
+	lower, upper := TokenMix{Weighted: &zeroLo}, TokenMix{Weighted: &zeroHi}
+	for _, priced := range events {
+		e := priced.event
+		if e.Completed < first.TimeLow || e.Started >= last.TimeHigh {
+			continue
+		}
+		if !validComponents(*e) || e.Completed < e.Started {
+			s.InvalidComponents = true
+		}
+		if e.HeaderTime > 0 && (e.HeaderTime < e.Started-5000 || e.HeaderTime > e.Completed+5000) {
+			s.ClockExcluded++
+		}
+		addMeasuredMix(&upper, priced.mix)
+		if e.Started >= first.TimeHigh && e.Completed <= last.TimeLow && e.Completed >= e.Started {
+			addMeasuredMix(&lower, priced.mix)
+			s.Requests++
+		} else {
+			s.Excluded++
+		}
+	}
+	point := mixScale(mixAdd(lower, upper), .5)
+	s.Mix, s.MeasurementLow, s.MeasurementHigh, s.CalibrationMix = lower, &lower, &upper, &point
+	return s
+}
+
+func usableSample(s *QuotaSample) bool {
+	return s != nil && !s.TimingUncertain && !s.InvalidComponents && s.ClockExcluded == 0 && s.RelativeSensitivity != nil && *s.RelativeSensitivity <= maxMeasurementSensitivity+1e-9
+}
+func rateBounds(s *QuotaSample) (float64, float64) {
+	return *s.MeasurementLow.Weighted / s.DeltaHigh, *s.MeasurementHigh.Weighted / s.DeltaLow
+}
+func compatibleSamples(a, b *QuotaSample) bool {
+	if !usableSample(a) || !usableSample(b) {
+		return false
+	}
+	al, ah := rateBounds(a)
+	bl, bh := rateBounds(b)
+	return al <= bh && bl <= ah
+}
+
+// compareWindowVersion keeps observed totals distinct from calibration
+// midpoints and uses only a current continuous quota segment. It is pure and
+// replayable at a watermark. V2 is retained for old pinned evidence; v3 adds
+// the actual-cycle target without redefining legacy fields.
+func compareWindowVersion(w Window, observations []Observation, events []Event, rules NormalizationRules, estimatorID string, actualCycle bool) WindowComparison {
+	c := WindowComparison{RuleID: rules.ID, EstimatorID: estimatorID, Status: "unavailable", Notes: []string{
+		"Complete source-account pool across all client keys; request filters do not change calibration.",
+		"API-equivalent value uses frozen API prices, not an asserted provider subscription price or allowance.",
+		"Measurement ranges assume consistent 1pp quantization within a source and bounded request/timestamp overlap. They are not confidence intervals and do not bound external usage or undisclosed provider reporting delays.",
+	}}
+	selected := []Event{}
+	for _, e := range events {
+		if inWindow(e, w) {
+			selected = append(selected, e)
+		}
+	}
+	scoped := priceWindowEvents(events, rules, w, w.Start-quotaClockMarginMS, w.Reset+quotaClockMarginMS)
+	c.Requests = int64(len(selected))
+	c.Recorded, c.Unpriced = tokenMix(selected, rules)
+	if strings.HasPrefix(w.Scope, "unknown") || w.BoundaryRevision || w.BoundaryUncertain > 0 {
+		c.Notes = append(c.Notes, "Unknown pool scope or conflicting cycle boundaries prevent calibration.")
+		return c
+	}
+	all := quotaPoints(w, observations, events)
+	if len(all) < 2 {
+		c.Notes = append(c.Notes, "At least two timed quota observations are required.")
+		return c
+	}
+	continuous := lastContinuous(all)
+	c.SegmentStart = continuous[0].Observed
+	if len(continuous) < len(all) {
+		c.Notes = append(c.Notes, "Quota reversal greater than 1pp: calibration starts after the last discontinuity.")
+	}
+
+	points := []quotaPoint{}
+	for _, p := range continuous {
+		if *p.Used >= 100 {
+			break
+		}
+		if !timedPoint(p) {
+			continue
+		}
+		points = append(points, p)
+	}
+	if len(points) < 2 {
+		c.Notes = append(c.Notes, "No usable timed, unsaturated observations.")
+		return c
+	}
+	last := points[len(points)-1]
+
+	starts := []quotaPoint{points[0]}
+	for i := 1; i < len(points)-1; i++ {
+		if math.Abs(*points[i].Used-*points[i-1].Used) > 1e-8 || points[i].Source != points[i-1].Source {
+			starts = append(starts, points[i])
+		}
+	}
+	c.Sample = observedPricedMeasurement(starts[0], last, scoped)
+	if c.Sample != nil {
+		c.Status = "observed_sample"
+	}
+	recentIndex := -1
+	for i := len(starts) - 1; i >= 0; i-- {
+		if *last.Used-*starts[i].Used < forecastMinimumLead {
+			continue
+		}
+		sample := observedPricedMeasurement(starts[i], last, scoped)
+		if usableSample(sample) {
+			c.Recent, recentIndex = sample, i
+			break
+		}
+	}
+	if recentIndex < 0 {
+		c.Notes = append(c.Notes, "Dollar projection needs a timed, priced sample with at most 10% measurement sensitivity (at least 11pp under 1pp quantization).")
+		return c
+	}
+	c.Calibration, c.Expanded = c.Recent, c.Recent
+	anchor := recentIndex
+	for i := anchor - 1; i >= 0; i-- {
+		if *starts[anchor].Used-*starts[i].Used < forecastMinimumLead {
+			continue
+		}
+		older := observedPricedMeasurement(starts[i], starts[anchor], scoped)
+		if !usableSample(older) {
+			continue
+		}
+		if !compatibleSamples(older, c.Recent) {
+			c.Notes = append(c.Notes, "Older and recent rate ranges differ: retain the recent compatible usage regime.")
+			break
+		}
+		expanded := observedPricedMeasurement(starts[i], last, scoped)
+		if !usableSample(expanded) {
+			break
+		}
+		c.Expanded, anchor = expanded, i
+	}
+	sample := c.Calibration
+	capacity := mixScale(sample.PerPercent, 100)
+	remainingUsed := *all[len(all)-1].Used
+	if actualCycle {
+		remainingUsed = *last.Used
+	}
+	remaining := mixScale(sample.PerPercent, math.Max(0, 100-remainingUsed))
+	low := mixScale(*sample.MeasurementLow, 100/sample.DeltaHigh)
+	high := mixScale(*sample.MeasurementHigh, 100/sample.DeltaLow)
+	c.Capacity, c.Remaining, c.CapacityLow, c.CapacityHigh = &capacity, &remaining, &low, &high
+	through := []Event{}
+	for _, e := range selected {
+		if e.Completed <= last.TimeLow {
+			through = append(through, e)
+		}
+	}
+	recorded, _ := tokenMix(through, rules)
+
+	projectionRemaining := mixScale(sample.PerPercent, math.Max(0, 100-*last.Used))
+	projected := mixAdd(recorded, projectionRemaining)
+	c.Projected, c.Status = &projected, "estimated"
+	if actualCycle {
+		c.ActualCycle = projectActualCycle(w, last, selected, sample, c.Sample, rules, strings.Contains(strings.Join(c.Notes, " "), "Older and recent rate ranges differ"))
+	}
+	c.Notes = append(c.Notes, "Calibration uses the shortest precision-qualified recent sample and the midpoint of bounded aligned usage; recorded token counts remain exact gateway records. Compatible-history expansion is retained as a shadow candidate for prospective evaluation.")
+	if last.Observed != all[len(all)-1].Observed {
+		c.Notes = append(c.Notes, "Calibration ends at the last usable timed, unsaturated reading; see the sample timestamp. A later refresh can update remaining quota without supplying a calibration endpoint.")
+	}
+	return c
+}
+
+func compareWindowV2(w Window, observations []Observation, events []Event, rules NormalizationRules) WindowComparison {
+	return compareWindowVersion(w, observations, events, rules, EstimatorV2, false)
+}
+
+func compareWindowV3(w Window, observations []Observation, events []Event, rules NormalizationRules) WindowComparison {
+	return compareWindowVersion(w, observations, events, rules, EstimatorVersion, true)
+}
+
+func compareWindowForEstimator(w Window, observations []Observation, events []Event, rules NormalizationRules, estimatorID string) WindowComparison {
+	if estimatorID == EstimatorV2 {
+		return compareWindowV2(w, observations, events, rules)
+	}
+	return compareWindowV3(w, observations, events, rules)
+}
+
+func mixSubtract(a, b TokenMix) TokenMix {
+	a.UncachedInput -= b.UncachedInput
+	a.Output -= b.Output
+	a.CacheRead -= b.CacheRead
+	a.CacheWrite -= b.CacheWrite
+	a.Total -= b.Total
+	if a.Weighted != nil && b.Weighted != nil {
+		v := *a.Weighted - *b.Weighted
+		a.Weighted = &v
+	} else {
+		a.Weighted = nil
+	}
+	return a
+}
+
+func projectActualCycle(w Window, anchor quotaPoint, events []Event, sample, coverageSample *QuotaSample, rules NormalizationRules, rateShift bool) *ActualCycleProjection {
+	p := &ActualCycleProjection{
+		TargetKind:       actualCycleTarget,
+		PolicyID:         EstimatorVersion,
+		RuleID:           rules.ID,
+		Scope:            "complete_source_account_pool",
+		Status:           "estimated",
+		FutureRatePolicy: "shortest_recent_precision_qualified_sample",
+		Anchor: ProjectionAnchor{
+			ObservationID: anchor.ID, ObservationIDs: append([]string(nil), anchor.IDs...),
+			Observed: anchor.Observed, Received: anchor.Received, TimeLow: anchor.TimeLow, TimeHigh: anchor.TimeHigh,
+			UsedPercent: *anchor.Used, UsedLow: math.Max(0, anchor.Low), UsedHigh: math.Min(100, anchor.High),
+		},
+		Limitations: []string{
+			"Boundary and quota bounds are coherent allocation scenarios, not confidence intervals.",
+			"The future rate assumes the recent gateway request mix continues; it does not bound external usage or provider billing delay.",
+		},
+	}
+	if rateShift {
+		p.FutureRateRepresentativeness = "recent_rate_differs_from_earlier_observed_rate"
+		p.Limitations = append(p.Limitations, "Earlier and recent measured rate ranges differ; only the remaining quota uses the recent rate.")
+	} else {
+		p.FutureRateRepresentativeness = "no_detected_earlier_rate_disagreement"
+	}
+	before, after, boundary := []Event{}, []Event{}, []Event{}
+	for _, e := range events {
+		switch {
+		case e.Completed <= anchor.TimeLow:
+			before = append(before, e)
+		case e.Started >= anchor.TimeHigh:
+			after = append(after, e)
+		default:
+			boundary = append(boundary, e)
+		}
+	}
+	baseLow, baseMissing := tokenMix(before, rules)
+	afterLow, afterMissing := tokenMix(after, rules)
+	boundaryMix, boundaryMissing := tokenMix(boundary, rules)
+	p.RecordedNow, _ = tokenMix(events, rules)
+	p.RecordedAtAnchorLow = baseLow
+	p.RecordedAtAnchorHigh = mixAdd(baseLow, boundaryMix)
+	p.RecordedAtAnchor = mixAdd(baseLow, mixScale(boundaryMix, .5))
+	p.KnownAfterAnchorLow = afterLow
+	p.KnownAfterAnchorHigh = mixAdd(afterLow, boundaryMix)
+	p.KnownAfterAnchor = mixAdd(afterLow, mixScale(boundaryMix, .5))
+	p.BoundaryValue, p.BoundaryRequests = boundaryMix, int64(len(boundary))
+	p.FutureRate = sample.PerPercent
+	p.FutureRateLow = mixScale(*sample.MeasurementLow, 1/sample.DeltaHigh)
+	p.FutureRateHigh = mixScale(*sample.MeasurementHigh, 1/sample.DeltaLow)
+	p.EstimatedFromAnchor = mixScale(p.FutureRate, math.Max(0, 100-*anchor.Used))
+	p.EstimatedFinal = mixAdd(p.RecordedAtAnchor, p.EstimatedFromAnchor)
+	p.TotalLow = mixAdd(p.RecordedAtAnchorLow, mixScale(p.FutureRateLow, math.Max(0, 100-p.Anchor.UsedHigh)))
+	p.TotalHigh = mixAdd(p.RecordedAtAnchorHigh, mixScale(p.FutureRateHigh, math.Max(0, 100-p.Anchor.UsedLow)))
+	remainingNow := mixSubtract(p.EstimatedFromAnchor, p.KnownAfterAnchor)
+	if baseMissing+afterMissing+boundaryMissing > 0 || p.RecordedNow.Weighted == nil || p.EstimatedFinal.Weighted == nil {
+		p.Status = "unavailable"
+		p.AvailabilityReasons = append(p.AvailabilityReasons, "incomplete_prices")
+	} else if remainingNow.Weighted != nil && *remainingNow.Weighted < -1e-6 {
+		p.Status = "stale"
+		p.AvailabilityReasons = append(p.AvailabilityReasons, "known_after_anchor_exceeds_forecast_budget")
+	} else {
+		p.EstimatedRemainingNow = &remainingNow
+		if p.TotalLow.Weighted != nil && p.KnownAfterAnchorHigh.Weighted != nil {
+			lowBudget := *mixScale(p.FutureRateLow, math.Max(0, 100-p.Anchor.UsedHigh)).Weighted
+			if *p.KnownAfterAnchorHigh.Weighted > lowBudget+1e-6 {
+				p.AvailabilityReasons = append(p.AvailabilityReasons, "one_uncertainty_scenario_has_stale_anchor")
+			}
+		}
+	}
+	if w.Coverage == "partial history" {
+		p.Limitations = append(p.Limitations, "Gateway retention begins after the provider cycle start; the estimate covers recorded gateway value and does not infer missing earlier requests.")
+		if coverageSample == nil || coverageSample.StartPercent > .5 {
+			p.Status = "unavailable"
+			p.EstimatedRemainingNow = nil
+			p.AvailabilityReasons = append(p.AvailabilityReasons, "missing_earlier_cycle_history")
+		}
+	}
+	return p
+}

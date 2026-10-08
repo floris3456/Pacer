@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 )
 
 type ProfileFilter struct {
@@ -60,12 +61,42 @@ type ProfileCredential struct {
 	First    int64  `json:"first_ms"`
 	Last     int64  `json:"last_ms"`
 }
-
+type ProfileCard struct {
+	Profile
+	Status   string        `json:"status"`
+	Today    ProfileTotals `json:"today"`
+	Month    ProfileTotals `json:"month"`
+	Lifetime ProfileTotals `json:"lifetime"`
+	Pools    []Window      `json:"pools"`
+}
 type ProfileBucket struct {
 	Key string `json:"key"`
 	ProfileTotals
 }
+type ProfileWindow struct {
+	Window
+	ProfileID   string `json:"profile_id"`
+	ProfileName string `json:"profile_name"`
+}
+type ProfileReport struct {
+	Normalization NormalizationRules  `json:"normalization"`
+	Config        ProfileConfig       `json:"config"`
+	Filter        ProfileFilter       `json:"filter"`
+	Credentials   []ProfileCredential `json:"credentials"`
+	Cards         []ProfileCard       `json:"cards"`
+	Totals        ProfileTotals       `json:"totals"`
+	Unassigned    ProfileTotals       `json:"unassigned"`
+	Timeline      []ProfileBucket     `json:"timeline"`
+	Models        []ProfileBucket     `json:"models"`
+	Clients       []ProfileBucket     `json:"clients"`
+	ByProfile     []ProfileBucket     `json:"by_profile"`
+	APIKeys       []APIKey            `json:"api_keys"`
+	Windows       []ProfileWindow     `json:"windows"`
+}
 
+func profileSelected(f ProfileFilter, owner string) bool {
+	return f.Profile == "" || f.Profile == "all" && owner != "unassigned" || f.Profile == owner
+}
 func eventSelected(f ProfileFilter, e Event) bool {
 	return (f.Account == "" || f.Account == e.Account) && (f.Model == "" || f.Model == e.Model) && keyMatches(e, f.APIKey) && (f.From == 0 || e.Started >= f.From) && (f.To == 0 || e.Started < f.To)
 }
@@ -120,6 +151,195 @@ func (s *Service) pinProfileFilter(ctx context.Context, f ProfileFilter) (Profil
 	return f, nil
 }
 
+func (s *Service) ProfileReport(ctx context.Context, f ProfileFilter) (ProfileReport, error) {
+	r := ProfileReport{Credentials: []ProfileCredential{}, Cards: []ProfileCard{}, Windows: []ProfileWindow{}}
+	if err := s.acquireHistory(ctx); err != nil {
+		return r, err
+	}
+	defer s.releaseHistory()
+	var err error
+	if !s.ready.Load() {
+		return r, errors.New("usage history is initializing")
+	}
+	initialRevision := f.At > 0 && f.Revision == 0
+	f, err = s.pinProfileFilter(ctx, f)
+	if err != nil {
+		return r, err
+	}
+	revision := f.Revision
+	if initialRevision {
+		revision = -1
+	}
+	r.Config, err = s.ProfileConfig(ctx, revision)
+	if err != nil {
+		return r, err
+	}
+	f.Revision = r.Config.Revision
+	r.Filter = f
+	r.Normalization, err = s.normalizationRules(ctx)
+	if err != nil {
+		return r, err
+	}
+	if f.Profile != "" && f.Profile != "all" && f.Profile != "unassigned" {
+		found := false
+		for _, p := range r.Config.Profiles {
+			if p.ID == f.Profile {
+				found = true
+			}
+		}
+		if !found {
+			return r, errors.New("profile not found")
+		}
+	}
+	accounts, err := s.Accounts(ctx)
+	if err != nil {
+		return r, err
+	}
+	r.APIKeys, err = s.apiKeys(ctx, f.Through)
+	if err != nil {
+		return r, err
+	}
+	cardIndex := map[string]int{}
+	names := map[string]string{"unassigned": "Unassigned history"}
+	for _, p := range r.Config.Profiles {
+		cardIndex[p.ID] = len(r.Cards)
+		names[p.ID] = p.Name
+		r.Cards = append(r.Cards, ProfileCard{Profile: p, Status: "no_credential", Pools: []Window{}})
+	}
+	timeline, models, clients, byProfile := map[string]*ProfileTotals{}, map[string]*ProfileTotals{}, map[string]*ProfileTotals{}, map[string]*ProfileTotals{}
+	at := time.UnixMilli(f.At).UTC()
+	today := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC).UnixMilli()
+	month := time.Date(at.Year(), at.Month(), 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	for _, a := range accounts {
+		events, obs, err := s.evidence(ctx, a.ID, f.Through, f.ObservationsThrough)
+		if err != nil {
+			return r, err
+		}
+		cred := ProfileCredential{Account: a, Status: "unknown", Requests: int64(len(events))}
+		_ = s.db.QueryRowContext(ctx, `SELECT checked_ms,status FROM analytics_credential_inventory WHERE account=?`, a.ID).Scan(&cred.Checked, &cred.Status)
+		if cred.Checked == 0 || f.At-cred.Checked > max(int64(s.PollInterval/time.Millisecond)*2, 900000) {
+			cred.Status = "unknown"
+		}
+		if len(events) > 0 {
+			cred.First = events[0].Started
+			cred.Last = events[len(events)-1].Started
+		}
+		r.Credentials = append(r.Credentials, cred)
+		for _, e := range events {
+			owner := ownerAt(r.Config, a.ID, e.Started)
+			if i, ok := cardIndex[owner]; ok {
+				card := &r.Cards[i]
+				card.Lifetime.add(e)
+				if e.Started >= today {
+					card.Today.add(e)
+				}
+				if e.Started >= month {
+					card.Month.add(e)
+				}
+			}
+			if !eventSelected(f, e) {
+				continue
+			}
+			if owner == "unassigned" {
+				r.Unassigned.add(e)
+			}
+			if !profileSelected(f, owner) {
+				continue
+			}
+			r.Totals.add(e)
+			addBucket(timeline, time.UnixMilli(e.Started).UTC().Format("2006-01-02"), e)
+			addBucket(models, e.Model, e)
+			key := e.APIKeyHash
+			if key == "" {
+				key = UnknownAPIKey
+			}
+			addBucket(clients, key, e)
+			addBucket(byProfile, owner, e)
+		}
+		derived := Derive(a, obs, events, f.At)
+		for i := range derived {
+			if err := ctx.Err(); err != nil {
+				return r, err
+			}
+			if derived[i].Kind != "ledger" {
+				comparison := compareWindowForEstimator(derived[i], obs, events, r.Normalization, f.Estimator)
+				ledger, ledgerErr := s.forecastEvidence(ctx, derived[i].ID, f)
+				if ledgerErr != nil {
+					return r, ledgerErr
+				}
+				comparison.LastVerification = lastVerification(comparison, ledger)
+				derived[i].Comparison = &comparison
+			}
+		}
+		for i := range r.Cards {
+			card := &r.Cards[i]
+			if card.ActiveAccount != a.ID {
+				continue
+			}
+			card.Status = cred.Status
+			latest := map[string]Window{}
+			for _, w := range derived {
+				if w.Status != "current" || w.Remaining == nil {
+					continue
+				}
+				key := w.Kind + "|" + w.Scope
+				if prev, ok := latest[key]; !ok || prev.LastObserved < w.LastObserved {
+					latest[key] = w
+				}
+			}
+			for _, w := range latest {
+				card.Pools = append(card.Pools, w)
+			}
+			sort.Slice(card.Pools, func(i, j int) bool {
+				return card.Pools[i].Scope+card.Pools[i].Kind < card.Pools[j].Scope+card.Pools[j].Kind
+			})
+		}
+		for _, w := range derived {
+			if w.Kind == "ledger" {
+				continue
+			}
+			if f.From > 0 && w.Reset <= f.From || f.To > 0 && w.Start >= f.To || f.Account != "" && f.Account != a.ID {
+				continue
+			}
+			owners := map[string]bool{}
+			for _, b := range r.Config.Bindings {
+				if b.Account == a.ID && intervalsOverlap(b, Binding{Start: w.Start, End: w.AttributionEnd}) && profileSelected(f, b.Profile) {
+					owners[b.Profile] = true
+				}
+			}
+			if profileSelected(f, "unassigned") {
+				for _, e := range events {
+					if inWindow(e, w) && ownerAt(r.Config, a.ID, e.Started) == "unassigned" {
+						owners["unassigned"] = true
+						break
+					}
+				}
+			}
+			for owner := range owners {
+				selected := []Event{}
+				for _, e := range events {
+					if inWindow(e, w) && ownerAt(r.Config, a.ID, e.Started) == owner && eventSelected(f, e) {
+						selected = append(selected, e)
+					}
+				}
+				pw := profileContribution(w, selected)
+				r.Windows = append(r.Windows, ProfileWindow{Window: pw, ProfileID: owner, ProfileName: names[owner]})
+			}
+		}
+	}
+	r.Timeline = buckets(timeline)
+	r.Models = buckets(models)
+	r.Clients = buckets(clients)
+	r.ByProfile = buckets(byProfile)
+	sort.Slice(r.Windows, func(i, j int) bool {
+		if r.Windows[i].Reset == r.Windows[j].Reset {
+			return r.Windows[i].ID+r.Windows[i].ProfileID < r.Windows[j].ID+r.Windows[j].ProfileID
+		}
+		return r.Windows[i].Reset > r.Windows[j].Reset
+	})
+	return r, nil
+}
+
 func profileContribution(w Window, events []Event) Window {
 	w.SharedUsage = &UsageTotals{Tokens: w.Tokens, Requests: w.Requests, CostNano: w.CostNano}
 	w.Tokens = Tokens{}
@@ -146,4 +366,69 @@ func profileContribution(w Window, events []Event) Window {
 	}
 	w.Notes = append(append([]string{}, w.Notes...), "Request totals follow the selected profile assignment, date, model and client filters. Quota percentages and calibration describe the complete source-account cycle, not just this contribution.")
 	return w
+}
+
+type ProfileProof struct {
+	Forecasts     []ForecastEvidence `json:"forecasts"`
+	Normalization NormalizationRules `json:"normalization"`
+	Proof
+	Filter    ProfileFilter `json:"filter"`
+	ProfileID string        `json:"profile_id"`
+}
+
+func (s *Service) ProfileProof(ctx context.Context, id string, f ProfileFilter) (ProfileProof, error) {
+	out := ProfileProof{}
+	if err := s.acquireHistory(ctx); err != nil {
+		return out, err
+	}
+	defer s.releaseHistory()
+	var err error
+	initialRevision := f.At > 0 && f.Revision == 0
+	f, err = s.pinProfileFilter(ctx, f)
+	if err != nil {
+		return out, err
+	}
+	revision := f.Revision
+	if initialRevision {
+		revision = -1
+	}
+	c, err := s.ProfileConfig(ctx, revision)
+	if err != nil {
+		return out, err
+	}
+	f.Revision = c.Revision
+	p, err := s.proofAt(ctx, id, f.Through, f.ObservationsThrough, f.At)
+	if err != nil {
+		return out, err
+	}
+	out.Normalization, err = s.normalizationRules(ctx)
+	if err != nil {
+		return out, err
+	}
+	calibrationEvents := append(append([]Event{}, p.Events...), p.BoundaryEvents...)
+	comparison := compareWindowForEstimator(p.Window, p.Observations, calibrationEvents, out.Normalization, f.Estimator)
+	out.Forecasts, err = s.forecastEvidence(ctx, id, f)
+	if err != nil {
+		return out, err
+	}
+	comparison.LastVerification = lastVerification(comparison, out.Forecasts)
+	p.Window.Comparison = &comparison
+	selected := []Event{}
+	var totals ProfileTotals
+	for _, e := range p.Events {
+		if profileSelected(f, ownerAt(c, e.Account, e.Started)) && eventSelected(f, e) {
+			selected = append(selected, e)
+			totals.add(e)
+		}
+	}
+	p.SharedEvents = p.Events
+	p.SharedReconciled = p.Reconciled
+	p.Events = selected
+	p.Window = profileContribution(p.Window, selected)
+	p.Reconciled = totals.Requests == p.Window.Requests && totals.Tokens == p.Window.Tokens && totals.CostNano == p.Window.CostNano
+	p.Policy += " Profile assignment revision and request filters are pinned. Source account observations remain unchanged. Boundary events retain outside-cycle requests needed for measurement bounds; they are not request-start-attributed totals. Do not add shared_events or boundary_events to events."
+	out.Proof = p
+	out.Filter = f
+	out.ProfileID = f.Profile
+	return out, nil
 }

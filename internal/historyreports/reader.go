@@ -44,6 +44,7 @@ type prepared struct {
 	CursorKey                               []byte
 	TokenEvidence, Forecasts, Verifications int64
 	PollIntervalSeconds                     int64
+	HistoricalReads                         bool
 }
 
 // PrepareOptions freezes the source runtime setting that affects credential
@@ -51,10 +52,14 @@ type prepared struct {
 // is performed; deployments using ANALYTICS_POLL_INTERVAL_SECONDS must pass it.
 type PrepareOptions struct{ PollIntervalSeconds int64 }
 type Reader struct {
-	db      *sql.DB
-	service *cpamp.Service
-	meta    prepared
-	path    string
+	db              *sql.DB
+	service         *cpamp.Service
+	meta            prepared
+	path            string
+	historicalGate  chan struct{}
+	historicalCache map[string]historicalEntry
+	historicalClock uint64
+	historicalBytes int
 }
 
 // Prepare is explicit offline work. dir is trusted task-local configuration,
@@ -99,7 +104,7 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 	for _, limit := range []struct {
 		table string
 		max   int64
-	}{{"analytics_events", 500000}, {"analytics_observations", 100000}, {"analytics_accounts", 1000}, {"analytics_profile_revisions", 10000}} {
+	}{{"analytics_events", 500000}, {"analytics_observations", 100000}, {"analytics_accounts", 1000}, {"analytics_profile_revisions", 10000}, {"analytics_forecasts", 100000}, {"analytics_forecast_results", 200000}} {
 		var n int64
 		if db.QueryRowContext(ctx, "SELECT count(*) FROM "+limit.table).Scan(&n) != nil {
 			return nil, ErrSource
@@ -129,6 +134,10 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 		return nil, ErrSource
 	}
 	m.Pin = Pin{ProfileFilter: cpamp.ProfileFilter{At: b.HMS, Through: b.EventsThrough, ObservationsThrough: b.ObservationsThrough, Revision: config.Revision, TokenEvidenceThrough: m.TokenEvidence, ForecastsThrough: m.Forecasts, VerificationsThrough: m.Verifications, Estimator: cpamp.EstimatorVersion, ValuationRule: book.ID}}
+	if e = prepareHistoricalReads(ctx, db, s, m); e != nil {
+		return nil, domainError(ctx, e)
+	}
+	m.HistoricalReads = true
 	raw, _ := json.Marshal(m)
 	if _, e = db.ExecContext(ctx, `CREATE TABLE pacer_report_preparation(id INTEGER PRIMARY KEY CHECK(id=1),payload BLOB NOT NULL);INSERT INTO pacer_report_preparation VALUES(1,?)`, raw); e != nil {
 		return nil, ErrSource
@@ -173,7 +182,7 @@ func Open(ctx context.Context, path string) (*Reader, error) {
 	}
 	s := cpamp.New(db, m.Boundary.HMS)
 	s.PollInterval = time.Duration(m.PollIntervalSeconds) * time.Second
-	return &Reader{db: db, service: s, meta: m, path: abs}, nil
+	return &Reader{db: db, service: s, meta: m, path: abs, historicalGate: make(chan struct{}, 1), historicalCache: map[string]historicalEntry{}}, nil
 }
 func (r *Reader) Close() error { return r.db.Close() }
 

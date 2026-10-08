@@ -1,6 +1,7 @@
 {
   "apps/manager-server/internal/http/controller/usagehistory/handler.go": "d9e12ffc23bf2744f5b85113730f93641a998b405855fa4289e4639743f26ae9",
   "apps/manager-server/internal/http/controller/usagehistory/profile_workspace.go": "3e639c1e056d38764ed9671d06c15abcdbcbffbe3a40ecffaeda13d33b5d9cf3",
+  "apps/manager-server/internal/http/controller/usagehistory/profiles.go": "60c66f9500b92009ad0af0035b725b14b00d1afab84b549935cb4bed6b7269db",
   "apps/manager-server/internal/http/controller/usagehistory/quota_usage.go": "3e05805c88eb2e1aeacd489e35a527ef514a15d36946b5553d3fffc051c0883f",
   "apps/manager-server/internal/model/api_key_alias.go": "af559801e6ab74fad68b160995d3f77db4bdc4fa6245649553a1fc8f0b70582d",
   "apps/manager-server/internal/model/model_price.go": "790e8db72d81227cac1bc246501045f3b2a23eb380cb7d264c0355e81233009c",
@@ -15,6 +16,7 @@
   "apps/manager-server/internal/service/usagehistory/forecasts.go": "01420bcc7e590bf5b3802edf672360ad98e36ded0d50e78956e73f042dabc7ae",
   "apps/manager-server/internal/service/usagehistory/keys.go": "9bbaee8749d21a2a6ea380dfa9e40efbb29df382b3704dc2e3780e3b491f3f08",
   "apps/manager-server/internal/service/usagehistory/normalize.go": "b2fd66913b51129ebac9c01e41cffb6d0dc3e571b41ba17e97cf878b1061e0c1",
+  "apps/manager-server/internal/service/usagehistory/pricing.go": "4f4d4dcb755013e5476792a9e3052940afbf1169276c12d4e4aad060d98299fd",
   "apps/manager-server/internal/service/usagehistory/profile_memberships.go": "e29d2c911d3e0671e82f28078f956e9ce142443895e6b9c8d24633f4b08a5b79",
   "apps/manager-server/internal/service/usagehistory/profile_normalization.go": "aaaf119c2a932085ef757de09bf7c7dd5967cf7a8053d1c8b6e23e770f0da71e",
   "apps/manager-server/internal/service/usagehistory/profile_report.go": "0a09a0457a5a5cee79b089485d1ed3aa7719cbedb4ec87f5f2d313cb3a5793d4",

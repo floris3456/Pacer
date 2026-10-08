@@ -2,6 +2,8 @@
 
 `internal/historyreports` computes the active CPAMP **Profile Workspace / Compare,
 daily history and quota-window evidence** views natively from Pacer-owned history.
+It also serves the frozen **legacy profile/proof, raw history/exhaustion, saved
+forecast evidence and subscription-tier quota scenario** read paths described below.
 It ports the calculation dependency closure from `pacer-valuation` at
 `e8492c245bf69144afdcf20b8b4ea8935f0476e5` (including `f94fedf`). It does not use a
 running CPAMP process, proxy, collector or provider client.
@@ -38,15 +40,19 @@ Independent numerical/behavioral assertions additionally verify:
 - missing prices, invalid counters, no-quota history, dated memberships,
   selected-key contributions and fixed 25-row request pagination survive.
 
-This closes the **tested active-view calculation/export extraction gate**, not
-every CPAMP view or the retirement gate. See the explicit exclusions below.
+The historical extension adds 53 original domain outputs and 104 original
+controller responses: **67 complete JSON/deterministic CSV files match bytewise**;
+the other **37 legacy CSV exports match header and complete row bytes**, with an
+explicit ordering difference because CPAMP iterates Go maps. All 81 earlier
+workspace/evidence export checks continue to pass. See the exact inventory below;
+this does not establish live operation or retirement acceptance.
 
 ## Native ownership and preparation
 
 Runtime dependencies are the existing SQLite driver, Go standard library and
 local Pacer packages. Copied code lives under `internal/historyreports/internal/cpamp`;
 the Go `internal` boundary keeps the reduced library behind this adapter.
-Approximately 128 source declarations plus price/alias readers and pure CSV
+Approximately 180 source declarations plus price/alias readers and pure CSV
 writers preserve the original arithmetic/JSON layouts. Copying this dependency
 closure avoids reimplementing subtly coupled valuation, meter allocation and
 proof calculations. No CPAMP app/store/collector/polling/HTTP package is linked.
@@ -100,11 +106,21 @@ inventory snapshots cannot be reconstructed from a report pin alone.
 Preparation and first aggregate computation scale with retained history and must
 run outside routing/startup critical paths. Explicit ceilings are 500,000 events,
 100,000 observations, 1,000 accounts, 10,000 profile revisions and 1,000 latest
-profiles. Oversize input fails instead of returning truncated totals. No expensive
+profiles; the added forecast/result limits are 100,000/200,000 rows. Oversize input
+fails instead of returning truncated totals. No expensive
 work is hidden in `Open`. New report calls carry a cooperative 30-second context
 deadline; the inherited pure calculations are not a hard-preemptible worker.
 Fixed filters share a 16-entry immutable-report cache; pages read their own
 25-row request slice. Cache DTOs are cloned, not shared mutable slices/maps.
+
+The extension computes the four default historical aggregates during **offline
+Prepare**: legacy profiles, raw history, current quota and historical quota. They
+are stored inside the prepared artifact, so the first default request decodes a
+result instead of recalculating up to 500,000 events. Filtered cold reads/proofs
+still use CPAMP's full algorithms; preparation ceilings are not a latency SLA or
+a hard CPU deadline. A separate 16-entry/**32 MiB** serialized-result memory cache
+shares repeated historical reads safely. Forecast proof arrays can still scale
+with retained ledger rows, although the public forecast page returns at most 100.
 
 ## Parent API contract
 
@@ -192,13 +208,145 @@ Suggested error mapping: `ErrInput`/`ErrBoundary` -> 400, `ErrCursor` -> 409,
 `ErrLimit` is an explicit offline preparation limit. Source/driver strings and
 paths are not returned in domain errors. Stream writer failures are returned.
 
+## Historical read extension (additive API)
+
+Existing `Profiles`, `Report`, `ListWindows`, `Evidence`, `ExportJSON`, `ExportCSV`,
+`PrepareOptions` and pin JSON contracts remain intact. New methods on `*Reader`:
+
+```go
+ProfileReport(ctx, LegacyQuery) (LegacyProfileReport, error)
+ProfileProof(ctx, LegacyQuery, windowID string) (LegacyProfileProof, error)
+HistoryReport(ctx, LegacyQuery, kind string) (LegacyHistoryReport, error)
+HistoryProof(ctx, LegacyQuery, windowID string) (LegacyHistoryProof, error)
+QuotaUsage(ctx, QuotaQuery) (QuotaReport, error)
+Forecasts(ctx, ForecastQuery) (ForecastPage, error)
+ExportLegacyJSON(ctx, LegacyQuery, LegacyExportOptions, io.Writer) error
+ExportLegacyCSV(ctx, LegacyQuery, LegacyExportOptions, io.Writer) error
+ExportQuotaJSON(ctx, QuotaQuery, io.Writer) error
+ExportQuotaCSV(ctx, QuotaQuery, io.Writer) error
+```
+
+### Preparation compatibility
+
+Fresh preparation initializes/preserves CPAMP's fixed `api-equivalent-v1`
+normalization book while the disposable artifact is writable, adds forecast read
+indexes and precomputes the default aggregates. It never issues a forecast or runs
+the forecast work queue. The publication metadata marks `HistoricalReads: true`.
+
+Older prepared artifacts continue serving the existing API. New historical
+methods return **`ErrNotPrepared`** on them; parent should map this to unavailable
+and rerun offline `Prepare` into a new owned directory. Read requests do not mutate
+the artifact or silently create the missing normalization book. Parent's existing
+generic offline command can call the same `Prepare` signature.
+`HistoricalReady()` is a metadata-only boolean capability check for UI gating.
+
+### Pins, selections and clock
+
+`LegacyQuery` is `{ Pin *LegacyPin; Selection Query }`. Supply one form only.
+`LegacyPin` aliases CPAMP's `ProfileFilter`; an omitted legacy `valuation_rule`
+remains omitted. An omitted estimator on an explicit pin retains **v2** meaning.
+`LegacyQuery{}` defaults to H, the explicit event/observation checkpoint, frozen
+profile revision/forecast cursors and estimator v3. Native `Selection` supports
+the existing stable profile/account refs, hashed-key lineage, model and dates;
+its embedded pins and request page are rejected for these views.
+
+All cursor/At bounds use the same validation as the existing reader. Recognized
+saved valuation books are checked against archive bounds even for older views
+that do not consume their calculation policy. Nothing advances to wall clock or
+the maximum stored event ID on a read. The raw CPAMP `Report` API lacked an At/
+watermark input: its adapted wrapper supplies **explicit pin At/through** instead
+of `time.Now()` and source maxima. `generated_at_ms` and current/stale/exhaustion
+states therefore describe the frozen report time, not today's service activity.
+Pending/backfill fields describe the retained CPAMP state, not a running Pacer
+ingestion worker. Parent should display the frozen boundary alongside the view.
+As in CPAMP, events are selected by the explicit ledger cursor and requested
+half-open interval; At/H is not a rewrite of late-recorded/backfilled timestamps.
+Those source times remain visible in proofs. Forecast issue/settlement and payload
+cursors have their additional as-of gates, so later predictions/results cannot
+be presented as then-known evidence.
+
+`HistoryReport` supports account/key/date selection and a kind string (maximum
+64 bytes), not profile/model filtering. `HistoryProof` supports the window and
+key selection; it rejects account/profile/model/date filters that the original
+raw proof could not honor. Window IDs are required for proofs, maximum 256 bytes.
+`ProfileProof` retains original selected/shared/boundary event distinctions and
+the complete source-window forecast ledger, rather than key-attributed forecasts.
+
+### Intentional version semantics retained
+
+- **Legacy ProfileReport/ProfileProof** use source `Bindings` and `ownerAt` (first
+  matching binding), the fixed `api-equivalent-v1` price book and the selected
+  `quota-estimator-v2`/`v3`. They do not reinterpret overlapping memberships using
+  the newer Workspace selection semantics. A v3 *valuation* pin does not activate
+  historical assumed-5m valuation in these older paths; its field remains intact.
+- **Raw history/exhaustion** retains `Derive`, captured costs, token-based
+  calibration, pool scope, gaps, boundary uncertainty and status/expiry behavior
+  at the supplied frozen clock. It is not promoted to the newer Compare policy.
+- **QuotaUsage** is CPAMP's separate `quota-usage-v1` factual/scenario view. It uses
+  captured event prices, deduplicated matched totals and whole overlapping windows.
+  It does not silently use v3 comparison-book dollars in its captured-cost columns.
+- Current benchmark tier prices and published multipliers are the **pinned source
+  catalog** reviewed 2026-09-29, not a live/up-to-date price fetch. `then` can remain
+  unavailable for older rules; session multipliers do not establish weekly ratios.
+- Saved forecasts/verification revisions are read exactly, not regenerated or
+  retroactively rescored. A later unscorable revision does not resurrect an older
+  verified badge. The source's source-account calibration is not an attribution
+  of provider utilization to one key.
+
+### Quota scenarios and forecast pages
+
+`QuotaQuery` accepts either `Pin *EvidencePin` (the full CPAMP QuotaUsageFilter) or
+`Selection Query` plus `Kind`, `Period`, `WindowID`, `Basis`, `SourcePlan`,
+`TargetPlan`, `CapacityRatio`, `GatewayOnly`. Combining a pin with overrides fails.
+Kinds are empty/5h/weekly, period is current (default)/history, basis is today
+(default)/then. Capacity ratio is finite, 0–10,000. A positive ratio needs a valid
+target tier and selected window; an explicit source tier also needs a window.
+The `GatewayOnly` assumption is **explicit**: without it key quota remains
+unavailable when outside applications could contribute, regardless of token cost.
+
+`ForecastQuery` is `{ Selection LegacyQuery; WindowID string; Limit int; Cursor
+string }`. It is a source-window ledger, so key/profile/account/model/date
+selection is rejected. Limit defaults to 25 and is 1–100. The page contains its
+complete pin, total, forecasts/results and signed next cursor. Ordering is original
+issued time ascending then ID. Cursors bind preparation, source snapshot, window,
+pin and page size and survive reopening that same artifact. Rows are bounded by
+forecast/result row cursors, issue/settlement time <= At and each payload's event/
+observation checkpoint. Future-issued/settled or beyond-checkpoint rows stay out.
+
+### Historical exports and map-order exception
+
+`LegacyExportOptions.View` is `profiles`, `profile-proof`, `history`, or
+`history-proof`; proofs require `WindowID`, only the history list accepts `Kind`.
+Quota exports take the complete `QuotaQuery`. JSON shapes, source strings, counts,
+numeric formatting, source policies and CSV headers/columns/escaping are preserved.
+
+CPAMP's legacy profile CSV iterates day/model/client/profile groups via a Go map;
+profile-proof CSV iterates metadata and prices via maps; raw-proof CSV iterates
+prices via a map. **A unique original whole-file byte sequence does not exist for
+these map-backed exports.** Native writers choose stable group order (day/model/
+client/profile; window/filter/normalization) and sorted price IDs. Tests compare
+the header and full encoded row-byte multiset against the actual original
+controllers, including embedded JSON. Whole-file bit parity is claimed only for
+JSON and deterministic quota/raw-history CSV. This is an explicit ordering
+exception, not changed accounting, redacted financial evidence or a stored-report
+proxy. Native repeated CSV output is deterministic.
+
+### Profile mutation is a separate contract
+
+Historical GET parity requires no profile mutation. Future editable native
+profiles would need an append-only, CAS-revisioned overlay with stable source
+account IDs, dated memberships/bindings and subscription assignments; source and
+native revision namespaces must remain distinguishable in pins. Old reports
+must keep their original config/book and preparation. It cannot be implemented by
+updating the readonly artifact or treating display-group edits as source-profile
+changes. No mutation/refresh API is provided by this adapter.
+
 ## Reproducing the oracle and extraction
 
 Use the task-local Go caches from the implementation receipts. No command below
 opens a live database or edits the analytics checkout:
 
 ```sh
-go run internal/historyreports/generate/extract.go /path/to/analytics
 python3 internal/historyreports/generate/oracle.py /path/to/analytics /fresh/task-local/output
 python3 internal/historyreports/generate/pack.py /fresh/task-local/output
 go test -race -tags sqlite_fts5 ./internal/history ./internal/historyreports/...
@@ -223,15 +371,49 @@ read-only artifact. Native replay on that actual snapshot passes the same seven
 workspaces, 30 proofs and 81 bytewise exports under the race detector. Parent can
 reuse it for authenticated UI/lab acceptance; this check does not exercise HTTP.
 
+For the complete historical declaration closure, use the opt-in Go provenance
+test (the earlier extractor alone regenerates only the first-phase subset):
+
+```sh
+PACER_CPAMP_SOURCE=/path/to/analytics \
+  go test -run '^TestExtractHistoricalReadClosure$' ./internal/historyreports
+PACER_CPAMP_SOURCE=/path/to/analytics \
+PACER_HISTORICAL_ORACLE_OUT=/fresh/task-local/historical-output \
+  go test -run '^TestGenerateHistoricalOracle$' -timeout=510s ./internal/historyreports
+```
+
+The Go test reuses the existing AST extractor with additional read-only roots;
+generator scripts are unchanged. `HISTORICAL-EXTRACTION.json` records source commit,
+roots and adaptations; `PROVENANCE.json` hashes all copied source/controller files.
+The oracle uses original functions and controller handlers through in-memory HTTP
+recorders and a disposable original store. Only raw Report's otherwise unpinnable
+clock input is frozen to H by a Go overlay. No original worktree, running lab,
+network/auth/worker configuration or scripts are modified.
+
+The added fixture has 81 retained events (80 inside event cursor 240), 65
+observations, eight accounts, five overlapping/dated profiles, mixed TTL evidence,
+missing prices, Claude/Codex/Google pool/tier cases and a saved v2/v3 forecast
+ledger generated by original pure estimator/evaluation helpers. Future and
+late-revision ledger rows prove the pin gates. Existing v2/v3 Workspace tests
+still verify contextual valuation independently of these legacy semantics.
+
 ## Remaining gates and intentionally unported views
 
-- Legacy `ProfileReport`/`ProfileProof`, legacy exhaustion/forecast UI, and the
-  separate `QuotaUsage` subscription-tier scenario listing/export are not ported.
-  Retaining their input tables does not establish those views' report parity.
+- **Ported historical domain inventory:** Profile Workspace/Compare/daily history,
+  quota evidence, legacy ProfileReport/ProfileProof, raw Report/ProofAt including
+  exhaustion fields, saved forecast evidence/revisions/badges, and QuotaUsage
+  subscription-tier lists/scenarios/exports. This is domain/export acceptance;
+  parent HTTP/UI wiring and browser rendering are not implemented here.
+- **Exact export exception:** map-backed legacy CSV row ordering as described
+  above; full-file bytes for those exports are not claimed. All cells/rows remain
+  exact. Original metadata unavailable at a saved pin cannot be reconstructed.
 - Live overview/background-refresh behavior, provider refresh/manual quota edits,
   native profile mutations and integration of future measurement-store events are
   outside this frozen-read adapter. No live observer/queue consumer was added.
-- The oracle is representative synthetic Claude history. Real approved frozen
+- Live adaptive-model exchange/projection state and standalone retrospective
+  `ReplayEstimates` evaluation tooling are not part of these historical GET views
+  and remain outside the adapter. No new predictions or verification worker runs.
+- The oracle is representative synthetic Claude/Codex/Google history. Real approved frozen
   production-data parity, larger-report performance, all-provider acceptance,
   unavailable historical metadata, migration/cutover and real restore/rollback
   still need validation. External report-artifact inventory/UI wiring remains

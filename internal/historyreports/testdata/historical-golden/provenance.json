@@ -1,0 +1,10 @@
+{
+  "clock_adaptation": "raw Report.Generated fixed to explicit H; original calculations/handlers unchanged",
+  "outputs": {
+    "historical-boundary.json": "73cc80afbf0092374a6864a01e9e202e571adae941169a80f095ec8f61228593",
+    "historical-exports.json": "d3a662a567d132b8b81a5c0a6d7837aed0eb373a6116a8fd86d9709a1b547978",
+    "historical-fixture.sql": "1d36ffdded9220879404c3f95fa5bb8911d8d529021b7659515626204e5921aa",
+    "historical-oracle.json": "0148054eb5aee2f120fd621ea9bfd75f8b42400f0008ebab430a08644d4f011c"
+  },
+  "source_commit": "e8492c245bf69144afdcf20b8b4ea8935f0476e5"
+}

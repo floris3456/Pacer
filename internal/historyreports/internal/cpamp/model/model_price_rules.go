@@ -115,3 +115,35 @@ func SelectModelPriceServiceTier(price ModelPrice, serviceTier string) (ModelPri
 	}
 	return ModelPriceServiceTier{}, false
 }
+
+// ModelPriceForServiceTier applies a matched rule to the base price. Missing
+// fields inherit the base rates, while explicit zero values remain configured.
+func ModelPriceForServiceTier(price ModelPrice, serviceTier string) (ModelPrice, bool) {
+	tier, ok := SelectModelPriceServiceTier(price, serviceTier)
+	if !ok {
+		return ModelPrice{}, false
+	}
+	effective := price
+	effective.ContextTiers = nil
+	effective.ServiceTiers = nil
+	if tier.PromptConfigured {
+		effective.Prompt = tier.Prompt
+		effective.PromptConfigured = true
+	}
+	if tier.CompletionConfigured {
+		effective.Completion = tier.Completion
+		effective.CompletionConfigured = true
+	}
+	if tier.CacheConfigured {
+		effective.Cache = tier.Cache
+	}
+	if tier.CacheReadConfigured {
+		effective.CacheRead = tier.CacheRead
+		effective.CacheReadConfigured = true
+	}
+	if tier.CacheCreationConfigured {
+		effective.CacheCreation = tier.CacheCreation
+		effective.CacheCreationConfigured = true
+	}
+	return effective, true
+}
