@@ -16,11 +16,11 @@ http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 checks = []
 
 
-def call(url, body=None, headers=None, method=None):
+def call(url, body=None, headers=None, method=None, timeout=40):
     request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
                                     headers={"Content-Type": "application/json", **(headers or {})}, method=method)
     try:
-        with http.open(request, timeout=40) as response:
+        with http.open(request, timeout=timeout) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -72,7 +72,24 @@ def commit(pending):
                    transition_id=pending["pending"]["transition_id"], checkpoint=checkpoint, context_epoch=checkpoint,
                    checkpoint_receipt={"version": 1, "transition_id": pending["pending"]["transition_id"],
                                        "previous_checkpoint": pending["pending"]["from_checkpoint"],
-                                       "checkpoint": checkpoint, "committed": True})
+                                        "checkpoint": checkpoint, "committed": True})
+
+
+def read_effective(ttl):
+    # Bounded native asynchronous-delivery wait, never a delivery watermark.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        status, raw = call(BASE + "/v1/plugins/pacer/cache-policy?" + query, headers=headers,
+                           timeout=max(.1, min(2, deadline - time.monotonic())))
+        assert status == 200, status
+        result = json.loads(raw)
+        if result.get("last_effective_ttl") == ttl:
+            checked("authorized-native-marker-readback-" + ttl, True)
+            checked("marker-readback-does-not-invent-refresh-" + ttl,
+                    not any(result.get(key) is not None for key in ("cache_refresh_at", "protected_until")))
+            return result
+        time.sleep(.05)
+    raise AssertionError("Native marker-TTL readback did not arrive within its deadline")
 
 
 assert call(UPSTREAM + "/_test/reset", {})[0] == 200
@@ -88,9 +105,7 @@ checked("final-Claude-body-rewrites-5m-to-selected-1h", bool(cache_ttls(last["bo
 
 # Refresh acknowledged state after logical completion marks this history used.
 query = urllib.parse.urlencode(dict(protocol=1, **scope))
-status, raw = call(BASE + "/v1/plugins/pacer/cache-policy?" + query, headers=headers)
-assert status == 200, (status, raw)
-state = json.loads(raw)
+state = read_effective("1h")
 assert call(UPSTREAM + "/_test/hold", {})[0] == 200
 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
     response = pool.submit(infer, state, True, True)
@@ -117,13 +132,16 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
 status, active = commit(pending)
 assert status == 200, (status, active)
 checked("transition-bound-checkpoint-commits-after-shutdown", active["active"]["ttl"] == "5m" and active.get("pending") is None)
+status, raw = call(BASE + "/v1/plugins/pacer/cache-policy?" + query, headers=headers)
+checked("new-epoch-does-not-borrow-old-marker-evidence", status == 200 and json.loads(raw).get("last_effective_ttl") is None)
 status, body = infer(active)
 assert status == 200, (status, body.decode()[:700])
 last = json.loads(call(UPSTREAM + "/_test/attempts")[1])[-1]
 checked("new-context-emits-selected-5m", bool(cache_ttls(last["body"])) and set(cache_ttls(last["body"])) == {"5m"})
+read_effective("5m")
 status, raw = call(BASE + "/v1/plugins/pacer/cache-policy?" + query,
                    headers={**headers, "X-Pacer-Cache-Capability": base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")})
-checked("foreign-capability-cannot-read-policy", status == 403)
+checked("foreign-capability-cannot-read-policy", status == 403 and b"last_effective_ttl" not in raw)
 out = pathlib.Path(os.environ.get("PACER_EVIDENCE", "../../evidence/implementation"))
 (out / "native-ttl.json").write_text(json.dumps(checks, indent=2) + "\n")
 print(json.dumps(checks, indent=2))
