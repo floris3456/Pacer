@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,10 @@ func TestGenerateRealOracle(t *testing.T) {
 	out := os.Getenv("PACER_REAL_ORACLE_OUT")
 	if source == "" || db == "" || pin == "" || out == "" {
 		t.Skip("explicit frozen source, scratch DB, fixed pin and fresh output dir required")
+	}
+	// Checked before anything is created, so no oracle can land in a checkout.
+	if e := realRefuseInsideWorktree(out); e != nil {
+		t.Fatal(e)
 	}
 	// Mkdir fails on an existing directory, so a previous oracle is never overwritten.
 	if e := os.Mkdir(out, 0700); e != nil {
@@ -128,5 +133,135 @@ func TestGenerateRealOracle(t *testing.T) {
 	if e = json.Unmarshal(raw, &meta); e != nil {
 		t.Fatal(e)
 	}
+	oracle, e := os.ReadFile(filepath.Join(out, "real-oracle.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	// A generation that wrote zero cases is a failure, not an empty success.
+	if e = realCheckWritten(oracle, meta.Cases); e != nil {
+		t.Fatal(e)
+	}
 	t.Logf("real oracle: %d original cases written to scratch output (contents not logged)", meta.Cases)
+}
+
+// realRefuseInsideWorktree refuses an output directory inside the git worktree
+// that runs the generator. Oracles hold original case data and must never be
+// committed or left in a checkout by accident. It fails closed when git cannot
+// report the worktree root.
+func realRefuseInsideWorktree(out string) error {
+	top, e := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if e != nil {
+		return fmt.Errorf("cannot resolve git worktree root: %w", e)
+	}
+	root, e := realResolve(strings.TrimSpace(string(top)))
+	if e != nil {
+		return e
+	}
+	dir, e := realResolve(out)
+	if e != nil {
+		return e
+	}
+	if realWithin(dir, root) {
+		return fmt.Errorf("output directory is inside the git worktree %s; choose a directory outside it", root)
+	}
+	return nil
+}
+
+// realResolve returns the absolute path of p with symlinks resolved. The output
+// directory does not exist yet, so the longest existing ancestor is resolved and
+// the missing tail is appended unchanged.
+func realResolve(p string) (string, error) {
+	abs, e := filepath.Abs(p)
+	if e != nil {
+		return "", e
+	}
+	existing, tail := abs, ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(existing); err == nil {
+			return filepath.Join(resolved, tail), nil
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", fmt.Errorf("no existing ancestor for %s", abs)
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+}
+
+// realWithin reports whether dir is root or lies beneath it. Both arguments are
+// cleaned by filepath.Rel, so ".." segments cannot escape the root.
+func realWithin(dir, root string) bool {
+	rel, e := filepath.Rel(root, dir)
+	if e != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// realCheckWritten rejects a generation that wrote no cases, or whose oracle
+// disagrees with the boundary's case total. Only counts appear in its errors.
+func realCheckWritten(oracle []byte, boundaryCases int) error {
+	var cases []json.RawMessage
+	if e := json.Unmarshal(oracle, &cases); e != nil {
+		return fmt.Errorf("real oracle is not a JSON array: %w", e)
+	}
+	if len(cases) == 0 {
+		return fmt.Errorf("generation wrote 0 cases")
+	}
+	if len(cases) != boundaryCases {
+		return fmt.Errorf("oracle has %d cases, boundary records %d", len(cases), boundaryCases)
+	}
+	return nil
+}
+
+// TestRealOutputOutsideWorktree: an oracle written inside a git worktree could be
+// committed by accident, so generation must refuse such a directory.
+func TestRealOutputOutsideWorktree(t *testing.T) {
+	here, e := filepath.Abs(".")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := realRefuseInsideWorktree(filepath.Join(here, "scratch-oracle")); err == nil {
+		t.Fatal("output directory inside the git worktree was accepted")
+	}
+	if err := realRefuseInsideWorktree(filepath.Join(t.TempDir(), "oracle")); err != nil {
+		t.Fatalf("output directory outside the worktree refused: %v", err)
+	}
+}
+
+// TestRealWithin covers the path rule itself, independent of the git checkout.
+func TestRealWithin(t *testing.T) {
+	for _, tc := range []struct {
+		dir, root string
+		want      bool
+	}{
+		{"/a/b", "/a/b", true},
+		{"/a/b/c", "/a/b", true},
+		{"/a/bc", "/a/b", false},
+		{"/a", "/a/b", false},
+		{"/a/b/../x", "/a/b", false},
+		{"/x/y", "/a/b", false},
+	} {
+		if got := realWithin(tc.dir, tc.root); got != tc.want {
+			t.Errorf("realWithin(%q, %q) = %t, want %t", tc.dir, tc.root, got, tc.want)
+		}
+	}
+}
+
+// TestRealGenerationRefusesEmptyOracle: a child run that writes zero cases must
+// fail generation rather than report success over an empty oracle.
+func TestRealGenerationRefusesEmptyOracle(t *testing.T) {
+	if err := realCheckWritten([]byte("null"), 0); err == nil {
+		t.Fatal("zero written cases accepted")
+	}
+	if err := realCheckWritten([]byte("[]"), 0); err == nil {
+		t.Fatal("empty oracle accepted")
+	}
+	if err := realCheckWritten([]byte(`[{"view":"profiles"}]`), 2); err == nil {
+		t.Fatal("boundary total differing from oracle accepted")
+	}
+	if err := realCheckWritten([]byte(`[{"view":"profiles"}]`), 1); err != nil {
+		t.Fatalf("valid oracle refused: %v", err)
+	}
 }

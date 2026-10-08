@@ -35,8 +35,16 @@ type realOracleCase struct {
 	Output                   json.RawMessage
 }
 
-// realSelect keeps non-empty unique ids in ascending order and applies the cap.
-func realSelect(ids []string, limit int) []string {
+// realCoverage is how many distinct ids one capped view named (found) and how
+// many survived its cap (kept). found > kept means the view was truncated.
+type realCoverage struct {
+	Found int `json:"found"`
+	Kept  int `json:"kept"`
+}
+
+// realSelect keeps non-empty unique ids in ascending order and applies the cap,
+// returning the kept ids and how many distinct ids were found before the cap.
+func realSelect(ids []string, limit int) ([]string, realCoverage) {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, id := range ids {
@@ -46,10 +54,11 @@ func realSelect(ids []string, limit int) []string {
 		}
 	}
 	sort.Strings(out)
+	found := len(out)
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, realCoverage{Found: found, Kept: len(out)}
 }
 
 func TestPacerRealServiceOracle(t *testing.T) {
@@ -85,6 +94,15 @@ func TestPacerRealServiceOracle(t *testing.T) {
 		cases = append(cases, c)
 	}
 
+	// coverage is keyed like caps. Every capped view records an entry, even when
+	// it found no ids, so the parity gate can tell "nothing found" from "not recorded".
+	coverage := map[string]realCoverage{}
+	keep := func(view string, ids []string, limit int) []string {
+		kept, cov := realSelect(ids, limit)
+		coverage[view] = cov
+		return kept
+	}
+
 	// Base profiles report; its ids drive every other profile/account/window case.
 	profiles, e := s.ProfileReport(ctx, base)
 	if e != nil {
@@ -101,8 +119,8 @@ func TestPacerRealServiceOracle(t *testing.T) {
 	for _, w := range profiles.Windows {
 		profileWindowIDs = append(profileWindowIDs, w.ID)
 	}
-	accountIDs := realSelect(credentialIDs, realAccountCap)
-	for _, id := range realSelect(cardIDs, realProfileCap) {
+	accountIDs := keep("accounts", credentialIDs, realAccountCap)
+	for _, id := range keep("profiles", cardIDs, realProfileCap) {
 		f := base
 		f.Profile = id
 		r, e := s.ProfileReport(ctx, f)
@@ -120,7 +138,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 		}
 		add(realOracleCase{Name: "account-" + id, View: "profiles", Filter: f}, r)
 	}
-	for _, id := range realSelect(profileWindowIDs, realProfileProofCap) {
+	for _, id := range keep("profile_proof", profileWindowIDs, realProfileProofCap) {
 		p, e := s.ProfileProof(ctx, id, base)
 		if e != nil {
 			t.Fatal("profile proof case", e)
@@ -146,7 +164,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 		}
 		add(realOracleCase{Name: "history-" + name, View: "history", Kind: kind, Filter: base}, r)
 	}
-	for _, id := range realSelect(historyWindowIDs, realProofCap) {
+	for _, id := range keep("history_proof", historyWindowIDs, realProofCap) {
 		p, e := s.ProofAt(ctx, id, base.Through, base.ObservationsThrough, base.At, base.APIKey)
 		if e != nil {
 			t.Fatal("history proof case", e)
@@ -193,7 +211,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 		t.Fatal(e)
 	}
 	rows.Close()
-	for _, id := range realSelect(forecastWindowIDs, realForecastCap) {
+	for _, id := range keep("forecasts", forecastWindowIDs, realForecastCap) {
 		ledger, e := s.forecastEvidence(ctx, id, base)
 		if e != nil {
 			t.Fatal("forecast case", e)
@@ -224,6 +242,7 @@ func TestPacerRealServiceOracle(t *testing.T) {
 			"history_proof": realProofCap,
 			"forecasts":     realForecastCap,
 		},
+		"coverage": coverage,
 		"case_sources": map[string]string{
 			"profiles":      "profile cards and credentials of the base profiles report",
 			"profile_proof": "windows of the base profiles report",

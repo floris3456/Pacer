@@ -12,6 +12,8 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,10 +38,117 @@ type realParityFailure struct {
 
 // realParityReport: Cases is every original case; Passed counts cases with no
 // mismatch; Failed lists every mismatching comparison (never stops at the first).
+// Caps and Dropped are copied from real-boundary.json. Dropped holds, per capped
+// view, the ids found and the ids kept. Exhaustive is true only when nothing was
+// dropped. It is informational: the test does not fail on it.
 type realParityReport struct {
-	Cases  int                 `json:"cases"`
-	Passed int                 `json:"passed"`
-	Failed []realParityFailure `json:"failed"`
+	Cases      int                     `json:"cases"`
+	Passed     int                     `json:"passed"`
+	Caps       map[string]int          `json:"caps"`
+	Dropped    map[string]realCoverage `json:"dropped"`
+	Exhaustive bool                    `json:"exhaustive"`
+	Failed     []realParityFailure     `json:"failed"`
+}
+
+// realCoverage mirrors the per-view found/kept counts written by the service oracle.
+type realCoverage struct {
+	Found int `json:"found"`
+	Kept  int `json:"kept"`
+}
+
+// realBoundary is the part of real-boundary.json the parity gate reads.
+type realBoundary struct {
+	Cases      int                     `json:"cases"`
+	CaseCounts map[string]int          `json:"case_counts"`
+	Caps       map[string]int          `json:"caps"`
+	Coverage   map[string]realCoverage `json:"coverage"`
+}
+
+// realParityGate lists every reason the run cannot count as a pass. A green run
+// needs a non-empty oracle, every case passing, and a boundary file that
+// describes exactly the cases replayed. It never inspects individual
+// comparisons. Reasons are sorted so the output is deterministic.
+func realParityGate(cases []historicalCase, report realParityReport, b realBoundary) []string {
+	var reasons []string
+	if len(cases) == 0 {
+		reasons = append(reasons, "oracle has 0 cases")
+	}
+	if report.Passed != len(cases) {
+		reasons = append(reasons, fmt.Sprintf("%d of %d cases passed", report.Passed, len(cases)))
+	}
+	if b.Cases != len(cases) {
+		reasons = append(reasons, fmt.Sprintf("boundary records %d cases, oracle has %d", b.Cases, len(cases)))
+	}
+	counts := map[string]int{}
+	for _, c := range cases {
+		counts[c.View]++
+	}
+	if !reflect.DeepEqual(counts, b.CaseCounts) {
+		reasons = append(reasons, "per-view case counts differ from boundary")
+	}
+	views := make([]string, 0, len(b.Caps))
+	for view := range b.Caps {
+		views = append(views, view)
+	}
+	sort.Strings(views)
+	for _, view := range views {
+		cov, ok := b.Coverage[view]
+		if !ok {
+			reasons = append(reasons, "boundary has no coverage for capped view "+view)
+			continue
+		}
+		// The kept count must be exactly what the cap allows; anything else is
+		// fabricated or stale coverage.
+		if cov.Kept != min(cov.Found, b.Caps[view]) {
+			reasons = append(reasons, "coverage for "+view+" is inconsistent with its cap")
+		}
+	}
+	return reasons
+}
+
+// realExhaustive reports whether every id found in every view was kept. A capped
+// view without coverage is not exhaustive: absence is never treated as evidence.
+func realExhaustive(b realBoundary) bool {
+	for view := range b.Caps {
+		if _, ok := b.Coverage[view]; !ok {
+			return false
+		}
+	}
+	for _, cov := range b.Coverage {
+		if cov.Found != cov.Kept {
+			return false
+		}
+	}
+	return true
+}
+
+// realForecastMaxPages bounds the cursor walk so a cursor that never ends fails
+// the comparison instead of hanging the harness.
+const realForecastMaxPages = 10000
+
+var errRealForecastPages = errors.New("forecast pages did not end or did not match total")
+
+// realForecastPages returns every forecast of one window by following next_cursor
+// until it is empty. Reading only the first page would compare a truncated list.
+// The final page must account for the reported total.
+func realForecastPages(ctx context.Context, r *Reader, selection LegacyQuery, window string, limit int) ([]Forecast, error) {
+	var all []Forecast
+	cursor := ""
+	for range realForecastMaxPages {
+		p, e := r.Forecasts(ctx, ForecastQuery{Selection: selection, WindowID: window, Limit: limit, Cursor: cursor})
+		if e != nil {
+			return nil, e
+		}
+		all = append(all, p.Forecasts...)
+		if p.NextCursor == "" {
+			if len(all) != p.Total {
+				return nil, errRealForecastPages
+			}
+			return all, nil
+		}
+		cursor = p.NextCursor
+	}
+	return nil, errRealForecastPages
 }
 
 func TestRealOracleParity(t *testing.T) {
@@ -70,7 +179,21 @@ func TestRealOracleParity(t *testing.T) {
 	if e = json.Unmarshal(raw, &exports); e != nil {
 		t.Fatal(e)
 	}
-	report := realParityReport{Cases: len(cases), Failed: []realParityFailure{}}
+	raw, e = os.ReadFile(filepath.Join(out, "real-boundary.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var boundary realBoundary
+	if e = json.Unmarshal(raw, &boundary); e != nil {
+		t.Fatal(e)
+	}
+	report := realParityReport{
+		Cases:      len(cases),
+		Caps:       boundary.Caps,
+		Dropped:    boundary.Coverage,
+		Exhaustive: realExhaustive(boundary),
+		Failed:     []realParityFailure{},
+	}
 	for _, tc := range cases {
 		fails := realCompareCase(ctx, r, tc, exports)
 		if len(fails) == 0 {
@@ -82,10 +205,14 @@ func TestRealOracleParity(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Written before the gate so a failing run still leaves its diagnostics behind.
 	if e = os.WriteFile(filepath.Join(out, "parity-report.json"), append(b, '\n'), 0600); e != nil {
 		t.Fatal(e)
 	}
-	t.Logf("%d of %d cases passed; %d mismatching comparisons", report.Passed, report.Cases, len(report.Failed))
+	t.Logf("%d of %d cases passed; %d mismatching comparisons; exhaustive=%t", report.Passed, report.Cases, len(report.Failed), report.Exhaustive)
+	if reasons := realParityGate(cases, report, boundary); len(reasons) > 0 {
+		t.Fatalf("parity gate: %s", strings.Join(reasons, "; "))
+	}
 	if len(report.Failed) > 0 {
 		t.Fatalf("%d mismatching comparisons; see parity-report.json", len(report.Failed))
 	}
@@ -113,9 +240,8 @@ func realCompareCase(ctx context.Context, r *Reader, tc historicalCase, exports 
 	case "quota":
 		value, err = r.QuotaUsage(ctx, QuotaQuery{Pin: tc.Quota})
 	case "forecasts":
-		var p ForecastPage
-		p, err = r.Forecasts(ctx, ForecastQuery{Selection: q, WindowID: tc.Window, Limit: 100})
-		value = p.Forecasts
+		// Every page, not the first: a single page would hide forecasts past the cursor.
+		value, err = realForecastPages(ctx, r, q, tc.Window, 100)
 	default:
 		return []realParityFailure{fail("/view")}
 	}
@@ -368,4 +494,90 @@ func TestPrepareRealSmokeArtifact(t *testing.T) {
 		t.Fatal("expected exactly one prepared smoke artifact")
 	}
 	t.Log("smoke artifact prepared")
+}
+
+// TestRealParityGate proves the run-level gate cannot pass vacuously. Every row
+// is a distinct way a green result could hide missing or capped evidence.
+func TestRealParityGate(t *testing.T) {
+	two := []historicalCase{{View: "profiles"}, {View: "history"}}
+	clean := realBoundary{
+		Cases:      2,
+		CaseCounts: map[string]int{"profiles": 1, "history": 1},
+		Caps:       map[string]int{"profiles": 20},
+		Coverage:   map[string]realCoverage{"profiles": {Found: 3, Kept: 3}},
+	}
+	okReport := realParityReport{Cases: 2, Passed: 2, Failed: []realParityFailure{}}
+	for _, tc := range []struct {
+		name     string
+		cases    []historicalCase
+		report   realParityReport
+		boundary realBoundary
+		wantFail bool
+	}{
+		{"clean run passes", two, okReport, clean, false},
+		{"vacuous empty oracle fails", nil, realParityReport{Failed: []realParityFailure{}}, realBoundary{}, true},
+		{"passed short of cases fails", two, realParityReport{Cases: 2, Passed: 1}, clean, true},
+		{"boundary case total mismatch fails", two, okReport, withCases(clean, 3), true},
+		{"per-view case count mismatch fails", two, okReport, withCounts(clean, map[string]int{"profiles": 2}), true},
+		{"capped view without coverage fails", two, okReport, withCaps(clean, map[string]int{"profiles": 20, "accounts": 20}), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reasons := realParityGate(tc.cases, tc.report, tc.boundary)
+			if got := len(reasons) > 0; got != tc.wantFail {
+				t.Fatalf("gate failed=%t (reasons=%v), want %t", got, reasons, tc.wantFail)
+			}
+		})
+	}
+}
+
+func withCases(b realBoundary, n int) realBoundary { b.Cases = n; return b }
+
+func withCounts(b realBoundary, c map[string]int) realBoundary { b.CaseCounts = c; return b }
+
+func withCaps(b realBoundary, c map[string]int) realBoundary { b.Caps = c; return b }
+
+// TestRealExhaustive: a view with dropped ids makes the run non-exhaustive, and
+// a missing coverage entry must not be read as exhaustive.
+func TestRealExhaustive(t *testing.T) {
+	full := realBoundary{Caps: map[string]int{"forecasts": 50}, Coverage: map[string]realCoverage{"forecasts": {Found: 4, Kept: 4}}}
+	if !realExhaustive(full) {
+		t.Fatal("all ids kept but reported non-exhaustive")
+	}
+	dropped := full
+	dropped.Coverage = map[string]realCoverage{"forecasts": {Found: 60, Kept: 50}}
+	if realExhaustive(dropped) {
+		t.Fatal("dropped ids reported exhaustive")
+	}
+	missing := full
+	missing.Coverage = map[string]realCoverage{}
+	if realExhaustive(missing) {
+		t.Fatal("capped view without coverage reported exhaustive")
+	}
+}
+
+// TestRealForecastPagesAgree checks the forecast parity reader against the
+// single-page reader: a window read in one page of 100 and in pages of 1 must
+// yield the same forecasts, and every page must be followed to its end.
+func TestRealForecastPagesAgree(t *testing.T) {
+	ctx := context.Background()
+	r := historicalFixture(t)
+	defer r.Close()
+	// "forecast-window" holds two forecasts (see TestHistoricalForecastBoundsAndScenarioSemantics).
+	const window = "forecast-window"
+	one, e := realForecastPages(ctx, r, LegacyQuery{}, window, 100)
+	if e != nil {
+		t.Fatal(e)
+	}
+	paged, e := realForecastPages(ctx, r, LegacyQuery{}, window, 1)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(one) != 2 || len(one) != len(paged) {
+		t.Fatalf("single page %d forecasts, paged %d, want 2 and 2", len(one), len(paged))
+	}
+	for i := range one {
+		if one[i].Forecast.ID != paged[i].Forecast.ID {
+			t.Fatalf("forecast %d differs between page sizes", i)
+		}
+	}
 }

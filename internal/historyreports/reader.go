@@ -45,15 +45,24 @@ const (
 	maxLatestProfiles   = 1000
 )
 
-// preparationCeilings maps each row-counted table to its ceiling. Production code
-// only reads it; tests lower entries to exercise the boundary and restore them.
-var preparationCeilings = map[string]int64{
-	"analytics_events":            maxEvents,
-	"analytics_observations":      maxObservations,
-	"analytics_accounts":          maxAccounts,
-	"analytics_profile_revisions": maxProfileRevisions,
-	"analytics_forecasts":         maxForecasts,
-	"analytics_forecast_results":  maxForecastResults,
+// preparationCeiling is one row-counted table and the largest row count Prepare
+// accepts for it.
+type preparationCeiling struct {
+	table string
+	max   int64
+}
+
+// preparationCeilings is checked in this fixed order. The first table that fails
+// (a count error, or a total above its ceiling) decides Prepare's error, so the
+// reported error never depends on map iteration. Production code only reads it;
+// tests may lower an entry or replace the list, and must restore it.
+var preparationCeilings = []preparationCeiling{
+	{"analytics_events", maxEvents},
+	{"analytics_observations", maxObservations},
+	{"analytics_accounts", maxAccounts},
+	{"analytics_profile_revisions", maxProfileRevisions},
+	{"analytics_forecasts", maxForecasts},
+	{"analytics_forecast_results", maxForecastResults},
 }
 
 type Pin = cpamp.ProfileWorkspaceFilter
@@ -126,12 +135,12 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 	// Fixed resource ceilings fail explicitly rather than truncating totals.
-	for table, max := range preparationCeilings {
+	for _, c := range preparationCeilings {
 		var n int64
-		if db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&n) != nil {
+		if db.QueryRowContext(ctx, "SELECT count(*) FROM "+c.table).Scan(&n) != nil {
 			return nil, ErrSource
 		}
-		if n > max {
+		if n > c.max {
 			return nil, ErrLimit
 		}
 	}
