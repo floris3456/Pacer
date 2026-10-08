@@ -1038,7 +1038,7 @@ def verify_incumbent(st, pre, since):
 
 def finish_checks(v, c):
     c = {k: bool(x) for k, x in c.items()}
-    if INJECT and INJECT in c:
+    if INJECT and INJECT in c and v.get('side') == 'candidate':  # never fake a failed rollback
         c[INJECT] = False
         v['injected_failure'] = INJECT
     v['checks'] = c
