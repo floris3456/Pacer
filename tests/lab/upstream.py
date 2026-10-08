@@ -15,6 +15,7 @@ attempts = []
 exhausted = set()
 analytics_calls = 0
 active_messages = 0
+reply_text = "Pacer fixture OK"
 release_stream = threading.Event()
 release_stream.set()
 short_reset = int(time.time()) + 18000
@@ -59,12 +60,15 @@ class Handler(BaseHTTPRequestHandler):
                     active_messages -= 1
 
     def post(self):
+        global reply_text
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1024 * 1024:
             return self.reply(413, {"error": "too_large"})
         try:
             body = json.loads(self.rfile.read(length))
         except (ValueError, UnicodeDecodeError):
+            return self.reply(400, {"error": "invalid_json"})
+        if not isinstance(body, dict):
             return self.reply(400, {"error": "invalid_json"})
         if self.path == "/_test/hold":
             release_stream.clear()
@@ -78,6 +82,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(409, {"error": "fixture_busy"})
                 exhausted.clear()
                 attempts.clear()
+                reply_text = "Pacer fixture OK"
+            return self.reply(200, {"ok": True})
+        if self.path == "/_test/response":
+            # Explicit dummy content only. This lets the real native summary
+            # path satisfy Core's format contract without bypassing CPA.
+            text = body.get("text")
+            try:
+                valid = set(body) == {"text"} and isinstance(text, str) and 0 < len(text.encode()) <= 16384
+            except UnicodeError:
+                valid = False
+            if not valid:
+                return self.reply(400, {"error": "invalid_fixture_response"})
+            with lock:
+                if active_messages:
+                    return self.reply(409, {"error": "fixture_busy"})
+                reply_text = text
             return self.reply(200, {"ok": True})
         if self.path == "/_test/exhaust":
             with lock:
@@ -95,11 +115,12 @@ class Handler(BaseHTTPRequestHandler):
                              "beta": self.headers.get("anthropic-beta", ""),
                              "coordination_leaked": any(k.lower().startswith(("x-quota-", "x-pacer-")) for k in self.headers)})
             limited = account in exhausted
+            text = reply_text
         if limited:
             return self.reply(429, {"error": {"type": "rate_limit_error", "message": "fixture exhausted"}})
         message = {"id": "msg_pacer_fixture", "type": "message", "role": "assistant",
                    "model": body.get("model", "claude-opus-5-5"),
-                   "content": [{"type": "text", "text": "Pacer fixture OK"}],
+                   "content": [{"type": "text", "text": text}],
                    "stop_reason": "end_turn", "stop_sequence": None,
                    "usage": {"input_tokens": 10, "output_tokens": 4,
                              "cache_creation_input_tokens": 100,
@@ -114,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             start = {**message, "content": [], "stop_reason": None}
             events = [("message_start", {"type": "message_start", "message": start}),
                       ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
-                      ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Pacer fixture OK"}}),
+                      ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}}),
                       ("content_block_stop", {"type": "content_block_stop", "index": 0}),
                       ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 4}}),
                       ("message_stop", {"type": "message_stop"})]
