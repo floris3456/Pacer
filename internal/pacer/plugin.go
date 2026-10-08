@@ -27,6 +27,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyadapter"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyevidence"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/prefixevidence"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/usagecoverage"
@@ -85,6 +86,7 @@ type Plugin struct {
 	coverageGeneration uint64
 	coverageStats      coverageDiagnostics
 	policyEvidence     *policyevidence.Store
+	prefixEvidence     *prefixevidence.Store
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
 	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
@@ -266,6 +268,12 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if err != nil {
 		p.measurementErrors++
 	}
+	// Prefix evidence is equally optional: an open failure only counts as a
+	// measurement error and leaves the policy path untouched.
+	p.prefixEvidence, err = prefixevidence.Open(db, p.now)
+	if err != nil {
+		p.measurementErrors++
+	}
 	measure, err := p.openMeasurements(db)
 	if err != nil {
 		db.Close()
@@ -372,6 +380,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return nil, pluginabi.NewError("pacer_cache_unavailable", "Managed cache policy is not configured", 503)
 		}
 		result, err := p.policy.Dispatch(context.Background(), method, raw)
+		// Settlement is observed only after a successful dispatch and never
+		// changes its result.
+		if method == pluginabi.MethodCachePolicyAttempt && err == nil && p.prefixEvidence != nil {
+			p.settlePrefixAttempt(raw)
+		}
 		if method == pluginabi.MethodCachePolicyHandle && err == nil && p.policyEvidence != nil {
 			var request pluginapi.CachePolicyRequest
 			if json.Unmarshal(raw, &request) == nil && request.Method == http.MethodGet {
@@ -385,6 +398,10 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 					}
 				}
 			}
+		}
+		// Runs after the marker readback, starting from its body, with the same gating.
+		if method == pluginabi.MethodCachePolicyHandle && err == nil && p.prefixEvidence != nil {
+			result = p.augmentPrefixReadback(raw, result)
 		}
 		if method == pluginabi.MethodCachePolicyResolve && err == nil {
 			var request struct {

@@ -187,6 +187,10 @@ func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error
 		_, evidenceErr := p.policyEvidence.Observe(context.Background(), record)
 		p.metricError(evidenceErr) // Optional projection cannot acknowledge delivery.
 	}
+	if p.prefixEvidence != nil && record.Policy.SelectedTTL != "" && record.Native != nil && record.Native.PrefixSnapshot != nil {
+		// Optional projection cannot acknowledge delivery; the tracker below is untouched by it.
+		p.metricError(p.prefixEvidence.Observe(context.Background(), prefixFact(record)))
+	}
 	if !record.Activity.Partial {
 		err = p.chats.CacheActivityForAuth(record.RequestID, identity.AuthID, record.StartedAt, record.Success, record.Activity.PrimaryPrefix, record.Activity.ProtectionTTL.Duration())
 	}
