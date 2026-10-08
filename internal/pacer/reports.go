@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -107,9 +106,7 @@ func (p *Plugin) reportsAPI(req pluginapi.ManagementRequest) pluginapi.Managemen
 		if len(trimmed) == 0 || trimmed[0] != '{' {
 			return reportError(historyreports.ErrInput)
 		}
-		d := json.NewDecoder(bytes.NewReader(req.Body))
-		d.DisallowUnknownFields()
-		if d.Decode(&body) != nil || d.Decode(new(any)) != io.EOF {
+		if decodeReport(req.Body, op, &body) != nil {
 			return reportError(historyreports.ErrInput)
 		}
 		if len(body.Cursor) > 4096 || len(body.WindowID) > 512 || len(body.ProfileReferences) > 100 {

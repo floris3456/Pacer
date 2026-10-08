@@ -144,7 +144,7 @@ func TestNativeHistoricalManagementIsBoundedAndPreservesPinnedExports(t *testing
 			t.Fatal("public/preparation path exposed")
 		}
 	}
-	for _, raw := range []string{`null`, `{"archive_path":"/private/path"}`, `{"query":{"model":"x"},"cursor":"ignored"}`, `{} {}`, `{"query":{"key_hashes":["not-a-digest"]}}`} {
+	for _, raw := range []string{`null`, `{"archive_path":"/private/path"}`, `{"query":{"model":"x"},"cursor":"ignored"}`, `{} {}`, `{"query":{"key_hashes":["not-a-digest"]}}`, `{"query":{},"query":{"model":"other"}}`, `{"Query":{}}`, `{"query":{"Model":"x"}}`, `{"query":{"model":"x","model":"y"}}`, `{"query":{"model":null}}`, `{"query":{"pin":null}}`, `{"query":null}`, `{"query":{},"limit":0}`} {
 		got := p.manage(pluginapi.ManagementRequest{Method: "POST", Path: historyRoot + "report", Body: []byte(raw)})
 		if got.StatusCode != 400 {
 			t.Fatal("invalid request accepted", raw, string(got.Body))
