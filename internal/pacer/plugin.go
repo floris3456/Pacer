@@ -49,7 +49,10 @@ type Config struct {
 		Providers []string `yaml:"providers"`
 	} `yaml:"routing"`
 }
-type credential struct{ ID, Index, Provider, Account, Alias string }
+type credential struct {
+	ID, Index, Provider, Account, Alias string
+	AccountVerified                     bool // Host billing identity, not a credential-only fallback.
+}
 type attempt struct {
 	Model, PreviousAccount     string
 	Claim                      *tracker.Claim

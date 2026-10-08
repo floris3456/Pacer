@@ -47,7 +47,10 @@ func (p *Plugin) discover(force ...bool) {
 		// first-party analytics calls or lend their counters to this observer.
 		if file.BaseURL != "" {
 			u, err := url.Parse(file.BaseURL)
-			if err != nil || u.Scheme != "https" || u.User != nil || (provider == "claude" && u.Hostname() != "api.anthropic.com") || (provider == "codex" && u.Hostname() != "chatgpt.com") {
+			if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
+				continue
+			}
+			if provider == "claude" && (u.Host != "api.anthropic.com" || strings.TrimSuffix(u.Path, "/") != "") || provider == "codex" && (u.Host != "chatgpt.com" || strings.TrimSuffix(u.Path, "/") != "/backend-api/codex") {
 				continue
 			}
 		}
@@ -59,6 +62,7 @@ func (p *Plugin) discover(force ...bool) {
 			continue
 		}
 		identity := "credential:" + id
+		verified := false
 		if raw, err = p.Host("host.auth.get", map[string]string{"auth_index": file.AuthIndex}); err == nil {
 			var result struct {
 				JSON struct {
@@ -69,9 +73,11 @@ func (p *Plugin) discover(force ...bool) {
 			if json.Unmarshal(raw, &result) == nil {
 				if provider == "claude" && result.JSON.AccountUUID != "" {
 					identity = "account:" + result.JSON.AccountUUID
+					verified = true
 				}
 				if provider == "codex" && result.JSON.AccountID != "" {
 					identity = "account:" + result.JSON.AccountID
+					verified = true
 				}
 			}
 		}
@@ -79,7 +85,7 @@ func (p *Plugin) discover(force ...bool) {
 		if alias == "" {
 			alias = provider + " " + tracker.Digest(id)[:8]
 		}
-		found[id] = credential{ID: id, Index: file.AuthIndex, Provider: provider, Account: provider + ":" + tracker.Digest(provider+":"+identity), Alias: alias}
+		found[id] = credential{ID: id, Index: file.AuthIndex, Provider: provider, Account: provider + ":" + tracker.Digest(provider+":"+identity), Alias: alias, AccountVerified: verified}
 	}
 	p.mu.Lock()
 	p.creds = found
