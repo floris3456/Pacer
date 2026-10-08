@@ -20,7 +20,8 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
 <h3 id="forward-title">Forward recorded usage</h3>
 <p>Native recorded attempts at a sealed checkpoint. Load captures one generation and selection; editing controls or refreshing status does not change that pin.</p>
 <p id="forward-coverage" class="status">Capacity and physical coverage are unknown. Recorded usage is not complete billing, provider quota, cache warmth or a forecast. API-equivalent value uses the pinned original calculation, not your provider bill.</p>
-<div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
+<div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status" style="white-space:pre-line">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
+<details><summary>Exact status receipt · separate, non-atomic metadata</summary><pre id="forward-status-receipt"></pre></details>
 <form id="forward-form" class="toolbar">
 <label>Native profile <select id="forward-profile"><option value="">All native recorded usage</option><option value="unassigned">Unassigned native usage</option></select></label>
 <label>From UTC (inclusive) <input id="forward-from" type="date"></label><label>Before UTC (exclusive) <input id="forward-to" type="date"></label>
@@ -399,7 +400,7 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
     for(const id of ['forward-summary','forward-reasons','forward-pin','forward-provenance','forward-requests','forward-page','forward-download-status','forward-csv-cursor','forward-evidence-body'])el(id).replaceChildren();
     el('forward-loaded').textContent='No forward pin loaded.';el('forward-evidence-dialog').close();
   }
-  function clearForward(){forwardInvalidate();clearForwardPin();forwardProfiles=null;el('forward-form').reset();el('forward-profile-read').reset();el('forward-profile-form').reset();el('forward-profile-rows').replaceChildren();el('forward-memberships').replaceChildren();el('forward-profile-metadata').textContent='';el('forward-profile-cas').textContent='No profile table revision loaded.';el('forward-profile-status').textContent='Read an exact profile revision before editing.';el('forward-status').textContent='Disconnected.';while(el('forward-profile').options.length>2)el('forward-profile').remove(2);forwardControls()}
+  function clearForward(){forwardInvalidate();clearForwardPin();forwardProfiles=null;el('forward-form').reset();el('forward-profile-read').reset();el('forward-profile-form').reset();el('forward-profile-rows').replaceChildren();el('forward-memberships').replaceChildren();el('forward-profile-metadata').textContent='';el('forward-profile-cas').textContent='No profile table revision loaded.';el('forward-profile-status').textContent='Read an exact profile revision before editing.';el('forward-status').textContent='Disconnected.';el('forward-status-receipt').textContent='';while(el('forward-profile').options.length>2)el('forward-profile').remove(2);forwardControls()}
   function forwardError(error){return ({404:'Forward v8 reporting is unsupported or the saved reference is unavailable. No fallback was requested.',401:'Management authorization required.',403:'Management authorization required.',409:'Pin/cursor or profile revision conflict. Keep the saved pin; read the intended revision before retrying.',413:'Forward input or output is too large. No partial download was created.',503:'Forward reporting is unavailable, busy or pending publication. Refresh status manually.'})[error.status]||(error.name==='AbortError'?'Forward request cancelled.':error.message||'Forward request failed');}
   async function forwardTask(work,target='forward-loaded'){
     if(forwardBusy||!connected)return;const ticket={generation,epoch:++forwardEpoch};forwardBusy=true;forwardControls();
@@ -411,11 +412,34 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
     try{const data=await api(forwardRoot+'/'+op,method,body,controller.signal);if(!forwardCurrent(ticket))throw Error('Forward selection changed');if(new TextEncoder().encode(JSON.stringify(data)).length>8*1024*1024)throw Error('Forward response exceeds the bounded envelope');return op==='status'?data:forwardSafe(data)}finally{clearTimeout(timeout);forwardControllers.delete(controller)}
   }
   async function forwardStatus(ticket){
-    const data=await forwardCall('status',undefined,ticket,'GET');if(!data||typeof data!=='object')throw Error('Unsupported forward status schema');const s=data.status||data,r=data.runtime||{};
-    if((s.version||data.version)!==forwardVersion||!forwardDecimal(s.projected_through)||!forwardDecimal(s.bootstrap_through)||typeof s.latest_generation!=='string'||s.latest_generation&&!forwardHash(s.latest_generation))throw Error('Unsupported forward status schema; no counters were rounded');
-    const states={unknown:'Unknown',unready:'Initializing / unready',initializing:'Initializing',ready:'Ready · sealed recorded snapshot',lagging:'Lagging',lag:'Lagging',error:'Error',disabled:'Disabled',paused:'Paused',stopped:'Paused / stopped'};
-    const target=r.target_through===undefined?'Unknown':forwardDecimal(r.target_through)?r.target_through:'Unknown (unsupported precision)';
-    el('forward-status').textContent=(states[r.state]||'Unknown runtime state')+' · projected '+s.projected_through+' · bootstrap '+s.bootstrap_through+' · observed source head '+(forwardDecimal(r.source_head)?r.source_head:'Unknown')+' · target head '+target+' · latest '+(s.latest_generation||'None')+(r.report_at?' · report T '+forwardDate(r.report_at):'')+(r.target_at?' · target T '+forwardDate(r.target_at):'')+(forwardText(r.phase,64)?' · phase '+r.phase:'');
+    el('forward-status-receipt').textContent='';el('forward-status').textContent='Reading forward status…';
+    const data=await forwardCall('status',undefined,ticket,'GET');
+    const record=v=>!!v&&typeof v==='object'&&!Array.isArray(v),has=(v,k)=>Object.hasOwn(v,k),optional=(v,k,check)=>!has(v,k)||check(v[k]);
+    const digest=v=>v===''||forwardHash(v),utc=v=>{try{forwardUTC(v);return true}catch{return false}};
+    const failures=v=>typeof v==='string'&&/^(0|[1-9][0-9]{0,19})$/.test(v)&&BigInt(v)<=18446744073709551615n;
+    const phases=['','bootstrap','projection','provenance_feed','provenance','seal'];
+    const errors=['','forward_bootstrap_failed','forward_source_unavailable','forward_selection_unavailable','forward_store_unavailable','forward_projection_failed','forward_provenance_feed_failed','forward_compute_unavailable','forward_seal_failed','forward_phase_invalid'];
+    if(!record(data))throw Error('Unsupported forward status schema');
+    const s=has(data,'status')?data.status:data,r=has(data,'runtime')?data.runtime:{};
+    if(!record(s)||!record(r)||(s.version||data.version)!==forwardVersion||!forwardDecimal(s.projected_through)||!forwardDecimal(s.bootstrap_through)||!digest(s.latest_generation)||!optional(s,'feed_id',digest)||!optional(s,'state',v=>['unready','snapshot_available'].includes(v)))throw Error('Unsupported forward status schema; no counters were rounded');
+    const states={unknown:'Unknown',unready:'Initializing / unready',initializing:'Initializing',ready:'Ready',lagging:'Lagging',lag:'Lagging',error:'Error',disabled:'Disabled',paused:'Paused',stopped:'Paused / stopped'};
+    if(!optional(r,'state',v=>typeof v==='string'&&has(states,v))||!optional(r,'target_through',forwardDecimal)||!optional(r,'source_head',forwardDecimal)||!optional(r,'report_at',utc)||!optional(r,'target_at',utc)||!optional(r,'phase',v=>phases.includes(v))||!optional(r,'error_code',v=>errors.includes(v)))throw Error('Unsupported forward runtime status; no counters were rounded');
+    const pick=(v,keys)=>Object.fromEntries(keys.filter(k=>has(v,k)).map(k=>[k,v[k]]));
+    const receipt={...pick(s,['state','feed_id','projected_through','bootstrap_through','latest_generation']),version:forwardVersion,runtime:pick(r,['state','target_through','source_head','report_at','target_at','phase','error_code'])};
+    const lines=['Separate, non-atomic metadata. Projected sequences are not published watermarks or record totals. Ready does not establish billing or physical coverage.',
+      'Ledger snapshot: '+(s.state==='snapshot_available'?'Snapshot available':s.state==='unready'?'Unready':'Unknown')+' · projected sequence '+s.projected_through+' · bootstrap sequence '+s.bootstrap_through+' · latest generation '+(s.latest_generation||'Unknown')];
+    if(has(data,'publisher')){
+      const p=data.publisher;
+      if(!record(p)||!['disabled','initializing','lag','error','ready','stopped'].includes(p.state)||typeof p.active!=='boolean'||!phases.includes(p.phase)||typeof p.bootstrap_complete!=='boolean'||p.capacity!=='unavailable'||!forwardDecimal(p.source_head)||!forwardDecimal(p.projected)||!failures(p.failures)||!optional(p,'latest_generation',digest)||!optional(p,'report_at',utc)||!optional(p,'target_at',utc)||!optional(p,'error_code',v=>errors.includes(v)))throw Error('Unsupported forward publisher status; no ready claim or rounded counters');
+      receipt.publisher=pick(p,['state','active','phase','source_head','projected','bootstrap_complete','latest_generation','report_at','target_at','error_code','failures','capacity']);
+      lines.push('Publisher snapshot: '+states[p.state]+' · active '+(p.active?'yes':'no')+' · phase '+(p.phase||'none')+' · observed source head '+p.source_head+' · projected sequence '+p.projected+' · bootstrap complete '+(p.bootstrap_complete?'yes':'no')+' · failures '+p.failures+' · capacity unavailable'+(p.error_code?' · error '+p.error_code:''),
+        'Last sealed publication (publisher): generation '+(p.latest_generation||'Unknown')+' · report T '+forwardDate(p.report_at),
+        'Next target metadata: adapter target head '+(r.target_through??'Unknown')+' · publisher target T '+forwardDate(p.target_at));
+    }else{
+      lines.push('Adapter runtime: '+(states[r.state]||'Unknown')+' · observed source head '+(r.source_head??'Unknown')+' · target head '+(r.target_through??'Unknown')+' · report T (runtime only) '+forwardDate(r.report_at)+' · target T '+forwardDate(r.target_at)+(r.phase?' · phase '+r.phase:'')+(r.error_code?' · error '+r.error_code:''),
+        'Publisher metadata unavailable · last sealed generation / T: Unknown. Runtime dates are not paired with the ledger latest generation.');
+    }
+    el('forward-status').textContent=lines.join('\n');el('forward-status-receipt').textContent=JSON.stringify(receipt,null,2);
   }
   function forwardFilterInput(){
     const filter={domain:'native'};for(const [id,k] of [['profile','profile'],['model','model'],['account','account'],['provider','provider'],['key-hash','key_hash']]){const value=el('forward-'+id).value.trim();if(value)filter[k]=value}

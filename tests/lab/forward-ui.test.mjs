@@ -8,6 +8,7 @@ const html=fs.readFileSync(new URL('../../internal/management/index.html',import
 const script=html.split('<script>')[1].split('</script>')[0];
 const root='/v8/management/plugins/pacer/reports/forward/';
 const version='pacer-forward-ledger-v1',hash='a'.repeat(64),nextHash='b'.repeat(64),revision='9007199254740993';
+// Synthetic priced unit fixture only; it is not a native/browser pricing claim.
 const token={uncached_input:0,cache_read:0,cache_write_5m:250000,cache_write_1h:750000,cache_write_unknown:0,output:0,reasoning:0};
 const value={low_nano_usd:7250000000,high_nano_usd:7250000000,tokens:token,category_nano_usd:{},missing_price_requests:0,invalid_counter_requests:0};
 const totals={source_record_count:1,canonical_rows:1,unique_attempts:1,valued_count:1,valued_subset:value,selection_value:value,reason_counts:{},coverage_reason_counts:{physical_coverage_unverified:1}};
@@ -16,6 +17,9 @@ const report=p=>({pin:p,manifest:{version,report_at:'2026-10-08T01:00:03.0000000
 const evidence=p=>({pin:p,id:'native:<img src=x>',account:'native-account:fixture',value,issues:[],coverage_reasons:['physical_coverage_unverified'],origins:[{id:'native:<img src=x>',source_id:'fixture-source',revision:'9223372036854775807',sequence:'9007199254740993',started_at:'2026-10-08T01:00:00.000000001Z',policy:{selected_ttl:'5m',effective_ttl:'1h'},attribution:{model:'claude-opus-5-5'},normalized_source_usage:{cache_create:1000000,cache_create_5m:250000,cache_create_1h:750000}}]});
 const csv=Buffer.from('id,value\r\n"native:one\nline",7.25\r\n','utf8');
 const exported=(format='csv')=>({filename:'pacer-forward.'+format,media_type:format==='csv'?'text/csv':'application/json',encoding:'base64',content:(format==='csv'?csv:Buffer.from('{"exact":true}\n')).toString('base64'),...(format==='csv'?{next_cursor:'csv-next'}:{})});
+// Shape of the parent's saved readiness diagnostic, with synthetic identities.
+// Tests do not open a live status URL, store, provider or mutable lab artifact.
+const publisherStatus=()=>({version,state:'snapshot_available',feed_id:'c'.repeat(64),projected_through:'104',bootstrap_through:'104',latest_generation:hash,runtime:{state:'ready',target_through:'104'},publisher:{state:'ready',active:false,phase:'',source_head:'104',projected:'104',bootstrap_complete:true,latest_generation:hash,report_at:'2026-10-08T07:43:35.386974073Z',failures:'0',capacity:'unavailable'}});
 let moduleSequence=0;
 async function fixture(embedded=false){
   const nodes=new Map(),calls=[],downloads=[],urls=new Map(),revoked=[],timers=new Map(),listeners=new Map();let sequence=0;
@@ -118,6 +122,64 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
     const f=await fixture();try{
       f.setHandle((path,body,method,old)=>path.endsWith('/status')?{status:{version,projected_through:revision,bootstrap_through:'0',latest_generation:hash},runtime:{state:'paused',source_head:'9223372036854775807',target_through:revision,target_at:'2026-10-08T01:00:03.000000001Z',other:'ignored',unknown_counter:9007199254740992}}:old(path,body,method));
       await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/Paused/);assert.match(f.el('forward-status').textContent,/9223372036854775807/);assert.match(f.el('forward-status').textContent,/000000001 UTC/);assert(!f.el('forward-status').textContent.includes('ignored'));
+    }finally{f.close()}
+  });
+  await t.test('actual publisher DTO shape retains exact sealed receipt independently of non-atomic ledger/target metadata',async()=>{
+    const f=await fixture();try{
+      await f.load();const saved=f.el('forward-pin').textContent;let status=publisherStatus();
+      f.setHandle((path,body,method,old)=>path.endsWith('/status')?status:old(path,body,method));
+      await f.el('forward-status-load').click();let text=f.el('forward-status').textContent;
+      assert.match(text,/Publisher snapshot: Ready · active no/);assert.match(text,/observed source head 104/);assert.match(text,/report T 2026-10-08 07:43:35\.386974073 UTC/);assert.match(text,/publisher target T Unknown/);
+      assert.deepEqual(JSON.parse(f.el('forward-status-receipt').textContent),status);
+      status={...status,projected_through:'9223372036854775807',bootstrap_through:revision,latest_generation:nextHash,runtime:{state:'lagging',target_through:'9223372036854775806',unknown_counter:9007199254740992},publisher:{...status.publisher,state:'lag',active:true,phase:'seal',source_head:'9223372036854775806',projected:revision,failures:'18446744073709551615',target_at:'2026-10-08T07:44:00.000000001Z',future_metadata:[{ignored:9007199254740992}]}};
+      await f.el('forward-status-load').click();text=f.el('forward-status').textContent;const receipt=JSON.parse(f.el('forward-status-receipt').textContent);
+      assert.match(text,/Ledger snapshot: .*projected sequence 9223372036854775807/);assert(text.split('\n').find(x=>x.startsWith('Ledger snapshot:')).endsWith(nextHash));
+      assert(text.split('\n').find(x=>x.startsWith('Last sealed publication')).includes(hash));assert(!text.split('\n').find(x=>x.startsWith('Last sealed publication')).includes(nextHash));
+      assert.match(text,/Publisher snapshot: Lagging · active yes · phase seal/);assert.match(text,/Next target metadata: adapter target head 9223372036854775806 · publisher target T 2026-10-08 07:44:00\.000000001 UTC/);
+      assert.equal(receipt.publisher.failures,'18446744073709551615');assert.equal(receipt.publisher.report_at,'2026-10-08T07:43:35.386974073Z');assert.equal(receipt.publisher.target_at,'2026-10-08T07:44:00.000000001Z');assert.equal(receipt.publisher.projected,revision);assert(!('future_metadata' in receipt.publisher));assert(!('unknown_counter' in receipt.runtime));
+      assert.match(text,/Separate, non-atomic/);assert.match(text,/not published watermarks or record totals/);assert.equal(f.el('forward-pin').textContent,saved);
+      await f.el('forward-next').click();assert.deepEqual(f.calls.at(-1).body.pin,JSON.parse(saved));f.el('disconnect').click();assert.equal(f.el('forward-status-receipt').textContent,'');
+    }finally{f.close()}
+  });
+  await t.test('publisher states/phases and fixed errors keep the prior pin available; initialization invents no sealed receipt',async()=>{
+    const f=await fixture();try{
+      await f.load();const saved=f.el('forward-pin').textContent;let status=publisherStatus();f.setHandle((path,body,method,old)=>path.endsWith('/status')?status:old(path,body,method));
+      for(const [state,label] of [['disabled','Disabled'],['initializing','Initializing'],['lag','Lagging'],['error','Error'],['ready','Ready'],['stopped','Paused / stopped']]){
+        status.publisher={...status.publisher,state,active:state==='lag',phase:state==='lag'?'seal':'',...(state==='error'?{error_code:'forward_seal_failed',failures:'2'}:{error_code:'',failures:'0'})};
+        await f.el('forward-status-load').click();const text=f.el('forward-status').textContent;assert(text.includes('Publisher snapshot: '+label));if(state==='error'){assert.match(text,/error forward_seal_failed/);assert(!text.includes('Publisher snapshot: Ready'))}
+        assert.equal(f.el('forward-pin').textContent,saved);assert(!f.el('forward-json').disabled);assert(!f.el('forward-next').disabled);
+      }
+      for(const phase of ['bootstrap','projection','provenance_feed','provenance','seal']){status.publisher={...status.publisher,state:'lag',active:true,phase};await f.el('forward-status-load').click();assert(f.el('forward-status').textContent.includes('phase '+phase));}
+      status.publisher={...status.publisher,state:'initializing',phase:'bootstrap',source_head:'0',projected:'0',bootstrap_complete:false};delete status.publisher.latest_generation;delete status.publisher.report_at;
+      await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/Last sealed publication \(publisher\): generation Unknown · report T Unknown/);assert.match(f.el('forward-status').textContent,/bootstrap complete no/);assert.equal(f.el('forward-pin').textContent,saved);
+    }finally{f.close()}
+  });
+  await t.test('known malformed/future publisher fields reject ready fallback, arrays and integer coercion while preserving the loaded pin',async()=>{
+    const f=await fixture();try{
+      await f.load();const saved=f.el('forward-pin').textContent;let status=publisherStatus();f.setHandle((path,body,method,old)=>path.endsWith('/status')?status:old(path,body,method));
+      const badPublishers=[null,[],['ready'],{},...[
+        {state:'future_ready'},{state:['ready']},{active:'false'},{active:undefined},{bootstrap_complete:'true'},{bootstrap_complete:undefined},{capacity:'available'},{capacity:undefined},{phase:'future_seal'},{phase:[]},
+        {source_head:104},{source_head:'01'},{source_head:'9223372036854775808'},{projected:9007199254740992},{projected:'-1'},{failures:0},{failures:'18446744073709551616'},{failures:'00'},{failures:'1e3'},
+        {latest_generation:[]},{latest_generation:'A'.repeat(64)},{report_at:1791445415386974073n.toString()},{report_at:'2026-02-30T01:00:00Z'},{report_at:'2026-10-08T07:43:35.3869740730Z'},{target_at:null},{error_code:'raw SQL private error'},
+      ].map(p=>({...publisherStatus().publisher,...p}))];
+      for(const publisher of badPublishers){status=publisherStatus();await f.el('forward-status-load').click();assert(f.el('forward-status-receipt').textContent);status={...status,publisher};await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/Unsupported forward publisher status/);assert(!f.el('forward-status').textContent.includes('Publisher snapshot: Ready'));assert.equal(f.el('forward-status-receipt').textContent,'');assert.equal(f.el('forward-pin').textContent,saved)}
+      for(const malformed of [[],null,{...publisherStatus(),runtime:[]},{...publisherStatus(),status:[]},{...publisherStatus(),latest_generation:[]},{...publisherStatus(),projected_through:104},{...publisherStatus(),runtime:{state:'ready',target_through:104}}]){status=malformed;await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/Unsupported forward/);assert.equal(f.el('forward-pin').textContent,saved);assert.equal(f.el('forward-status-receipt').textContent,'')}
+      await f.el('forward-json').click();assert.deepEqual(f.calls.at(-1).body.pin,JSON.parse(saved));assert.equal(f.downloads.length,1);
+    }finally{f.close()}
+  });
+  await t.test('older runtime-only adapter does not fabricate publisher heads, sealed generation or dates',async()=>{
+    const f=await fixture();try{
+      const status=publisherStatus();delete status.publisher;status.runtime={state:'ready'};f.setHandle((path,body,method,old)=>path.endsWith('/status')?status:old(path,body,method));
+      await f.el('forward-status-load').click();const text=f.el('forward-status').textContent;assert.match(text,/Adapter runtime: Ready · observed source head Unknown · target head Unknown · report T \(runtime only\) Unknown · target T Unknown/);assert.match(text,/Publisher metadata unavailable · last sealed generation \/ T: Unknown/);assert(!Object.hasOwn(JSON.parse(f.el('forward-status-receipt').textContent),'publisher'));
+    }finally{f.close()}
+  });
+  await t.test('unvalued native-shaped records display unknown selection/row prices; the synthetic $7.25 case is not a native pricing expectation',async()=>{
+    const f=await fixture();try{
+      f.setHandle((path,body,method,old)=>{
+        if(path.endsWith('/report'))return {...report(body.pin),totals:{...totals,valued_count:0,valued_subset:{...value,low_nano_usd:0,high_nano_usd:0},selection_value:null,reason_counts:{price_missing:1}}};
+        if(path.endsWith('/requests'))return {pin:body.pin,rows:[{...evidence(body.pin),value:null,issues:['price_missing']}],next_cursor:''};
+        return old(path,body,method);
+      });await f.load();assert.match(f.el('forward-summary').textContent,/valued 0 · unvalued 1 · selected API-equivalent Unknown/);assert.match(f.el('forward-requests').textContent,/Unknown/);assert(!f.el('forward-requests').textContent.includes('$'));assert.match(f.el('forward-reasons').textContent,/price missing/);
     }finally{f.close()}
   });
   await t.test('embedded unavailable never falls back and source/origin fences precede disconnect',async()=>{
