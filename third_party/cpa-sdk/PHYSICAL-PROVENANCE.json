@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/floris3456/CLIProxyAPI",
+  "commit": "df794f421de43c861272b2a6b5247286be3c4f07",
+  "parent_integration": "5526ea12",
+  "abi": 1,
+  "schema": 7,
+  "physical_contract_version": 1,
+  "files": {
+    "sdk/pluginapi/usage_physical.go": "ca50a9997ddd6a6371f6aeb21fba4468b1399894e278e72917c7029e3a0c2a1b",
+    "sdk/pluginapi/usage_checkpoint.go": "08a62c87777c245e80bc5b2b01e81de196b27f012f4a00a0fdf7e9c957b97398"
+  }
+}

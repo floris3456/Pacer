@@ -9,6 +9,10 @@ The Pacer hooks are now wired; see [native integration and its incomplete-invent
 result for optional projections. `Invalidate` durably faults pre-correlation/discovery failures.
 `ObserveUsage` remains backward compatible. Neither new method makes host calls.
 
+The optional CPA physical extension now has a separate [durable causal-cut consumer](PHYSICAL.md)
+and explicit `SelectPhysical` API. It does not promote these request-time snapshots or native
+capacity ratios. SDK provenance and exact read-only DB inspection fields are documented there.
+
 ## Exact supported claim and remaining barrier
 
 `Consumer.Snapshot` can return `Known:true` for an account's **request-start** interval

@@ -24,6 +24,7 @@ type Options struct {
 type Consumer struct {
 	mu             sync.Mutex
 	store          *measurement.Store
+	physical       *measurement.PhysicalProof
 	id, source     string
 	pendingFailure bool
 }
@@ -45,6 +46,10 @@ func New(ctx context.Context, store *measurement.Store, options Options) (*Consu
 	if err := store.StartSourceConsumer(ctx, c.id, c.source, options.Clock().Round(0).UTC()); err != nil {
 		return nil, err
 	}
+	var err error
+	if c.physical, err = store.NewPhysicalProof(ctx, c.id); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -58,6 +63,9 @@ func (c *Consumer) ready(ctx context.Context) error {
 		return nil
 	}
 	if err := c.store.PoisonSourceConsumer(ctx, c.id); err != nil {
+		return err
+	}
+	if err := c.physical.Poison(ctx); err != nil {
 		return err
 	}
 	c.pendingFailure = false
@@ -118,6 +126,9 @@ func (c *Consumer) PutMembership(ctx context.Context, m Membership) error {
 }
 func (c *Consumer) badMembership(ctx context.Context, account string, cause error) error {
 	c.storageResult(cause)
+	if err := c.physical.Fault(ctx, account); err != nil {
+		return c.storageResult(err)
+	}
 	if err := c.fault(ctx, account); err != nil {
 		return err
 	}
@@ -155,6 +166,9 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 	}
 	r, err := measurement.FromNative(raw, capture.Credential, c.source)
 	if err != nil {
+		if failure := c.physical.Fault(ctx, ""); failure != nil {
+			return ObservedUsage{}, c.storageResult(failure)
+		}
 		if failure := c.fault(ctx, ""); failure != nil {
 			return ObservedUsage{}, failure
 		}
@@ -183,6 +197,9 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 		}
 	}
 	if se != nil && se.SourceRef != "" && (se.Gap || !se.Tracked) {
+		if err = c.physical.Invalidate(ctx, se.SourceRef, se.ManagerID, ""); err != nil {
+			return ObservedUsage{}, c.storageResult(err)
+		}
 		if err = c.store.InvalidateSource(ctx, se.SourceRef, se.ManagerID, "", se.InvalidFrom); err != nil {
 			return ObservedUsage{}, c.storageResult(err)
 		}
@@ -190,10 +207,20 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 	result, err := c.store.PutRecord(ctx, r)
 	if err != nil {
 		c.storageResult(err)
+		if se != nil && se.SourceRef != "" {
+			if failure := c.physical.Invalidate(ctx, se.SourceRef, se.ManagerID, ""); failure != nil {
+				return ObservedUsage{}, c.storageResult(failure)
+			}
+		} else if failure := c.physical.Fault(ctx, r.Attribution.AccountID); failure != nil {
+			return ObservedUsage{}, c.storageResult(failure)
+		}
 		if failure := c.fault(ctx, r.Attribution.AccountID); failure != nil {
 			return ObservedUsage{}, failure
 		}
 		return ObservedUsage{}, err
+	}
+	if err = c.physical.ObserveRecord(ctx, raw, r); err != nil {
+		return ObservedUsage{}, c.storageResult(err)
 	}
 	return ObservedUsage{Record: r, Result: result}, nil
 }
@@ -206,6 +233,9 @@ func (c *Consumer) Invalidate(ctx context.Context, account string) error {
 	if err := c.ready(ctx); err != nil {
 		return err
 	}
+	if err := c.physical.Fault(ctx, account); err != nil {
+		return c.storageResult(err)
+	}
 	return c.fault(ctx, account)
 }
 
@@ -217,6 +247,13 @@ func (c *Consumer) ApplyCheckpoint(ctx context.Context, membership string, expec
 	if err := c.ready(ctx); err != nil {
 		return err
 	}
+	// Optional physical negatives are durable before either domain can advance.
+	if err := c.applyPhysicalCheckpoint(ctx, membership, expected, response); err != nil {
+		return c.storageResult(err)
+	}
+	// The request-domain digest retains its original payload. The optional
+	// extension has its own bounded hash and must not alter request-time identity.
+	response.Physical = nil
 	m, err := c.store.SourceMembership(ctx, membership)
 	if err != nil {
 		return c.storageResult(err)
@@ -273,6 +310,11 @@ func (c *Consumer) ApplyCheckpoint(ctx context.Context, membership string, expec
 		p.InvalidFrom = nil
 	}
 	err = c.store.ApplySourceCheckpoint(ctx, p)
+	if errors.Is(err, measurement.ErrInvalid) || errors.Is(err, measurement.ErrConflict) {
+		if failure := c.physical.Invalidate(ctx, ref, response.ManagerIncarnationID, response.IncarnationID); failure != nil {
+			return c.storageResult(failure)
+		}
+	}
 	return c.storageResult(err)
 }
 
@@ -297,6 +339,9 @@ func (c *Consumer) CheckpointFailed(ctx context.Context, membership string) erro
 	}
 	m, err := c.store.SourceMembership(ctx, membership)
 	if err != nil {
+		return c.storageResult(err)
+	}
+	if err = c.physical.Fault(ctx, m.AccountID); err != nil {
 		return c.storageResult(err)
 	}
 	return c.fault(ctx, m.AccountID)
