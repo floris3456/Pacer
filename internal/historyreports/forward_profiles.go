@@ -12,6 +12,33 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp"
 )
 
+// Only the forward durable encoding overrides the legacy DTO's omitempty.
+// nil means legacy ownership; [] means an explicitly empty selection. Existing
+// profile objects keep their original bytes/digests and still decode normally.
+type forwardStoredProfiles struct{ ForwardProfileConfig }
+
+func (c forwardStoredProfiles) MarshalJSON() ([]byte, error) {
+	type profile struct {
+		ForwardProfile
+		Memberships *[]ForwardMembership `json:"memberships,omitempty"`
+	}
+	var profiles []profile
+	if c.Profiles != nil {
+		profiles = make([]profile, len(c.Profiles))
+	}
+	for i, p := range c.Profiles {
+		profiles[i].ForwardProfile = p
+		if p.Memberships != nil {
+			members := p.Memberships
+			profiles[i].Memberships = &members
+		}
+	}
+	return json.Marshal(struct {
+		ForwardProfileConfig
+		Profiles []profile `json:"profiles"`
+	}{c.ForwardProfileConfig, profiles})
+}
+
 func (s *ForwardStore) RegisterForwardBook(ctx context.Context, b ForwardBook) (d string, err error) {
 	if b.ID == "" || len(b.ID) > 256 || b.Book.Policy != "profile-api-value-v3" || len(b.Book.Prices) > 10000 || len(b.Qualifications) > 10000 {
 		return "", ErrInput
@@ -95,7 +122,7 @@ func (s *ForwardStore) SeedForwardProfiles(ctx context.Context, c ForwardProfile
 		if current != 0 {
 			return ErrForwardConflict
 		}
-		if _, e := forwardObject(tx, ctx, "profiles", "1", c); e != nil {
+		if _, e := forwardObject(tx, ctx, "profiles", "1", forwardStoredProfiles{c}); e != nil {
 			return e
 		}
 		_, e := tx.ExecContext(ctx, `UPDATE forward_meta SET profile_revision=1 WHERE id=1`)
@@ -184,7 +211,7 @@ func (s *ForwardStore) EditProfiles(ctx context.Context, expected int64, edit Fo
 		}
 		revision = current + 1
 		c.Revision = revision
-		if _, e := forwardObject(tx, ctx, "profiles", strconv.FormatInt(revision, 10), c); e != nil {
+		if _, e := forwardObject(tx, ctx, "profiles", strconv.FormatInt(revision, 10), forwardStoredProfiles{c}); e != nil {
 			return e
 		}
 		_, e := tx.ExecContext(ctx, `UPDATE forward_meta SET profile_revision=? WHERE id=1`, revision)
