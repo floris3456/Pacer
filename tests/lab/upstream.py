@@ -4,12 +4,16 @@ All credentials and content are dummy test inputs. This fixture never makes
 outbound requests and does not write request bodies or authorization to logs.
 """
 import json
+import os
+import ssl
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 lock = threading.Lock()
 attempts = []
 exhausted = set()
+analytics_calls = 0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -17,8 +21,17 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        global analytics_calls
         if self.path == "/health":
             return self.reply(200, {"ready": True})
+        if self.path == "/_test/analytics":
+            with lock:
+                return self.reply(200, {"calls": analytics_calls})
+        if self.path == "/api/oauth/usage":
+            with lock:
+                analytics_calls += 1
+            return self.reply(200, {"five_hour": {"utilization": 20, "resets_at": time.time() + 18000},
+                                    "seven_day": {"utilization": 30, "resets_at": time.time() + 604800}})
         if self.path == "/_test/attempts":
             with lock:
                 return self.reply(200, attempts)
@@ -62,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
+            self.quota_headers()
             self.end_headers()
             start = {**message, "content": [], "stop_reason": None}
             events = [("message_start", {"type": "message_start", "message": start}),
@@ -80,9 +94,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        if self.path.split("?", 1)[0] == "/v1/messages" and status == 200:
+            self.quota_headers()
         self.end_headers()
         self.wfile.write(data)
 
+    def quota_headers(self):
+        self.send_header("anthropic-ratelimit-unified-5h-utilization", "0.2")
+        self.send_header("anthropic-ratelimit-unified-5h-reset", str(int(time.time()) + 18000))
+        self.send_header("anthropic-ratelimit-unified-7d-utilization", "0.3")
+        self.send_header("anthropic-ratelimit-unified-7d-reset", str(int(time.time()) + 604800))
+
 
 if __name__ == "__main__":
+    if os.environ.get("FIXTURE_CERT"):
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(os.environ["FIXTURE_CERT"], os.environ["FIXTURE_KEY"])
+        server = ThreadingHTTPServer(("0.0.0.0", 443), Handler)
+        server.socket = tls.wrap_socket(server.socket, server_side=True)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

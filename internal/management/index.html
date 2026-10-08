@@ -13,26 +13,41 @@
 <section id="models" hidden><h2>Model Settings</h2><p class="muted">CPA owns these settings. Changes apply to its catalogue, not a second Pacer model store.</p><label>Filter <input id="filter" type="search" placeholder="Model or provider"></label><div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>State</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
 <section id="keys" hidden><h2>Keys &amp; Groups</h2><p class="muted">Friendly names and key-replacement lineage do not change permissions or routing. Dated provider-account profile memberships are separate.</p><div id="key-status" class="status"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key reference</th><th>History group</th></tr></thead><tbody id="key-rows"></tbody></table></div></section>
 </section></main>
-<dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><p class="muted">Blank alias restores the upstream name. Existing model limits and thinking settings are preserved.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
+<dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
 <script>
 (() => {
   'use strict';
-  let key = '', tab = 'pacer', models = [], editing = null;
+  let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [];
   const root = '/v0/management/plugins/pacer';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
   async function api(path, method='GET', body) {
     if (!allowed.has(method+' '+path)) throw Error('Management operation is not allowed');
     const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-    if (!response.ok) throw Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':'Request failed ('+response.status+'). No change was confirmed.');
+    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.')}
     return response.json();
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
   function row(target, values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value??'Unknown';tr.append(td)}el(target).append(tr);return tr}
-  function date(value){if(!value)return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
-  function showModels(){el('catalogue').replaceChildren();const filter=el('filter').value.toLowerCase();for(const model of models){if(!(model.upstream+' '+model.channel+' '+model.id).toLowerCase().includes(filter))continue;const tr=row('catalogue',[model.id||model.upstream,model.channel,model.enabled?'Enabled':'Disabled']);const td=document.createElement('td'),button=document.createElement('button');button.textContent='Edit';button.onclick=()=>{editing=model;el('model-title').textContent=model.upstream;el('model-enabled').checked=model.enabled;el('model-alias').value=model.alias?.name||'';el('model-error').textContent='';el('model-dialog').showModal()};td.append(button);tr.append(td)}}
+  function date(value){if(!value||String(value).startsWith('0001-'))return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
+  function editModel(model){
+    editing=model;
+    el('model-title').textContent=model.upstream;
+    el('model-enabled').checked=model.enabled;
+    el('model-alias').value=model.alias?.name||'';
+    el('model-keep').checked=!!model.alias?.['keep-original'];
+    el('keep-label').hidden=!model.supports?.['keep-original'];
+    el('model-display').value=model.setting?.['display-name']||'';
+    el('model-context').value=model.setting?.['max-context-length']||'';
+    el('model-output').value=model.setting?.['max-output-tokens']||'';
+    el('output-label').hidden=!model.supports?.['max-output-tokens'];
+    el('model-thinking').value=(model.setting?.['thinking-levels']||[]).join(', ');
+    el('thinking-help').textContent='Comma-separated levels: '+thinkingLevels.join(', ');
+    el('model-error').textContent='';el('model-dialog').showModal();
+  }
+  function showModels(){el('catalogue').replaceChildren();const filter=el('filter').value.toLowerCase();for(const model of models){if(!(model.upstream+' '+model.channel+' '+model.id).toLowerCase().includes(filter))continue;const tr=row('catalogue',[model.id||model.upstream,model.channel,model.enabled?'Enabled':('Disabled'+(model.disabled_by?.scope?' · '+model.disabled_by.scope:''))]);tr.dataset.model=model.upstream;const td=document.createElement('td'),button=document.createElement('button');button.textContent='Edit';button.onclick=()=>editModel(model);td.append(button);tr.append(td)}}
   async function refresh(){message('');try{
-    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];showModels()}
+    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){const data=await api(root+'/keys');el('key-rows').replaceChildren();el('key-status').textContent=data.coverage||'Imported key names and historical lineage';for(const item of data.keys||[])row('key-rows',[item.alias,item.reference,(item.lineage||[]).join(', ')])}
     else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.'}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
@@ -41,8 +56,27 @@
   el('disconnect').onclick=()=>{key='';el('workspace').hidden=true;el('login').hidden=false;message('Disconnected')};
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(key)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
-  el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. Cache-TTL contracts remain enforced.')}catch(error){message(error.message,true)}};
+  el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
-  el('model-form').onsubmit=async event=>{event.preventDefault();try{const alias=el('model-alias').value.trim();await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,enabled:el('model-enabled').checked,alias:alias?{name:alias,'keep-original':editing.alias?.['keep-original']||false}:null});el('model-dialog').close();await refresh();message('Model configuration saved in CPA.')}catch(error){el('model-error').textContent=error.message}};
+  async function saveModel(reset=false){
+    const buttons=el('model-form').querySelectorAll('button');buttons.forEach(b=>b.disabled=true);
+    try{
+      const alias=el('model-alias').value.trim(), setting={};
+      if(!reset){
+        const display=el('model-display').value.trim();if(display)setting['display-name']=display;
+        for(const [id,field,supported] of [['model-context','max-context-length',true],['model-output','max-output-tokens',editing.supports?.['max-output-tokens']]]){
+          if(!supported||!el(id).value)continue;const value=Number(el(id).value);
+          if(!Number.isSafeInteger(value)||value<1)throw Error('Token limits must be positive whole numbers');setting[field]=value;
+        }
+        const levels=[...new Set(el('model-thinking').value.split(',').map(v=>v.trim().toLowerCase()).filter(Boolean))];
+        if(levels.some(v=>!thinkingLevels.includes(v)))throw Error('Choose thinking levels from the supported list');
+        if(levels.length)setting['thinking-levels']=levels;
+      }
+      await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,...(!reset?{enabled:el('model-enabled').checked}:{}),alias:!reset&&alias?{name:alias,'keep-original':!!editing.supports?.['keep-original']&&el('model-keep').checked}:null,setting:Object.keys(setting).length?setting:null});
+      el('model-dialog').close();await refresh();message('Model configuration saved in CPA.');
+    }catch(error){el('model-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
+  }
+  el('model-form').onsubmit=event=>{event.preventDefault();saveModel()};
+  el('model-reset').onclick=()=>saveModel(true);
 })();
 </script></body></html>

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -119,6 +120,11 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		if p.cfg.StatePath != cfg.StatePath {
 			return nil, errors.New("state_path change requires idle reload")
 		}
+		mode, err := reconcileMode(p.db, cfg.Routing.Mode)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Routing.Mode = mode
 		p.cfg = cfg
 		return registration(), nil
 	}
@@ -137,6 +143,12 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	mode, err := reconcileMode(db, cfg.Routing.Mode)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	cfg.Routing.Mode = mode
 	chats, err := tracker.Open(db, p.now)
 	if err != nil {
 		db.Close()
@@ -472,12 +484,12 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		decoder := json.NewDecoder(bytes.NewReader(req.Body))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&body) != nil || (body.Mode != "off" && body.Mode != "dry-run") {
+		if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF || (body.Mode != "off" && body.Mode != "dry-run") {
 			return resource(409, map[string]string{"error": "routing_rollout_gate", "message": "Only off or dry-run is accepted before rollout verification"})
 		}
-		p.mu.Lock()
-		p.cfg.Routing.Mode = body.Mode
-		p.mu.Unlock()
+		if err := p.setMode(body.Mode); err != nil {
+			return resource(503, map[string]string{"error": "routing_state_unavailable"})
+		}
 		return resource(200, map[string]string{"mode": body.Mode})
 	}
 	return resource(404, map[string]string{"error": "not_found"})
