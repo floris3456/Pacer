@@ -31,6 +31,7 @@ cache_policy:
   trusted_empty_installations: []
 # Optional, pre-created by the trusted offline importer:
 # history_path: /var/lib/pacer/history.sqlite
+# report_path: /var/lib/pacer/reports/historyreports-INSTANCE/reports.sqlite
 ```
 
 Use exact host-resolved built-in Claude model IDs, not wildcard/compatible-gateway
@@ -83,6 +84,29 @@ clients. Configuration changes require an idle reload.
 - Import only a frozen SQLite backup through `history-import`; no arbitrary path or
   importer is exposed through management. Archive preservation is not report parity.
   CPAMP remains required until all named parity/rollback gates pass.
+
+Prepare native frozen reports explicitly, outside CPA startup and routing:
+
+```sh
+./pacer-state prepare-reports --archive /var/lib/pacer/history.sqlite --output-dir /var/lib/pacer/reports
+```
+
+The output directory must already exist. The command creates an owned child directory
+and prints its read-only artifact path and default pin. Set `report_path` to that path
+at the next confirmed-idle reload. Normal plugin startup only opens preparation metadata;
+it never imports/materializes history. Keep the original archive and CPAMP backup.
+Frozen report HTTP calls are capped at two concurrent calculations, 64 KiB input and
+8 MiB output; broad exports may require narrower filters. Calculation deadlines are
+cooperative, not hard process-preemption. A missing artifact never yields invented totals.
+
+The native management paths are `GET /plugins/pacer/history/profiles` and
+`POST /plugins/pacer/history/{report,windows,evidence,export}` under the existing
+CPA-authenticated management namespace. There is no public-resource alias or preparation
+endpoint. Requests contain `query` (the documented historyreports Query), with bounded
+window/evidence/export options. Export responses wrap exact JSON/CSV writer bytes as
+`{filename,media_type,content}` for the same credential-free iframe bridge; downloaded
+files preserve those bytes. Saved `query.pin` and `query.evidence_pin` never advance H.
+See [the extraction contract](history-reports.md) for tested parity and unported views.
 
 ## Build and evidence
 

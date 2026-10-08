@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
@@ -35,6 +36,7 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
+	ReportPath      string       `yaml:"report_path"`
 	CachePolicy     PolicyConfig `yaml:"cache_policy"`
 	Enabled         bool         `yaml:"enabled"`
 	Priority        int          `yaml:"priority"`
@@ -59,6 +61,8 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
+	reports           *historyreports.Reader
+	reportSlots       chan struct{}
 	routingEligible   bool // Private rollout gate: false in every runtime constructor/configuration.
 	policy            *policyadapter.Adapter
 	selections        map[string]pluginapi.CachePolicy
@@ -88,7 +92,7 @@ type Plugin struct {
 }
 
 func New(host Host) *Plugin {
-	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, selections: map[string]pluginapi.CachePolicy{}, workerDone: make(chan struct{})}
+	return &Plugin{Host: host, now: time.Now, creds: map[string]credential{}, requests: map[string]attempt{}, selections: map[string]pluginapi.CachePolicy{}, workerDone: make(chan struct{}), reportSlots: make(chan struct{}, 2)}
 }
 
 func registration(policyEnabled ...bool) any {
@@ -149,6 +153,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.db != nil {
+		if p.cfg.ReportPath != cfg.ReportPath {
+			return nil, errors.New("report_path change requires idle reload")
+		}
 		if !reflect.DeepEqual(p.cfg.CachePolicy, cfg.CachePolicy) {
 			return nil, errors.New("cache_policy changes require an idle reload")
 		}
@@ -232,6 +239,18 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		}
 		p.history = h
 	}
+	if cfg.ReportPath != "" {
+		r, err := historyreports.Open(context.Background(), cfg.ReportPath)
+		if err != nil {
+			db.Close()
+			if p.history != nil {
+				p.history.Close()
+				p.history = nil
+			}
+			return nil, errors.New("configured frozen report artifact is unavailable; prepare it offline first")
+		}
+		p.reports = r
+	}
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
 	p.policy = policy
@@ -255,6 +274,10 @@ func (p *Plugin) Close() {
 	if p.history != nil {
 		_ = p.history.Close()
 		p.history = nil
+	}
+	if p.reports != nil {
+		_ = p.reports.Close()
+		p.reports = nil
 	}
 }
 
@@ -301,7 +324,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return result, err
 	case pluginabi.MethodManagementRegister:
-		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": []map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}}, nil
+		return map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}}, reportRoutes()...)}, nil
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -582,6 +605,9 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 }
 
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if strings.HasPrefix(req.Path, historyRoot) {
+		return p.reportsAPI(req)
+	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/keys" {
 		return p.editKeys(req)
 	}
