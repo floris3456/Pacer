@@ -177,11 +177,16 @@ def expect_lower_bound(interval, window, records, delta):
     assert is_int(value["records"])
 
 
-def expect_unknown(interval, window, reasons):
+def expect_unknown(interval, window, reasons, allowed=()):
+    """Exactly `reasons`, plus at most the named `allowed` extras."""
     check_common(interval, window)
     assert interval["status"] == "unknown" and interval["value"] is None, \
         "%s: expected unknown, got %s value %r" % (window, interval["status"], interval["value"])
-    assert interval["reasons"] == sorted(reasons), "%s: reasons %r, expected exactly %r" % (window, interval["reasons"], sorted(reasons))
+    got = interval["reasons"]
+    extra = sorted(set(got) - set(reasons))
+    ok = got == sorted(set(got)) and set(reasons) <= set(got) and set(extra) <= set(allowed)
+    assert ok, "%s: reasons %r, expected exactly %r%s" % (
+        window, got, sorted(reasons), " plus optionally %r" % sorted(allowed) if allowed else "")
 
 
 def expect_unknown_including(interval, window, required, forbidden=()):
@@ -563,7 +568,11 @@ def case_d(lab, account, ready_at, r):
     assert held[0]["started"] < t2 < held[0]["at"], "premise: the stream was not in flight at s2"
     r["held_stream"] = {"started": iso(held[0]["started"]), "completed": iso(held[0]["at"]), "outcome": held[0]["outcome"]}
     for w in WINDOWS:
-        expect_unknown(found[w], w, ["carry_in_unproven", "cut_not_quiescent", "physical_proof_unavailable"])
+        # Native CPA advances its sequence between cuts a and b, so every
+        # sandwich needs the s2 proof. With s2 not quiescent there is none, and
+        # s1's sandwich is then unproven too (dispatch_freedom_unproven).
+        expect_unknown(found[w], w, ["carry_in_unproven", "cut_not_quiescent", "physical_proof_unavailable"],
+                       allowed=["dispatch_freedom_unproven"])
 
 
 def case_e(lab, account, ready_at, r):

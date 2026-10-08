@@ -440,6 +440,17 @@ class Phases(unittest.TestCase):
         self.assertFalse((self.dir / check.RESTART_MARKER).exists())
         self.assertIn("case b (cap-b): FAIL", printed)
 
+    def test_phase1_case_d_accepts_only_the_native_sandwich_reason_as_extra(self):
+        native = ["carry_in_unproven", "cut_not_quiescent", "dispatch_freedom_unproven", "physical_proof_unavailable"]
+        self.assertEqual(0, run("phase1", FakeLab(phase1={"cap-d": ("unknown", native, None)}), self.dir)[0])
+        other = sorted(native + ["missing_exact_proof"])
+        code, receipt, _ = run("phase1", FakeLab(phase1={"cap-d": ("unknown", other, None)}), self.dir)
+        self.assertEqual(1, code)
+        self.assertIn("plus optionally", receipt["cases"]["d"]["error"])
+        missing = ["carry_in_unproven", "dispatch_freedom_unproven", "physical_proof_unavailable"]
+        self.assertEqual(1, run("phase1", FakeLab(phase1={"cap-d": ("unknown", missing, None)}), self.dir)[0])
+        self.assertEqual(1, run("phase1", FakeLab(phase1={"cap-c": ("unknown", ["dispatch_freedom_unproven", "reset_between_samples"], None)}), self.dir)[0])
+
     def test_a_failed_rerun_removes_the_old_restart_marker(self):
         self.assertEqual(0, run("phase1", FakeLab(), self.dir)[0])
         self.assertTrue((self.dir / check.RESTART_MARKER).exists())
