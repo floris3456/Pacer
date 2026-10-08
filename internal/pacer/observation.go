@@ -65,6 +65,20 @@ func (p *Plugin) observeAuth(auth string, headers http.Header, at time.Time) {
 	}
 }
 
+func (p *Plugin) observeCaptured(auth string, headers http.Header, captured map[string]time.Time) {
+	p.mu.Lock()
+	c, ok := p.creds[auth]
+	observer := p.observer
+	p.mu.Unlock()
+	if !ok || observer == nil {
+		return
+	}
+	samples := observation.HeadersCaptured(c.Provider, headers, captured)
+	if len(samples) > 0 {
+		_ = observer.Observe(c.Account, c.Provider, samples)
+	}
+}
+
 func (p *Plugin) startWorker() {
 	p.workerOnce.Do(func() {
 		p.workerWait.Add(1)

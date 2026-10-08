@@ -42,6 +42,7 @@ type Config struct {
 }
 type credential struct{ ID, Index, Provider, Account, Alias string }
 type attempt struct {
+	Model, PreviousAccount     string
 	Claim                      *tracker.Claim
 	Caller, Session, Key, Auth string
 	Headers                    http.Header
@@ -49,23 +50,23 @@ type attempt struct {
 	Binding                    tracker.Binding
 }
 type Plugin struct {
-	mu           sync.Mutex
-	Host         Host
-	now          func() time.Time
-	db           *sql.DB
-	chats        *tracker.Store
-	observer     *observation.Store
-	cfg          Config
-	creds        map[string]credential
-	requests     map[string]attempt
-	decisions    []routing.Decision
-	workerOnce   sync.Once
-	workerDone   chan struct{}
-	workerWait   sync.WaitGroup
-	refreshMu    sync.Mutex
-	discoverMu   sync.Mutex
-	lastDiscover time.Time
-	stopped      bool
+	mu             sync.Mutex
+	Host           Host
+	now            func() time.Time
+	db             *sql.DB
+	chats          *tracker.Store
+	observer       *observation.Store
+	cfg            Config
+	creds          map[string]credential
+	requests       map[string]attempt
+	decisionErrors int64
+	workerOnce     sync.Once
+	workerDone     chan struct{}
+	workerWait     sync.WaitGroup
+	refreshMu      sync.Mutex
+	discoverMu     sync.Mutex
+	lastDiscover   time.Time
+	stopped        bool
 }
 
 func New(host Host) *Plugin {
@@ -143,6 +144,10 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	if err := openDecisions(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	mode, err := reconcileMode(db, cfg.Routing.Mode)
 	if err != nil {
 		db.Close()
@@ -270,9 +275,16 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		return struct{}{}, nil
 	case pluginabi.MethodUsageHandle:
-		var req pluginapi.UsageRecord
+		var req struct {
+			pluginapi.UsageRecord
+			ResponseHeadersObservedAt map[string]time.Time
+		}
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, err
+		}
+		if len(req.ResponseHeadersObservedAt) > 0 {
+			p.observeCaptured(req.AuthID, req.ResponseHeaders, req.ResponseHeadersObservedAt)
+			return struct{}{}, nil
 		}
 		// Older hosts do not supply the response-capture clock. Absolute headers
 		// still carry useful evidence; strip countdowns rather than re-anchor a
@@ -362,13 +374,8 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	p.mu.Lock()
 	t.Key = key
 	t.Decision = d
+	t.Model, t.PreviousAccount = req.Model, b.Account
 	p.requests[header(http.Header(req.Options.Headers), requestHeader)] = t
-	if cfg.Routing.Mode == "dry-run" && d.Handled {
-		p.decisions = append(p.decisions, d)
-		if len(p.decisions) > 200 {
-			p.decisions = p.decisions[len(p.decisions)-200:]
-		}
-	}
 	p.mu.Unlock()
 	// Until the dry-run observation and integration gates are accepted the
 	// candidate records choices but cannot alter the host's scheduler.
@@ -396,6 +403,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			b, err := p.chats.Admit(req.RequestID, key, tracker.Selection{Auth: c.ID, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: req.Model, Forced: true}, t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
+					p.recordDecision(t, c, e.Code)
 					return refuse(e.Code, e.Message)
 				}
 				return refuse("quota_state_unavailable", "Pacer binding state is unavailable")
@@ -404,6 +412,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			t.Key, t.Auth, t.Binding = key, auth, b
 			p.requests[req.RequestID] = t
 			p.mu.Unlock()
+			p.recordDecision(t, c, "admitted")
 		}
 	}
 	clear := []string{controlHeader, requestHeader, "X-Quota-Binding", "X-Quota-Protocol"}
@@ -452,6 +461,10 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		accounts := []map[string]any{}
+		decisions, err := p.decisionView()
+		if err != nil {
+			return resource(503, map[string]string{"error": "decision_state_unavailable"})
+		}
 		for _, c := range p.creds {
 			windows, err := p.observer.ReadWindows(c.Account)
 			if err != nil {
@@ -473,7 +486,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			accounts = append(accounts, map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "state": state, "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}})
 		}
 		sort.Slice(accounts, func(i, j int) bool { return fmt.Sprint(accounts[i]["id"]) < fmt.Sprint(accounts[j]["id"]) })
-		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": p.decisions})
+		return resource(200, map[string]any{"routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/routing" {
 		if len(req.Body) > 1024 {
