@@ -9,7 +9,9 @@ import urllib.request
 import uuid
 
 base = "http://pacer-lab-cpa.orb.local:8317"
-upstream = "http://pacer-upstream.orb.local:8080"
+# A separately started copy of the same fixture source (own counter domain, fresh
+# reset times) may stand in while CPA's api.anthropic.com is redirected to it.
+upstream = os.environ.get("PACER_UPSTREAM_CONTROL", "http://pacer-upstream.orb.local:8080")
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 checks = []
 
