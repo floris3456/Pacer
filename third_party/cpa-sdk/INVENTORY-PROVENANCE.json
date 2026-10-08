@@ -1,12 +1,12 @@
 {
   "repository": "https://github.com/floris3456/CLIProxyAPI",
-  "commit": "pending-cpa-inventory",
+  "commit": "bb27d121a88230bbf25fa9238be1ba4018a48952",
   "abi": 1,
   "schema": 7,
   "inventory_contract_version": 1,
-  "scope": "Additive host.auth.inventory_checkpoint types written from the approved capacity membership contract while the CPA side lands in parallel; replace with byte-for-byte copies and the CPA commit once it lands",
+  "scope": "Additive host.auth.inventory_checkpoint types, byte-for-byte copies from the CPA pacer-boundary commit",
   "files": {
     "sdk/pluginabi/auth_inventory.go": "806ab3f0264f96961969484468382d629d2bc8d5bfe3fb70f47f3f0e58c62926",
-    "sdk/pluginapi/auth_inventory.go": "f6679f90f3af1dd238a409a5cdff42006c757c05f4463f31c38179b795b66812"
+    "sdk/pluginapi/auth_inventory.go": "1183b0ddaccb416d94b213c81bb6819590345d3544843a55fe5e9dc675a4ae2c"
   }
 }

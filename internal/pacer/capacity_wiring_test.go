@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -432,7 +433,8 @@ func TestCapacityInventoryProvenance(t *testing.T) {
 		Commit string            `json:"commit"`
 		Files  map[string]string `json:"files"`
 	}
-	if err = json.Unmarshal(raw, &provenance); err != nil || provenance.Commit != "pending-cpa-inventory" || len(provenance.Files) != 2 {
+	// Pinned to the landed CPA commit (full 40-hex SHA), never a placeholder.
+	if err = json.Unmarshal(raw, &provenance); err != nil || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(provenance.Commit) || len(provenance.Files) != 2 {
 		t.Fatal("inventory provenance", provenance, err)
 	}
 	for path, want := range provenance.Files {

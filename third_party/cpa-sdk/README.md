@@ -15,8 +15,8 @@ Review per-file provenance and the ABI before updating this snapshot.
 
 `INVENTORY-PROVENANCE.json` records two additive files for the
 `host.auth.inventory_checkpoint` RPC (`sdk/pluginabi/auth_inventory.go`,
-`sdk/pluginapi/auth_inventory.go`). They were written from the approved capacity
-contract before the CPA commit existed, so the commit reads `pending-cpa-inventory`.
+`sdk/pluginapi/auth_inventory.go`). Both are byte-for-byte copies from CPA
+`pacer-boundary` `bb27d121a88230bbf25fa9238be1ba4018a48952`.
 
 The later additive schema-7 physical checkpoint subset is pinned separately in
 `PHYSICAL-PROVENANCE.json`: `usage_checkpoint.go` and `usage_physical.go` are copied
