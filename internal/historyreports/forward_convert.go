@@ -102,6 +102,60 @@ func convertForward(entry measurement.ReportFeedEntry) ForwardEvent {
 	return f
 }
 
+// New generations apply this qualification even to a previously prepared base.
+// Old sealed generations retain their original converter/read semantics.
+const forwardQualifiedConverterVersion = ForwardConverterVersion + "/baseline-qualified-v1"
+
+// Run after frozen accounting correction and pinned token-evidence enrichment.
+// CPAMP retains token_breakdown.quality verbatim: only "complete" certifies the
+// accounting; absent/partial/unknown values remain evidence, never exact zero.
+// Legacy v0/v1 are supported through the original correction, not relabelled v2.
+func forwardBaselineIssues(e cpamp.Event) []string {
+	issues := []string{}
+	if e.Quality != "complete" {
+		issues = append(issues, "incomplete_accounting")
+	}
+	if e.AccountingVersion < 0 || e.AccountingVersion > 2 {
+		issues = append(issues, "unsupported_accounting")
+	}
+	t := e.Tokens
+	cache, valid := forwardSum(t.Cached, t.CacheCreation)
+	valid = valid && t.Input >= cache && t.Output >= 0 && t.Reasoning >= 0
+	source := e.SourceTokens
+	if e.TokenEvidence != nil {
+		source = &e.TokenEvidence.Details
+	}
+	output := t.Output
+	if source != nil && source.Output != nil {
+		output = *source.Output
+	} else if (e.Provider == "antigravity" || e.Provider == "gemini") && strings.HasPrefix(e.Model, "gemini") {
+		// Validate the original legacy heuristic's sums before letting its
+		// unchecked arithmetic run. This is not a second valuation formula.
+		total, ok := forwardSum(t.Input, t.Output)
+		total, ok2 := forwardSum(total, t.Reasoning)
+		if ok && ok2 && t.Total == total {
+			output, ok = forwardSum(t.Output, t.Reasoning)
+			valid = valid && ok
+		}
+	}
+	total, ok := forwardSum(t.Input, output)
+	valid = valid && ok && total == t.Total && t.Reasoning <= output
+	var w5, w1 int64
+	if source != nil {
+		if source.Write5m != nil {
+			w5 = *source.Write5m
+		}
+		if source.Write1h != nil {
+			w1 = *source.Write1h
+		}
+	}
+	writes, ok := forwardSum(w5, w1)
+	if !valid || !ok || writes > t.CacheCreation {
+		issues = append(issues, "invalid_counters")
+	}
+	return issues
+}
+
 func valueForward(e ForwardEvent, book ForwardBook) (*ForwardValue, []string) {
 	issues := append([]string{}, e.Issues...)
 	qualified := false

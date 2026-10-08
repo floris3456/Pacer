@@ -63,7 +63,7 @@ func (s *ForwardStore) SealForward(ctx context.Context, q ForwardSeal) (ForwardP
 		q.Provenance.Reasons = append(q.Provenance.Reasons, "source_proof_absent")
 	}
 	q.Provenance.Reasons = forwardUnique(q.Provenance.Reasons)
-	m := forwardManifest{Version: ForwardVersion, Converter: ForwardConverterVersion, Head: q.Head, BaseDigest: q.BaseDigest, BookDigest: q.BookDigest, OriginDigest: q.OriginDigest, ProfileRevision: q.ProfileRevision, ProfileDigest: pd, At: q.At.UTC(), Provenance: q.Provenance}
+	m := forwardManifest{Version: ForwardVersion, Converter: forwardQualifiedConverterVersion, Head: q.Head, BaseDigest: q.BaseDigest, BookDigest: q.BookDigest, OriginDigest: q.OriginDigest, ProfileRevision: q.ProfileRevision, ProfileDigest: pd, At: q.At.UTC(), Provenance: q.Provenance}
 	body, err := json.Marshal(m)
 	if err != nil {
 		return ForwardPin{}, ErrInput
@@ -154,7 +154,7 @@ func (s *ForwardStore) forwardContext(ctx context.Context, p ForwardPin, staging
 	if !sealed && !staging {
 		return c, pin, ErrForwardPending
 	}
-	if hash(string(raw)) != p.Generation || json.Unmarshal(raw, &c.manifest) != nil || c.manifest.Version != ForwardVersion || c.manifest.Converter != ForwardConverterVersion {
+	if hash(string(raw)) != p.Generation || json.Unmarshal(raw, &c.manifest) != nil || c.manifest.Version != ForwardVersion || (c.manifest.Converter != ForwardConverterVersion && c.manifest.Converter != forwardQualifiedConverterVersion) {
 		return c, pin, ErrSource
 	}
 	f := &pin.Filter
@@ -350,6 +350,9 @@ func (s *ForwardStore) walkForward(ctx context.Context, c forwardReadContext, p 
 			if len(nb) > 0 && json.Unmarshal(nb, &n) != nil || len(bb) > 0 && json.Unmarshal(bb, &b) != nil {
 				return ErrSource
 			}
+			if len(bb) > 0 && c.manifest.Converter == forwardQualifiedConverterVersion {
+				b.Issues = forwardUnique(append(b.Issues, forwardBaselineIssues(b.Event)...))
+			}
 			e := b
 			origins := []ForwardEvent{b}
 			account := b.Event.Account
@@ -368,6 +371,9 @@ func (s *ForwardStore) walkForward(ctx context.Context, c forwardReadContext, p 
 				}
 				if len(bb) > 0 {
 					origins = append(origins, b)
+					if c.manifest.Converter == forwardQualifiedConverterVersion && len(b.Issues) > 0 {
+						e.Issues = append(e.Issues, "origin_accounting_unverified")
+					}
 					resolved = n.PhysicalKey != "" && cert != nil && cert.LegacyAccount == b.Event.Account && n.Event.Provider == b.Event.Provider
 					nativeCategories, nativeValid := cpamp.ForwardCategories(n.Event)
 					baseCategories, baseValid := cpamp.ForwardCategories(b.Event)

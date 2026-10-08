@@ -162,7 +162,28 @@ func TestAuditBaselineQualification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin, err := s.SealForward(ctx, ForwardSeal{Head: head, BaseDigest: base, OriginDigest: origin, BookDigest: book, At: forwardAt.Add(24 * time.Hour)})
+	// Model an already prepared pre-hardening base, without rewriting any real
+	// archive: old projections had no qualification diagnostics.
+	for _, f := range page.Events {
+		f.Issues = []string{}
+		raw, err := json.Marshal(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.db.Exec(`UPDATE forward_base_events SET body=? WHERE id=?`, raw, f.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seal := ForwardSeal{Head: head, BaseDigest: base, OriginDigest: origin, BookDigest: book, At: forwardAt.Add(24 * time.Hour)}
+	legacy := auditLegacyPin(t, s, seal)
+	var legacyJSON, legacyCSV bytes.Buffer
+	if err = s.ExportForwardJSON(ctx, legacy, &legacyJSON); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExportForwardCSV(ctx, legacy, 25, "", &legacyCSV); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := s.SealForward(ctx, seal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,5 +209,93 @@ func TestAuditBaselineQualification(t *testing.T) {
 	}
 	if report.Totals.Rows != int64(len(cases)) || report.Totals.UniqueAttempts == nil || *report.Totals.UniqueAttempts != int64(len(cases)) || report.Totals.ValuedCount != 2 || report.Totals.SelectionValue != nil {
 		t.Errorf("F2 denominator: expected rows/attempts=%d valued=2 selected=nil, got %+v", len(cases), report.Totals)
+	}
+	var replayJSON, replayCSV bytes.Buffer
+	if err = s.ExportForwardJSON(ctx, legacy, &replayJSON); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExportForwardCSV(ctx, legacy, 25, "", &replayCSV); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(legacyJSON.Bytes(), replayJSON.Bytes()) || !bytes.Equal(legacyCSV.Bytes(), replayCSV.Bytes()) {
+		t.Fatal("F2 changed old-generation historical replay instead of publishing qualified new knowledge")
+	}
+}
+
+// Synthetic historical sealed object using the previous converter. This is
+// test-only construction, not a migration/override API.
+func auditLegacyPin(t *testing.T, s *ForwardStore, q ForwardSeal) ForwardPin {
+	t.Helper()
+	ctx := context.Background()
+	_, pd, err := s.ProfilesAt(ctx, q.ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := forwardManifest{Version: ForwardVersion, Converter: ForwardConverterVersion, Head: q.Head, BaseDigest: q.BaseDigest, BookDigest: q.BookDigest, OriginDigest: q.OriginDigest, ProfileRevision: q.ProfileRevision, ProfileDigest: pd, At: q.At, Provenance: q.Provenance}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := ForwardPin{Version: ForwardVersion, Generation: hash(string(raw)), Filter: ForwardFilter{Domain: "combined"}}
+	if _, err = s.db.Exec(`INSERT INTO forward_generations(id,body) VALUES(?,?)`, p.Generation, raw); err != nil {
+		t.Fatal(err)
+	}
+	report, err := s.forwardReport(ctx, p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE forward_generations SET summary=?,sealed=1 WHERE id=?`, raw, p.Generation); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAuditLegacyAccountingStillQualifiesAfterCorrection(t *testing.T) {
+	for _, version := range []int{0, 1} {
+		t.Run(string(rune('0'+version)), func(t *testing.T) {
+			r := forwardFrozenFixture(t, func(db *sql.DB) {
+				var raw []byte
+				if err := db.QueryRow(`SELECT payload FROM analytics_events WHERE json_extract(payload,'$.provider')='claude' LIMIT 1`).Scan(&raw); err != nil {
+					t.Fatal(err)
+				}
+				var e cpamp.Event
+				if err := json.Unmarshal(raw, &e); err != nil {
+					t.Fatal(err)
+				}
+				oldHash := e.Hash
+				e.Hash, e.RequestID, e.Quality = "audit-legacy", "audit-legacy", "complete"
+				e.AccountingVersion, e.RawInput = version, 100
+				e.Tokens = cpamp.Tokens{Input: 300, Cached: 200, CacheCreation: 200, Total: 300}
+				e.SourceTokens, e.TokenEvidence, e.OriginalAccounting = nil, nil, nil
+				raw, err := json.Marshal(e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = db.Exec(`UPDATE analytics_events SET event_hash=?,payload=? WHERE event_hash=?`, e.Hash, string(raw), oldHash); err != nil {
+					t.Fatal(err)
+				}
+			})
+			page, err := r.ReadBaselineEvents(context.Background(), "", measurement.ReportBudget{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, f := range page.Events {
+				if f.Event.Hash != "audit-legacy" {
+					continue
+				}
+				found = true
+				if len(f.Issues) != 0 || f.Event.OriginalAccounting == nil || f.Event.OriginalAccounting.Cached != 200 || f.Event.Tokens.Cached != 0 {
+					t.Fatalf("legacy v%d correction discarded or wrongly refused: %+v", version, f)
+				}
+			}
+			if !found {
+				t.Fatal("legacy control absent")
+			}
+		})
 	}
 }

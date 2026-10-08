@@ -143,6 +143,7 @@ func (r *Reader) ReadBaselineEvents(ctx context.Context, after string, budget me
 		e.Value = nil
 		f := ForwardEvent{ID: "cpamp-event:" + forwardDigest([]string{r.meta.Boundary.LineageSHA256, e.Hash}), Origin: "baseline", SourceID: "cpamp:" + r.meta.Boundary.LineageSHA256, AttemptID: e.RequestID, Revision: 1, StartedAt: time.UnixMilli(e.Started).UTC(), EndedAt: time.UnixMilli(e.Completed).UTC(), ReceivedAt: time.UnixMilli(e.Recorded).UTC(), StartBasis: "cpamp_recorded_ms", Final: true, Accounting: "cpamp-frozen", Quality: e.Quality, Event: e, BodyDigest: digests[i], Issues: []string{}}
 		f.RawInputBasis = "frozen_cpamp_raw_input"
+		f.Issues = forwardBaselineIssues(e)
 		page.Events = append(page.Events, f)
 	}
 	var next string
