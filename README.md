@@ -1,4 +1,28 @@
-# CPA quota handoff
+# Pacer
+
+**Candidate implementation; not a production release.** The executable is
+`cmd/plugin` → `internal/pacer`. Current configuration accepts routing `off` or
+`dry-run`, never active routing before the integration and 24–48-hour observation
+gates. Per-chat Claude cache policy is independent of routing mode and requires
+the schema-7 CPA boundary, explicit durable-store initialization and a compatible
+client. Missing policy state never means empty history.
+
+- [Pacer installation and trust boundary](docs/pacer-installation.md)
+- [Durable cache-policy contract](docs/cache-policy-contract.md)
+- [Native host adapter](docs/policy-adapter-contract.md)
+- [Passive observation](docs/observation-contract.md)
+- [Native usage and conservative measurement](internal/measurement/README.md)
+- [Frozen history preservation](docs/history-import.md)
+
+The `tests/lab/` scripts test an isolated CPA + fake TLS upstream, not real provider
+inference. Management and client authentication remain separate. Keep the incumbent
+CPA/plugin and CPAMP/database until migration, rollback and observation acceptance.
+
+## Historical quota-handoff documentation
+
+The remainder documents the **previous implementation**, retained for historical
+context. Its adaptive/shadow/enforce configuration is **not accepted by Pacer**;
+use the Pacer installation guide above. Old packages are not the executable path.
 
 A native [CLIProxyAPI](https://github.com/floris3456/CLIProxyAPI) plugin that
 tracks Claude/Codex credential quotas, warns active chats and coordinates quota
@@ -106,9 +130,9 @@ docker run --rm -v "$PWD:/src" -v "$PWD/.cache/go:/go" -w /src \
 python3 scripts/package.py
 ```
 
-The two CPA SDK packages are an unchanged, licensed
+The two CPA SDK packages are a licensed
 [source snapshot](third_party/cpa-sdk/README.md), with file hashes and commit
-provenance. No private CPA checkout or server configuration is needed. Tests use
+provenance, plus documented schema-7 additions in `cache_policy.go`. No private CPA checkout or server configuration is needed. Tests use
 dummy credentials. The build runs a native ABI load/register/shutdown probe.
 The release workflow builds both architectures and publishes store-compatible
 ZIP names plus checksums. It never deploys to a server.

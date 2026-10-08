@@ -16,12 +16,16 @@ for arch in ("amd64", "arm64"):
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
         for path, name in (
             (binary, binary.name),
+            (binary.parent / "pacer-state", "tools/pacer-state"),
+            (binary.parent / "history-import", "tools/history-import"),
             (root / "LICENSE", "LICENSE"),
             (root / "third_party/cpa-sdk/LICENSE", "CPA-SDK-LICENSE"),
+            (root / "internal/history/CPAMP-LICENSE", "CPAMP-LICENSE"),
+            (root / "docs/pacer-installation.md", "INSTALLATION.md"),
         ):
             item = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             item.create_system = 3
-            item.external_attr = (0o100755 if path == binary else 0o100644) << 16
+            item.external_attr = (0o100755 if path == binary or name.startswith("tools/") else 0o100644) << 16
             item.compress_type = zipfile.ZIP_DEFLATED
             output.writestr(item, path.read_bytes())
     archives.append(archive)
