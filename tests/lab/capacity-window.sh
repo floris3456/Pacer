@@ -284,9 +284,10 @@ verify() {
 	ip=$(fixture_ip)
 	check "$fixture running with address '$ip'" running "$fixture"
 	check "fixture control $control/health" curl -fsS --max-time 3 "$control/health"
+	# By address, not *.orb.local: OrbStack answers port 443 on .orb.local names with its own HTTPS proxy.
 	for name in api.anthropic.com platform.claude.com; do
 		check "fixture TLS for $name with the capacity cert" curl -fsS --max-time 3 --cacert "$certs/cert.pem" \
-			--connect-to "$name:443:pacer-upstream-capacity.orb.local:443" "https://$name/health"
+			--connect-to "$name:443:$ip:443" "https://$name/health"
 	done
 	docker exec "$cpa" cat /etc/hosts >"$tmp/hosts.current" 2>/dev/null || : >"$tmp/hosts.current"
 	hosts_lines "$ip" >"$tmp/hosts.lines"
@@ -325,6 +326,7 @@ up() {
 	if [ -n "$pending" ]; then
 		say "STAGED: $pending. Hosts and logins are not armed yet, so nothing reaches the fixture."
 		say "STAGED: next: docker restart $cpa && PACER_CAPACITY_WINDOW=1 $0 up"
+		sleep 1 # restart_pending compares whole seconds: a restart issued now must start in a later second
 		exit 0
 	fi
 	arm_hosts
