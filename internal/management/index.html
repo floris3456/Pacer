@@ -1,13 +1,116 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pacer</title>
 <style>
-:root{color-scheme:dark;font:15px/1.55 system-ui,sans-serif;background:#202123;color:#ededee}*{box-sizing:border-box}body{margin:0}header,main{max-width:1180px;margin:auto;padding:24px}header{border-bottom:1px solid #444548;display:flex;align-items:center;gap:30px}h1{font-size:23px;margin:0}h2{font-size:20px}h3{font-size:16px}nav{display:flex;gap:8px;flex-wrap:wrap}button,input,select{font:inherit;color:inherit;background:#303134;border:1px solid #626368;border-radius:5px;padding:7px 12px}button{cursor:pointer}button:hover{background:#414246}button[aria-current=page]{background:#4b5055;border-color:#a1abb4}button:disabled{opacity:.5;cursor:not-allowed}a{color:#bfd0dc}input:focus,select:focus,button:focus-visible{outline:2px solid #a5c4d9;outline-offset:2px}input[type=password]{width:min(100%,350px)}label{display:inline-flex;gap:10px;align-items:center}p{margin:10px 0}.muted,small{color:#bfc0c5}.status{border-left:3px solid #a5b4c1;padding:7px 13px;background:#2c2d30}.error{border-color:#dfa098;color:#f3c2bc}.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0}table{width:100%;border-collapse:collapse;text-align:left}th,td{border-bottom:1px solid #47484c;padding:11px 10px;vertical-align:top}th{color:#bfc0c5;font-weight:500}details{margin:18px 0;padding:12px 0;border-top:1px solid #444548}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,monospace}.table-wrap{overflow:auto}[hidden]{display:none!important}.pill{display:inline-block;background:#3b3c40;border:1px solid #616268;border-radius:4px;padding:1px 7px;font-size:12px}form{display:flex;gap:12px;align-items:center;flex-wrap:wrap}dialog{color:inherit;background:#292a2d;border:1px solid #73757b;border-radius:8px;max-width:600px;width:90%}dialog::backdrop{background:#0009}dialog label{display:flex;justify-content:space-between;margin:14px 0}dialog input{max-width:65%}@media(max-width:680px){header{align-items:flex-start;gap:15px;flex-direction:column}header,main{padding:18px}td,th{padding:9px 7px}}
+:root{--bg:#1c1c1c;--surface:#222222;--raised:#2a2a2a;--hover:#323232;--field:#181818;--line:#363636;--line-strong:#565656;--text:#e6e6e6;--muted:#a9a9a9;--focus:#d6d6d6;--err:#b8665c;--err-text:#ecb8b1;--r:2px;
+  color-scheme:dark;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text)}
+header,main{max-width:1180px;margin:auto;padding:20px}
+header{max-width:none;display:flex;align-items:center;gap:24px;padding:10px max(20px,calc(50% - 570px));border-bottom:1px solid var(--line);background:var(--surface)}
+h1{font-size:16px;font-weight:650;letter-spacing:.01em;margin:0}
+h2{font-size:16px;font-weight:650;margin:22px 0 6px}
+h3{font-size:14px;font-weight:650;margin:22px 0 6px}
+h4{font-size:13px;font-weight:650;margin:18px 0 6px}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:transparent;border-color:transparent;color:var(--muted)}
+nav button:hover{background:var(--hover);color:var(--text)}
+nav button[aria-current=page]{background:transparent;border-color:var(--line-strong);color:var(--text);font-weight:600}
+button,input,select,textarea{font:inherit;font-size:13px;color:var(--text);border:1px solid var(--line-strong);border-radius:var(--r);padding:6px 10px;min-height:32px}
+button{background:var(--raised);cursor:pointer;line-height:1.4}
+button:hover{background:var(--hover);border-color:#6a6a6a}
+button:active{background:#3a3a3a}
+input,select,textarea{background:var(--field)}
+textarea{width:100%;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+input[type=checkbox]{min-height:0;accent-color:#bdbdbd}
+button[aria-current=page]{border-color:var(--line-strong)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:disabled:hover{background:var(--raised);border-color:var(--line-strong)}
+a{color:#dcdcdc;text-decoration:underline;text-underline-offset:2px}
+input:focus,select:focus,textarea:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+input[type=password]{width:min(100%,340px)}
+label{display:inline-flex;gap:8px;align-items:center;color:var(--muted);font-size:13px}
+p{margin:8px 0}
+.muted,small{color:var(--muted)}
+p.muted{font-size:13px;max-width:92ch}
+.status{border:1px solid var(--line);border-left:2px solid var(--line-strong);padding:7px 12px;margin:10px 0;background:var(--surface);color:var(--text)}
+.error{border-color:var(--err);border-left-color:var(--err);color:var(--err-text)}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
+table{width:100%;border-collapse:collapse;text-align:left;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.02em;white-space:nowrap;border-bottom-color:var(--line-strong)}
+tbody tr:hover td{background:#262626}
+td button{min-height:26px;padding:2px 8px;margin:0 4px 4px 0;white-space:nowrap}
+caption{text-align:left;color:var(--muted);font-size:12px;padding:10px 0 6px}
+.table-wrap>table>caption{padding-left:12px}
+details{margin:14px 0;padding:8px 0 0;border-top:1px solid var(--line)}
+summary{cursor:pointer;color:var(--text);font-size:13px;padding:2px 0}
+summary:hover{color:#ffffff}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);padding:8px 10px;margin:8px 0}
+.table-wrap{overflow:auto;border:1px solid var(--line);margin:10px 0}
+.table-wrap td{overflow-wrap:anywhere;min-width:96px}
+.table-wrap td:first-child,.table-wrap th:first-child{padding-left:12px}
+.table-wrap tr:last-child td{border-bottom:0}
+[hidden]{display:none!important}
+.pill{display:inline-block;background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r);padding:0 6px;font-size:12px}
+form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+fieldset{border:1px solid var(--line);border-radius:0;padding:10px 12px;margin:10px 0}
+legend{color:var(--muted);font-size:12px;padding:0 4px}
+dialog{color:var(--text);background:var(--surface);border:1px solid var(--line-strong);border-radius:3px;max-width:600px;width:90%;padding:18px 20px}
+dialog h2{margin-top:0}
+dialog::backdrop{background:#000000b3}
+dialog label{display:flex;justify-content:space-between;margin:12px 0}
+dialog input{max-width:65%}
+/* Observation states: label text plus a distinct shape, never colour alone. */
+td[data-state]::before{content:"";display:inline-block;width:8px;height:8px;margin:0 7px 1px 0;border:1px solid currentColor;vertical-align:middle}
+td[data-state=active]::before{background:currentColor}
+td[data-state=pending]::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+td[data-state=assumed]::before{transform:rotate(45deg) scale(.85)}
+td[data-state=stale]::before{border-style:dashed;border-color:var(--muted)}
+td[data-state=unknown]::before{content:"?";width:auto;height:auto;border:1px dotted var(--muted);font-size:10px;line-height:10px;padding:0 2px;color:var(--muted)}
+td[data-state=stale],td[data-state=unknown]{color:var(--muted)}
+@media(max-width:680px){header{align-items:flex-start;gap:8px;flex-direction:column;padding:10px 14px}
+nav{margin-left:-10px}
+td button{min-height:32px;margin:0 4px 4px 0}
+main{padding:14px}
+td,th{padding:6px 8px}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
 /* The host may inject a light generic plugin theme. Pacer keeps its explicit
    neutral palette rather than mixing dark controls with inherited light text. */
-body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,code,kbd,samp{color:inherit}thead,th{background:#292a2d}pre,code,kbd,samp{background:#252629}
-#legacy-advanced caption{text-align:left;color:#bfc0c5;margin:14px 0 6px}#legacy-advanced .table-wrap{margin:12px 0}#legacy-advanced input,#legacy-advanced select{max-width:100%}#legacy-proof-dialog{max-width:1000px}#legacy-advanced td{overflow-wrap:anywhere;min-width:125px}
-.toolbar>label{min-width:0;max-width:100%;flex-wrap:wrap}.toolbar>label>input,.toolbar>label>select{min-width:0;max-width:100%}
-#forward{border:1px solid #626368;border-radius:8px;padding:18px;margin:28px 0;min-width:0}#forward input,#forward select,#forward textarea{max-width:100%;min-width:0}#forward .table-wrap{max-width:100%}#forward td{overflow-wrap:anywhere;min-width:120px}#forward pre,#forward-status,#forward-summary,#forward-loaded{overflow-wrap:anywhere}#forward h3{margin-top:0}#forward label{flex-wrap:wrap}#forward .membership{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid #626368;padding:12px 0}#forward .membership label{flex:1 1 180px}#forward .membership input{width:100%}#forward-evidence-dialog{max-width:1000px;max-height:90vh;overflow:auto}#forward-evidence-body{max-height:60vh;overflow:auto}#forward-coverage{border-color:#bfc0c5;color:#ededee}#forward :focus-visible{outline:2px solid #d8d9dc;outline-offset:2px}@media(max-width:680px){#forward{padding:12px}#forward .toolbar,#forward form{align-items:stretch}#forward .toolbar>label{width:100%}#forward .toolbar>label>input,#forward .toolbar>label>select{width:100%}}
+body{background:var(--bg);color:var(--text)}
+h1,h2,h3,h4,h5,h6,legend,table,pre,code,kbd,samp{color:inherit}
+thead,th{background:var(--raised)}
+pre,code,kbd,samp{background:var(--field)}
+
+#legacy-advanced caption{text-align:left;color:var(--muted);margin:12px 0 4px}
+#legacy-advanced .table-wrap{margin:10px 0}
+#legacy-advanced input,#legacy-advanced select{max-width:100%}
+#legacy-proof-dialog{max-width:1000px}
+#legacy-advanced td{overflow-wrap:anywhere;min-width:125px}
+
+.toolbar>label{min-width:0;max-width:100%;flex-wrap:wrap}
+.toolbar>label>input,.toolbar>label>select{min-width:0;max-width:100%}
+
+#forward{border:1px solid var(--line);border-radius:0;padding:16px;margin:24px 0;min-width:0;background:var(--surface)}
+#forward input,#forward select,#forward textarea{max-width:100%;min-width:0}
+#forward .table-wrap{max-width:100%;background:var(--bg)}
+#forward td{overflow-wrap:anywhere;min-width:120px}
+#forward pre,#forward-status,#forward-summary,#forward-loaded{overflow-wrap:anywhere}
+#forward h3{margin-top:0}
+#forward label{flex-wrap:wrap}
+#forward .membership{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:10px 0}
+#forward .membership label{flex:1 1 180px}
+#forward .membership input{width:100%}
+#forward-evidence-dialog{max-width:1000px;max-height:90vh;overflow:auto}
+#forward-evidence-body{max-height:60vh;overflow:auto}
+#forward-coverage{border-color:var(--line);border-left-color:var(--muted);color:var(--text);background:var(--raised)}
+#forward :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media(max-width:680px){#forward{padding:12px}
+#forward .toolbar,#forward form{align-items:stretch}
+#forward .toolbar>label{width:100%}
+#forward .toolbar>label>input,#forward .toolbar>label>select{width:100%}
+}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
@@ -141,7 +244,9 @@ body{background:#202123;color:#ededee}h1,h2,h3,h4,h5,h6,label,legend,table,pre,c
     const data=await response.json();if(startedGeneration!==generation)throw Error('Management connection changed');return data;
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
-  function row(target, values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value??'Unknown';tr.append(td)}el(target).append(tr);return tr}
+  const stateNames={active:'active',fresh:'active',observed:'active',current:'active',pending:'pending','awaiting-confirmation':'pending',assumed:'assumed',stale:'stale',unknown:'unknown'};
+function cellState(value){if(typeof value!=='string')return '';const parts=value.split(' · ').map(part=>part.trim().toLowerCase());return parts.includes('stale')?'stale':stateNames[parts[0]]||''}
+function row(target, values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value??'Unknown';const state=cellState(value??'Unknown');if(state)td.dataset.state=state;tr.append(td)}el(target).append(tr);return tr}
   function date(value){if(!value||String(value).startsWith('0001-'))return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
   function editModel(model){
     editing=model;
