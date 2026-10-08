@@ -25,11 +25,14 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "forward-init" {
+		return forwardInit(args[1:], os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "prepare-reports" {
 		return prepareReports(args[1:], os.Stdout)
 	}
 	if len(args) == 0 || args[0] != "init" {
-		return errors.New("usage: pacer-state init --state PATH --routes ROUTES | prepare-reports --archive PATH --output-dir DIRECTORY")
+		return errors.New("usage: pacer-state init --state PATH --routes ROUTES | prepare-reports --archive PATH --output-dir DIRECTORY | forward-init --output PATH --book-json PATH")
 	}
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	path := flags.String("state", "", "Pacer SQLite state path")

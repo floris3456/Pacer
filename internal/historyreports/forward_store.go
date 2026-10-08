@@ -8,12 +8,172 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type ForwardStore struct {
 	db        *sql.DB
 	reader    *sql.DB
 	cursorKey []byte
+}
+
+// CheckForwardPath rejects aliases to protected stores before any opening or
+// creation. Every existing component must be free of symlinks; hard-link aliases
+// to existing protected files are rejected by file identity, not string equality.
+func CheckForwardPath(path string, protected ...string) error {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return ErrInput
+	}
+	for current := path; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return ErrInput
+		}
+		if err == nil && (info.Mode()&os.ModeSymlink != 0 || current == path && !info.Mode().IsRegular()) {
+			return ErrInput
+		}
+		if current == filepath.Dir(current) {
+			break
+		}
+	}
+	info, _ := os.Stat(path)
+	for _, other := range protected {
+		if other == "" {
+			continue
+		}
+		abs, err := filepath.Abs(other)
+		if err != nil {
+			return ErrInput
+		}
+		if filepath.Clean(abs) == path {
+			return ErrInput
+		}
+		if otherInfo, err := os.Stat(other); err == nil && info != nil && os.SameFile(info, otherInfo) {
+			return ErrInput
+		}
+	}
+	return nil
+}
+
+// OpenPreparedForward is the runtime-only opener. SQLite mode=rw atomically
+// refuses an absent file. There is no create fallback, schema migration, table
+// scan, index build or initializer call, including for an existing empty file.
+func OpenPreparedForward(ctx context.Context, path string) (*ForwardStore, error) {
+	if err := CheckForwardPath(path); err != nil {
+		return nil, ErrInput
+	}
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		return nil, ErrSource
+	}
+	db, err := sql.Open("sqlite3", uri(path, "mode=rw&_synchronous=FULL&_busy_timeout=1000"))
+	if err != nil {
+		return nil, ErrSource
+	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
+	s := &ForwardStore{db: db}
+	ok := false
+	defer func() {
+		if !ok {
+			if s.reader != nil {
+				s.reader.Close()
+			}
+			db.Close()
+		}
+	}()
+	var version, mode string
+	if err = db.QueryRowContext(ctx, `SELECT version,cursor_key FROM forward_meta WHERE id=1`).Scan(&version, &s.cursorKey); err != nil || version != ForwardVersion || len(s.cursorKey) != 32 {
+		return nil, ErrSource
+	}
+	if err = db.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+		return nil, ErrSource
+	}
+	for _, name := range []string{"forward_objects", "forward_native", "forward_base_meta", "forward_base_events", "forward_links", "forward_origin_state", "forward_generations"} {
+		var n int
+		if err = db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n); err != nil || n != 1 {
+			return nil, ErrSource
+		}
+	}
+	for _, name := range []string{"forward_native_physical", "forward_native_page", "forward_base_page", "forward_object_digest"} {
+		var n int
+		if err = db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil || n != 1 {
+			return nil, ErrSource
+		}
+	}
+	for _, query := range []string{
+		`SELECT event_id,revision,sequence,sort_key,physical,started,account,provider,credential,body FROM forward_native LIMIT 0`,
+		`SELECT digest,kind,name,body FROM forward_objects LIMIT 0`,
+		`SELECT id,body,sealed,summary FROM forward_generations LIMIT 0`,
+	} {
+		rows, e := db.QueryContext(ctx, query)
+		if e != nil {
+			return nil, ErrSource
+		}
+		if e = rows.Close(); e != nil {
+			return nil, ErrSource
+		}
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		return nil, ErrSource
+	}
+	s.reader, err = sql.Open("sqlite3", uri(path, "mode=ro&_busy_timeout=1000"))
+	if err != nil {
+		return nil, ErrSource
+	}
+	s.reader.SetMaxOpenConns(2)
+	s.reader.SetMaxIdleConns(2)
+	if err = s.reader.PingContext(ctx); err != nil {
+		return nil, ErrSource
+	}
+	ok = true
+	return s, nil
+}
+
+// NativeForwardSelection validates an explicitly authorized immutable book and
+// snapshots the local profile branch. It is metadata-only. A store with a frozen
+// base requires a separately reviewed migration/runtime selection, never silent
+// omission of that base by the native-only publisher.
+func (s *ForwardStore) NativeForwardSelection(ctx context.Context, bookDigest string) (ForwardSeal, error) {
+	q := ForwardSeal{BookDigest: bookDigest}
+	var book ForwardBook
+	if err := s.object(ctx, "book", bookDigest, &book); err != nil {
+		return q, ErrSource
+	}
+	if book.Book.Policy != "profile-api-value-v3" || book.ID == "" {
+		return q, ErrSource
+	}
+	var bases int
+	if err := s.reader.QueryRowContext(ctx, `SELECT profile_revision,(SELECT count(*) FROM forward_base_meta) FROM forward_meta WHERE id=1`).Scan(&q.ProfileRevision, &bases); err != nil || bases != 0 {
+		return q, ErrSource
+	}
+	if _, _, err := s.ProfilesAt(ctx, q.ProfileRevision); err != nil {
+		return q, ErrSource
+	}
+	return q, nil
+}
+
+// PreparedForwardHead reads only the progress row and retained manifest, so a
+// runtime can expose the last sealed report while asynchronous adoption resumes.
+func (s *ForwardStore) PreparedForwardHead(ctx context.Context) (ForwardStatus, time.Time, error) {
+	status, err := s.Status(ctx)
+	if err != nil {
+		return status, time.Time{}, ErrSource
+	}
+	if status.Latest == "" {
+		return status, time.Time{}, nil
+	}
+	var body []byte
+	var sealed bool
+	if err = s.reader.QueryRowContext(ctx, `SELECT body,sealed FROM forward_generations WHERE id=?`, status.Latest).Scan(&body, &sealed); err != nil || !sealed || len(body) > 2<<20 || hash(string(body)) != status.Latest {
+		return status, time.Time{}, ErrSource
+	}
+	var m forwardManifest
+	if json.Unmarshal(body, &m) != nil || m.Version != ForwardVersion || m.Converter != ForwardConverterVersion || !validForwardTime(m.At) {
+		return status, time.Time{}, ErrSource
+	}
+	return status, m.At, nil
 }
 
 const forwardSchema = `
