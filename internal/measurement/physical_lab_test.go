@@ -109,6 +109,52 @@ func TestNativePhysicalStoredSelections(t *testing.T) {
 		t.Fatalf("native managed lifecycle missing: events=%d ttls=%v streams=%v", len(seen), ttls, streams)
 	}
 	t.Logf("native exact-cut joins: %d proofs, %d distinct physical events; 1h/5m and stream/nonstream; foreign cut refused; billing/warmth unknown", len(manifests), len(seen))
+	if os.Getenv("PACER_CHECK_LEGACY_MARKERS") == "1" {
+		var legacy []Record
+		bodies := map[string]string{}
+		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned := 0
+		err = readBodies(ctx, tx, `SELECT body FROM measurement_records ORDER BY event_id LIMIT 4097`, nil, func(raw []byte) error {
+			scanned++
+			var r Record
+			if err := json.Unmarshal(raw, &r); err != nil {
+				return err
+			}
+			if r.Native != nil && r.Activity.PrimaryPrefix {
+				legacy = append(legacy, r)
+				bodies[r.EventID] = digest(raw)
+			}
+			return nil
+		})
+		tx.Rollback()
+		if err != nil || len(legacy) == 0 || scanned > 4096 {
+			t.Fatalf("retained pre-fix marker records required: count=%d err=%v", len(legacy), err)
+		}
+		for _, old := range legacy {
+			for _, delay := range []time.Duration{time.Second, 2 * time.Hour} {
+				report, err := s.Measure(ctx, Query{Provider: old.Attribution.Provider, AccountID: old.Attribution.AccountID, Scope: "all", BookID: DefaultPriceBook().ID, Since: old.StartedAt.Add(-time.Second), AsOf: old.EndedAt.Add(delay), MaxRecords: 4096})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(report.Stretches) == 0 {
+					t.Fatal("legacy reporting omitted retained primary history")
+				}
+				for _, stretch := range report.Stretches {
+					if stretch.PrefixRef != "" || !stretch.ProtectedUntil.IsZero() || stretch.QualifyingRequests != 0 || stretch.PriorEligible || !stretch.UnknownWarmth {
+						t.Fatal("retained native Activity manufactured primary protection during reporting")
+					}
+				}
+			}
+			var raw []byte
+			if err = s.db.QueryRowContext(ctx, `SELECT body FROM measurement_records WHERE event_id=?`, old.EventID).Scan(&raw); err != nil || digest(raw) != bodies[old.EventID] {
+				t.Fatal("retained native body changed during reporting", err)
+			}
+		}
+		t.Logf("legacy native marker guard: %d retained positive bodies unchanged; public reports refuse prefix/protection before and after alleged expiry", len(legacy))
+	}
 	if after := os.Getenv("PACER_PHYSICAL_REVOKED_SNAPSHOT"); after != "" {
 		post := open(after)
 		revoked := 0

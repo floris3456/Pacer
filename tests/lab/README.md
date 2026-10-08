@@ -63,3 +63,17 @@ with an origin gap. This is not equivalent to manually inserting a gap. Preserve
 both copies and failures. Never clear faults, reset fixture history, or restore an
 older database to produce a positive result. Bind receipts to loaded artifact hashes;
 source fixtures or a skipped test do not establish native acceptance.
+
+The network-none, task-owned snapshot inspector can execute
+`physical_snapshot.py anchor|positive|revoked <unique-name.sqlite>` with the live
+state mounted **read-only** at `/state` and a private destination at `/snapshots`.
+It waits at most 70 seconds, saves through SQLite's backup API using exclusive
+0600 output, and reports facts from that saved copy. Its row/count readiness is
+only a bounded wait condition; the Go selector still must validate actual cuts.
+Failed copies are retained. `test_physical_snapshot.py` checks these SQL/readiness
+conditions without a runtime or filesystem state.
+
+Set `PACER_CHECK_LEGACY_MARKERS=1` for a lab retaining pre-fix native Activity:
+the opt-in selector additionally checks public `Measure` readback before and
+after the alleged expiry, requiring unknown warmth and no protection or prefix
+authority, while retaining old canonical body digests byte-for-byte.
