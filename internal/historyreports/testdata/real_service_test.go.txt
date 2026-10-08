@@ -1,0 +1,242 @@
+// Overlaid into the original CPAMP usagehistory package by TestGenerateRealOracle.
+// It opens the caller's scratch copy of the real backup as-is: the original Init
+// runs, but no fixture rows are inserted. The fixed pin is used verbatim as the
+// original ProfileFilter, and every case is derived from the original outputs
+// themselves (sorted, de-duplicated, then capped). Nothing here prints row data.
+package usagehistory
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
+)
+
+// Caps are recorded in real-boundary.json so a capped oracle is never mistaken
+// for an exhaustive one.
+const (
+	realProfileCap      = 20
+	realAccountCap      = 20
+	realProfileProofCap = 300
+	realProofCap        = 100
+	realForecastCap     = 50
+)
+
+// realOracleCase has the same layout as the synthetic historical-oracle.json.
+type realOracleCase struct {
+	Name, View, Window, Kind string
+	Filter                   ProfileFilter
+	Quota                    *QuotaUsageFilter `json:",omitempty"`
+	Output                   json.RawMessage
+}
+
+// realSelect keeps non-empty unique ids in ascending order and applies the cap.
+func realSelect(ids []string, limit int) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func TestPacerRealServiceOracle(t *testing.T) {
+	out, db, pinPath := os.Getenv("PACER_REAL_ORACLE_OUT"), os.Getenv("PACER_REAL_DB"), os.Getenv("PACER_REAL_PIN")
+	if out == "" || db == "" || pinPath == "" {
+		t.Fatal("explicit output, scratch DB and pin required")
+	}
+	pinBytes, e := os.ReadFile(pinPath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Strict decoding: an unknown pin key is a configuration error, not a no-op.
+	dec := json.NewDecoder(bytes.NewReader(pinBytes))
+	dec.DisallowUnknownFields()
+	var base ProfileFilter
+	if e = dec.Decode(&base); e != nil {
+		t.Fatal("invalid pin")
+	}
+	ctx := context.Background()
+	st, e := store.Open(db)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer st.Close()
+	s := New(st, nil)
+	if e = s.Init(ctx); e != nil {
+		t.Fatal(e)
+	}
+
+	var cases []realOracleCase
+	add := func(c realOracleCase, v any) {
+		c.Output = encode(v)
+		cases = append(cases, c)
+	}
+
+	// Base profiles report; its ids drive every other profile/account/window case.
+	profiles, e := s.ProfileReport(ctx, base)
+	if e != nil {
+		t.Fatal(e)
+	}
+	add(realOracleCase{Name: "base", View: "profiles", Filter: base}, profiles)
+	var cardIDs, credentialIDs, profileWindowIDs []string
+	for _, c := range profiles.Cards {
+		cardIDs = append(cardIDs, c.ID)
+	}
+	for _, c := range profiles.Credentials {
+		credentialIDs = append(credentialIDs, c.ID)
+	}
+	for _, w := range profiles.Windows {
+		profileWindowIDs = append(profileWindowIDs, w.ID)
+	}
+	accountIDs := realSelect(credentialIDs, realAccountCap)
+	for _, id := range realSelect(cardIDs, realProfileCap) {
+		f := base
+		f.Profile = id
+		r, e := s.ProfileReport(ctx, f)
+		if e != nil {
+			t.Fatal("profile case", e)
+		}
+		add(realOracleCase{Name: "profile-" + id, View: "profiles", Filter: f}, r)
+	}
+	for _, id := range accountIDs {
+		f := base
+		f.Account = id
+		r, e := s.ProfileReport(ctx, f)
+		if e != nil {
+			t.Fatal("account case", e)
+		}
+		add(realOracleCase{Name: "account-" + id, View: "profiles", Filter: f}, r)
+	}
+	for _, id := range realSelect(profileWindowIDs, realProfileProofCap) {
+		p, e := s.ProfileProof(ctx, id, base)
+		if e != nil {
+			t.Fatal("profile proof case", e)
+		}
+		add(realOracleCase{Name: "window-" + id, View: "profile-proof", Window: id, Filter: base}, p)
+	}
+
+	// Unfiltered history drives the history-proof window set.
+	var historyWindowIDs []string
+	for _, kind := range []string{"", "5h", "weekly"} {
+		name := kind
+		if name == "" {
+			name = "all"
+		}
+		r, e := s.Report(ctx, "", kind, 0, 0, base.APIKey)
+		if e != nil {
+			t.Fatal("history case", e)
+		}
+		if kind == "" {
+			for _, w := range r.Windows {
+				historyWindowIDs = append(historyWindowIDs, w.ID)
+			}
+		}
+		add(realOracleCase{Name: "history-" + name, View: "history", Kind: kind, Filter: base}, r)
+	}
+	for _, id := range realSelect(historyWindowIDs, realProofCap) {
+		p, e := s.ProofAt(ctx, id, base.Through, base.ObservationsThrough, base.At, base.APIKey)
+		if e != nil {
+			t.Fatal("history proof case", e)
+		}
+		add(realOracleCase{Name: "proof-" + id, View: "history-proof", Window: id, Filter: base}, p)
+	}
+
+	// Quota: current and history for the base pin, then history per capped account.
+	for _, period := range []string{"current", "history"} {
+		f := QuotaUsageFilter{ProfileFilter: base, Period: period}
+		r, e := s.QuotaUsage(ctx, f)
+		if e != nil {
+			t.Fatal("quota case", e)
+		}
+		add(realOracleCase{Name: "quota-" + period, View: "quota", Filter: base, Quota: &f}, r)
+	}
+	for _, id := range accountIDs {
+		f := QuotaUsageFilter{ProfileFilter: base, Period: "history"}
+		f.Account = id
+		r, e := s.QuotaUsage(ctx, f)
+		if e != nil {
+			t.Fatal("quota account case", e)
+		}
+		add(realOracleCase{Name: "quota-account-" + id, View: "quota", Filter: base, Quota: &f}, r)
+	}
+
+	// Forecast windows come from the stored forecast rows, the only source that
+	// names every window with forecasts (not only those visible in a report).
+	rows, e := s.db.QueryContext(ctx, `SELECT DISTINCT window_id FROM analytics_forecasts`)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var forecastWindowIDs []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			t.Fatal(e)
+		}
+		forecastWindowIDs = append(forecastWindowIDs, id)
+	}
+	if e = rows.Err(); e != nil {
+		rows.Close()
+		t.Fatal(e)
+	}
+	rows.Close()
+	for _, id := range realSelect(forecastWindowIDs, realForecastCap) {
+		ledger, e := s.forecastEvidence(ctx, id, base)
+		if e != nil {
+			t.Fatal("forecast case", e)
+		}
+		add(realOracleCase{Name: "forecast-" + id, View: "forecasts", Window: id, Filter: base}, ledger)
+	}
+
+	raw, e := json.MarshalIndent(cases, "", "  ")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(out, "real-oracle.json"), append(raw, '\n'), 0600); e != nil {
+		t.Fatal(e)
+	}
+	counts := map[string]int{}
+	for _, c := range cases {
+		counts[c.View]++
+	}
+	meta, e := json.MarshalIndent(map[string]any{
+		"source_commit": os.Getenv("PACER_REAL_SOURCE_SHA"),
+		"pin":           base,
+		"cases":         len(cases),
+		"case_counts":   counts,
+		"caps": map[string]int{
+			"profiles":      realProfileCap,
+			"accounts":      realAccountCap,
+			"profile_proof": realProfileProofCap,
+			"history_proof": realProofCap,
+			"forecasts":     realForecastCap,
+		},
+		"case_sources": map[string]string{
+			"profiles":      "profile cards and credentials of the base profiles report",
+			"profile_proof": "windows of the base profiles report",
+			"history_proof": "windows of the unfiltered history report",
+			"quota":         "current and history for base; history per capped account",
+			"forecasts":     "distinct analytics_forecasts.window_id",
+		},
+	}, "", "  ")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(out, "real-boundary.json"), append(meta, '\n'), 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Logf("%d original cases written", len(cases))
+}

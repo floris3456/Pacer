@@ -1,0 +1,112 @@
+// Overlaid into original controllers by TestGenerateRealOracle. In-memory HTTP
+// recorders only: no listening server, network or external auth. The case list
+// comes from real-oracle.json written by the service overlay. The caller's
+// scratch DB receives one admin credential row through the test helper, which
+// the reports never read.
+package usagehistory
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/app"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/config"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/adminauth"
+	history "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/usagehistory"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/testutil"
+)
+
+func TestPacerRealExportOracle(t *testing.T) {
+	out, db := os.Getenv("PACER_REAL_ORACLE_OUT"), os.Getenv("PACER_REAL_DB")
+	if out == "" || db == "" {
+		t.Fatal("explicit output and scratch DB required")
+	}
+	raw, e := os.ReadFile(filepath.Join(out, "real-oracle.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var cases []struct {
+		Name, View, Window, Kind string
+		Filter                   history.ProfileFilter
+		Quota                    *history.QuotaUsageFilter
+	}
+	if e = json.Unmarshal(raw, &cases); e != nil {
+		t.Fatal(e)
+	}
+	st, e := store.Open(db)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer st.Close()
+	testutil.EnsureAdminCredential(t, st)
+	s := history.New(st, nil)
+	if e = s.Init(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	h := Handler{App: &app.Context{UsageHistoryService: s, AdminAuthService: adminauth.New(config.Config{}, st)}}
+	outputs := map[string]string{}
+	for _, item := range cases {
+		// The forecasts view has no controller export in the original API.
+		if item.View == "forecasts" {
+			continue
+		}
+		var filter any = item.Filter
+		if item.Quota != nil {
+			filter = item.Quota
+		}
+		raw, _ := json.Marshal(filter)
+		var fields map[string]any
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.UseNumber()
+		if e = d.Decode(&fields); e != nil {
+			t.Fatal(e)
+		}
+		q := url.Values{}
+		for k, v := range fields {
+			q.Set(k, fmt.Sprint(v))
+		}
+		if item.Window != "" {
+			q.Set("window", item.Window)
+		}
+		if item.Kind != "" {
+			q.Set("kind", item.Kind)
+		}
+		for _, format := range []string{"json", "csv"} {
+			q.Set("format", format)
+			w := httptest.NewRecorder()
+			request := httptest.NewRequest("GET", "/synthetic?"+q.Encode(), nil)
+			request.Header.Set("Authorization", "Bearer "+testutil.AdminKey)
+			switch item.View {
+			case "profiles", "profile-proof":
+				h.Profiles(w, request)
+			case "history", "history-proof":
+				h.Handle(w, request)
+			case "quota":
+				h.quotaUsage(w, request)
+			default:
+				t.Fatal("unknown view", item.View)
+			}
+			// Status only: bodies can contain real account labels and are never logged.
+			if w.Code != 200 {
+				t.Fatalf("%s export returned status %d", item.View, w.Code)
+			}
+			outputs[item.View+"/"+item.Name+"/"+format] = w.Body.String()
+		}
+	}
+	raw, e = json.MarshalIndent(outputs, "", "  ")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(out, "real-exports.json"), append(raw, '\n'), 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Logf("%d original controller export responses written", len(outputs))
+}
