@@ -1,0 +1,12 @@
+{
+  "type": "claude",
+  "access_token": "sk-ant-oat01-pacer-capacity-b",
+  "refresh_token": "sk-ant-ort01-pacer-capacity-b",
+  "expired": "2027-06-01T00:00:00Z",
+  "email": "cap-b@example.invalid",
+  "claude_device_ids": [
+    "81564afc23f7294e0760595513fde3106f381be2760ac675cef1e5b2703843a5"
+  ],
+  "disabled": false,
+  "prefix": "cap-b"
+}
