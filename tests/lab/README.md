@@ -104,7 +104,11 @@ separate attempt domain; the original `upstream.py` is never edited or restarted
    `unknown_account_ref_tuple`, so the originals must be parked.
 2. `check-capacity.py phase1` (~35 min): cases a–e in parallel, one account each.
 3. On pass: `docker restart pacer-lab-cpa`, `capacity-window.sh up` within ~20 s,
-   then `check-capacity.py phase2` within ~45 min (~35 min run).
+   then `check-capacity.py phase2` within ~1.5 h (~35 min run; readback keeps 8 intervals).
+   Phase 2's clean interval also expects `carry_in_unproven` + `source_not_enrolled`
+   when no request reached the account between the restart and s1. CPA enrols a
+   Claude source only on its first dispatch per process. A rerun after a failed
+   phase 2 takes the other branch, because the first run's requests enrolled them.
 4. `check-capacity.py phase3` (~35 min), then `capacity-window.sh down` and restore
    any Pacer state snapshot (the run adds `capacity-evidence.sqlite` rows).
 
