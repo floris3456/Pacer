@@ -146,7 +146,6 @@ func (s *Service) BuildQuotaFacts(ctx context.Context, f ProfileWorkspaceFilter)
 	if err != nil {
 		return out, err
 	}
-	acc := newFactsAccumulator(&out)
 	for _, a := range accounts {
 		if err = ctx.Err(); err != nil {
 			return out, err
@@ -167,45 +166,56 @@ func (s *Service) BuildQuotaFacts(ctx context.Context, f ProfileWorkspaceFilter)
 		if len(events) > 0 {
 			cred.First, cred.Last = events[0].Started, events[len(events)-1].Started
 		}
-		out.Credentials = append(out.Credentials, cred)
-		acc.addAccount(a, events, obs)
+		part := AccountFactsFor(&out, a, events, obs)
+		part.Credential = cred
+		out.AddAccount(part)
 	}
-	acc.finish()
 	return out, nil
 }
 
-// factsAccumulator is BuildQuotaFacts' per-account step, shared with the live
-// (post-H) build: buckets and windows from one account's valued events (sorted
-// by start) and meter readings, at out.Filter.At with out.Config/PriceBook.
-type factsAccumulator struct {
-	out         *QuotaFacts
-	profiles    []Profile
-	unassigned  int
-	cardIDs     []string
-	buckets     map[string]*FactBucket
-	bucketOrder []string
+// AccountFacts is one account's share of QuotaFacts. Accounts are independent,
+// so a live build can recompute only accounts with new evidence and append the
+// rest unchanged; appending parts in account order reproduces BuildQuotaFacts.
+type AccountFacts struct {
+	Credential     ProfileCredential `json:"credential"`
+	Unassigned     bool              `json:"unassigned"`
+	OrderSensitive bool              `json:"order_sensitive"`
+	NextTransition int64             `json:"next_transition"`
+	Buckets        []FactBucket      `json:"buckets"`
+	Windows        []FactWindow      `json:"windows"`
 }
 
-func newFactsAccumulator(out *QuotaFacts) *factsAccumulator {
-	profiles := out.Config.Profiles
-	acc := &factsAccumulator{out: out, profiles: profiles, unassigned: len(profiles), cardIDs: make([]string, 0, len(profiles)+1), buckets: map[string]*FactBucket{}}
+// AddAccount appends one account's facts.
+func (q *QuotaFacts) AddAccount(p AccountFacts) {
+	q.Credentials = append(q.Credentials, p.Credential)
+	if p.Unassigned {
+		q.UnassignedPeriods = append(q.UnassignedPeriods, ProfileMembership{Account: p.Credential.Account.ID})
+	}
+	q.OrderSensitive = q.OrderSensitive || p.OrderSensitive
+	if p.NextTransition != 0 && (q.NextTransition == 0 || p.NextTransition < q.NextTransition) {
+		q.NextTransition = p.NextTransition
+	}
+	q.Buckets = append(q.Buckets, p.Buckets...)
+	q.Windows = append(q.Windows, p.Windows...)
+}
+
+// AccountFactsFor is BuildQuotaFacts' per-account step: buckets and windows
+// from one account's valued events (sorted by start) and meter readings, at
+// frame.Filter.At with frame.Config and frame.PriceBook. The credential is the
+// caller's.
+func AccountFactsFor(frame *QuotaFacts, a Account, events []Event, obs []Observation) AccountFacts {
+	f := frame.Filter
+	part := AccountFacts{Credential: ProfileCredential{Account: a}, Buckets: []FactBucket{}, Windows: []FactWindow{}}
+	out := frame
+	profiles := frame.Config.Profiles
+	unassigned := len(profiles)
+	cardIDs := make([]string, 0, unassigned+1)
 	for _, p := range profiles {
-		acc.cardIDs = append(acc.cardIDs, p.ID)
+		cardIDs = append(cardIDs, p.ID)
 	}
-	acc.cardIDs = append(acc.cardIDs, "unassigned")
-	return acc
-}
-
-func (acc *factsAccumulator) finish() {
-	for _, key := range acc.bucketOrder {
-		acc.out.Buckets = append(acc.out.Buckets, *acc.buckets[key])
-	}
-	acc.bucketOrder = nil
-}
-
-func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observation) {
-	out, f := acc.out, acc.out.Filter
-	profiles, unassigned, cardIDs, buckets := acc.profiles, acc.unassigned, acc.cardIDs, acc.buckets
+	cardIDs = append(cardIDs, "unassigned")
+	buckets := map[string]*FactBucket{}
+	bucketOrder := []string{}
 	belongs := func(index int, at int64) bool {
 		if index < unassigned {
 			return quotaProfileContains(out.Config, profiles[index], a.ID, at)
@@ -232,7 +242,7 @@ func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observa
 		cards := cardsAt(e.Started)
 		eventCards[n] = cards
 		if e.Started <= 0 {
-			out.OrderSensitive = true
+			part.OrderSensitive = true
 		}
 		if hasCard(cards, unassigned) {
 			unassignedAccount = true
@@ -242,14 +252,12 @@ func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observa
 		if b == nil {
 			b = &FactBucket{Account: a.ID, Day: time.UnixMilli(e.Started).UTC().Format("2006-01-02"), Model: e.Model, Key: e.APIKeyHash, Cards: cards, First: e.Started, Last: e.Started}
 			buckets[key] = b
-			acc.bucketOrder = append(acc.bucketOrder, key)
+			bucketOrder = append(bucketOrder, key)
 		}
 		b.First, b.Last = min(b.First, e.Started), max(b.Last, e.Started)
 		b.Totals.add(e)
 	}
-	if unassignedAccount {
-		out.UnassignedPeriods = append(out.UnassignedPeriods, ProfileMembership{Account: a.ID})
-	}
+	part.Unassigned = unassignedAccount
 
 	derived := deriveValuationWindows(a, obs, events, f.At, out.PriceBook)
 	latest := map[string]string{}
@@ -265,8 +273,8 @@ func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observa
 			continue
 		}
 		for _, at := range []int64{w.Start, w.Reset} {
-			if at > f.At && (out.NextTransition == 0 || at < out.NextTransition) {
-				out.NextTransition = at
+			if at > f.At && (part.NextTransition == 0 || at < part.NextTransition) {
+				part.NextTransition = at
 			}
 		}
 		windowEvents := []Event{}
@@ -339,8 +347,12 @@ func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observa
 			}
 			fw.Cards = append(fw.Cards, FactCard{Index: i, Normalization: normalization(id), CurrentAtPin: fw.Latest && belongs(i, f.At)})
 		}
-		out.Windows = append(out.Windows, fw)
+		part.Windows = append(part.Windows, fw)
 	}
+	for _, key := range bucketOrder {
+		part.Buckets = append(part.Buckets, *buckets[key])
+	}
+	return part
 }
 
 // filteredNormalization is normalizeProfileWindow's result under a key or model
