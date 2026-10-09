@@ -86,65 +86,44 @@ h1,h2,h3,h4,h5,h6,legend,table,pre,code,kbd,samp{color:inherit}
 thead,th{background:var(--raised)}
 pre,code,kbd,samp{background:var(--field)}
 
-#legacy-advanced caption{text-align:left;color:var(--muted);margin:12px 0 4px}
-#legacy-advanced .table-wrap{margin:10px 0}
-#legacy-advanced input,#legacy-advanced select{max-width:100%}
-#legacy-proof-dialog{max-width:1000px}
-#legacy-advanced td{overflow-wrap:anywhere;min-width:125px}
-
-.toolbar>label{min-width:0;max-width:100%;flex-wrap:wrap}
-.toolbar>label>input,.toolbar>label>select{min-width:0;max-width:100%}
-
-#forward{border:1px solid var(--line);border-radius:0;padding:16px;margin:24px 0;min-width:0;background:var(--surface)}
-#forward input,#forward select,#forward textarea{max-width:100%;min-width:0}
-#forward .table-wrap{max-width:100%;background:var(--bg)}
-#forward td{overflow-wrap:anywhere;min-width:120px}
-#forward pre,#forward-status,#forward-summary,#forward-loaded{overflow-wrap:anywhere}
-#forward h3{margin-top:0}
-#forward label{flex-wrap:wrap}
-#forward .membership{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:10px 0}
-#forward .membership label{flex:1 1 180px}
-#forward .membership input{width:100%}
-#forward-evidence-dialog{max-width:1000px;max-height:90vh;overflow:auto}
-#forward-evidence-body{max-height:60vh;overflow:auto}
-#forward-coverage{border-color:var(--line);border-left-color:var(--muted);color:var(--text);background:var(--raised)}
-#forward :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-@media(max-width:680px){#forward{padding:12px}
-#forward .toolbar,#forward form{align-items:stretch}
-#forward .toolbar>label{width:100%}
-#forward .toolbar>label>input,#forward .toolbar>label>select{width:100%}
-}
-#compare-panel{border:1px solid var(--line);border-radius:0;padding:16px;margin:18px 0;background:var(--surface)}
-#compare-panel h3{margin-top:0}
-.compare-toggle{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
-.compare-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
-.compare-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
-.compare-toggle button+button{border-left:1px solid var(--line-strong)}
-.compare-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}
-.compare-card{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
-.compare-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;background:transparent;color:var(--text);border:0}
-.compare-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
-.compare-profile-name{font-weight:600;font-size:14px}
-.compare-meta{color:var(--muted);font-size:12px}
-.compare-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.compare-columns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.compare-col{display:flex;flex-direction:column;gap:4px;min-width:0}
-.compare-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
-.compare-big-num{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3;color:var(--text)}
-.compare-unavailable{color:var(--muted);font-weight:600}
-.compare-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.compare-older-btn{align-self:flex-start;font-size:11px;min-height:22px;padding:1px 6px;margin-top:4px}
-.compare-older-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
-.compare-older-item{background:var(--raised);border:1px solid var(--line);padding:3px 6px;text-align:left;cursor:pointer;color:var(--text);border-radius:var(--r);font-size:11px}
-.compare-older-item:hover{background:var(--hover);border-color:var(--line-strong)}
-#compare-footer{margin-top:10px;font-size:12px}
-#compare-footer p{margin:4px 0}
+.usage-toggle{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
+.usage-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
+.usage-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
+.usage-toggle button+button{border-left:1px solid var(--line-strong)}
+.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}
+.usage-card{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.usage-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;background:transparent;color:var(--text);border:0}
+.usage-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
+.usage-profile-name{font-weight:600;font-size:14px}
+.usage-meta{color:var(--muted);font-size:12px}
+.usage-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.usage-columns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.usage-col{display:flex;flex-direction:column;gap:4px;min-width:0}
+.usage-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
+.usage-rate-big{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3;color:var(--text)}
+.usage-rate-unavailable{color:var(--muted);font-weight:600}
+.usage-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.usage-model-mix{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.usage-col-actions{display:flex;gap:6px;margin-top:6px}
+.usage-col-actions button{min-height:24px;padding:2px 8px;font-size:12px}
+.usage-other-limits{font-size:12px;margin:6px 0;border-top:1px solid var(--line);padding-top:4px}
+#usage-technical{margin:24px 0 16px;border-top:1px solid var(--line);padding-top:12px}
+#usage-technical>summary{font-weight:600;font-size:14px}
+.usage-tech-section{margin:16px 0;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.usage-tech-section:last-child{border-bottom:none}
+.usage-tech-section h4{margin:10px 0 6px;font-size:13px;font-weight:650}
+#usage-inspect-dialog,#usage-windows-dialog{max-width:760px;width:95%;max-height:90vh;overflow:auto}
+#usage-windows-dialog table,#usage-inspect-dialog table{margin:10px 0}
+tr.usage-window-excluded td{color:var(--muted);opacity:.7}
+.usage-window-note{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px}
+.usage-cost-split{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);margin:8px 0}
+.usage-key-shares{margin:8px 0;font-size:12px}
+.usage-models-total td{font-weight:600}
 @media(max-width:680px){
-#compare-panel{padding:10px}
-#compare-panel .toolbar{align-items:stretch}
-#compare-panel .toolbar>label{width:100%;flex-wrap:wrap}
-#compare-panel .toolbar>label>input,#compare-panel .toolbar>label>select{width:100%;min-width:0}
-.compare-columns{grid-template-columns:1fr}
+#usage .toolbar{align-items:stretch}
+#usage .toolbar>label{width:100%;flex-wrap:wrap}
+#usage .toolbar>label>input,#usage .toolbar>label>select{width:100%;min-width:0}
+.usage-columns{grid-template-columns:1fr}
 }
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
@@ -153,13 +132,20 @@ pre,code,kbd,samp{background:var(--field)}
 <div id="message" role="status" class="status" hidden></div>
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
-<section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p><section id="compare-panel" aria-labelledby="compare-title"><h3 id="compare-title">Compare profiles</h3><div class="toolbar"><label>API key <select id="compare-key"><option value="">All keys</option></select></label><label>From <input id="compare-from" type="date"></label><label>Through <input id="compare-through" type="date"></label><div class="compare-toggle" role="group" aria-label="Statistics view"><button type="button" id="compare-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="compare-mode-average" aria-pressed="false">Average</button></div></div><div id="compare-status" role="status" class="status" hidden></div><div id="compare-grid" class="compare-grid"></div><div id="compare-footer" class="muted"></div></section><div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div><details><summary>History and valuation coverage</summary><pre id="history"></pre></details>
-<section id="forward" aria-labelledby="forward-title">
-<h3 id="forward-title">Forward recorded usage</h3>
-<p>Native recorded attempts at a sealed checkpoint. Load captures one generation and selection; editing controls or refreshing status does not change that pin.</p>
-<p id="forward-coverage" class="status">Capacity and physical coverage are unknown. Recorded usage is not complete billing, provider quota, cache warmth or a forecast. API-equivalent value uses the pinned original calculation, not your provider bill.</p>
+<section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p>
+<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div></div>
+<div id="usage-status" role="status" class="status" hidden></div>
+<div id="usage-grid" class="usage-grid"></div>
+<h3>Accounts right now</h3>
+<div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div>
+<details id="usage-technical"><summary>Technical details</summary>
+<div class="usage-tech-section"><h4>Data sources</h4>
+<pre id="history"></pre>
 <div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status" style="white-space:pre-line">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
 <details><summary>Exact status receipt · separate, non-atomic metadata</summary><pre id="forward-status-receipt"></pre></details>
+<p id="forward-coverage" class="status">Capacity and physical coverage are unknown. Recorded usage is not complete billing, provider quota, cache warmth or a forecast. API-equivalent value uses the pinned original calculation, not your provider bill.</p>
+</div>
+<div class="usage-tech-section"><h4>Request log</h4>
 <form id="forward-form" class="toolbar">
 <label>Native profile <select id="forward-profile"><option value="">All native recorded usage</option><option value="unassigned">Unassigned native usage</option></select></label>
 <label>From UTC (inclusive) <input id="forward-from" type="date"></label><label>Before UTC (exclusive) <input id="forward-to" type="date"></label>
@@ -168,12 +154,10 @@ pre,code,kbd,samp{background:var(--field)}
 <button id="forward-load">Load new pinned report</button></form>
 <p class="muted">Blank start includes retained native origins; blank end uses the saved report horizon T. Dates select request starts in [from, min(to, T)), at UTC midnight. Cumulative revisions do not prove physical consumption within that interval. Accounts use native references, not legacy profile/key certificates.</p>
 <p id="forward-loaded" role="status">No forward pin loaded.</p><p id="forward-summary"></p><p id="forward-reasons"></p>
-<div class="toolbar"><button id="forward-json" type="button" disabled>Download pinned summary JSON</button><button id="forward-csv" type="button" disabled>Download request CSV page</button><button id="forward-csv-next" type="button" disabled>Download next CSV page</button><span id="forward-download-status" role="status"></span></div>
-<p class="muted">CSV downloads contain at most 50 rows per page, each with its own header. They are not a whole-ledger export. JSON is the bounded pinned summary; oversized results are reported as errors.</p>
-<details><summary>CSV continuation at this pin</summary><pre id="forward-csv-cursor"></pre></details>
 <div class="toolbar"><button id="forward-first" type="button" disabled>First request page</button><button id="forward-next" type="button" disabled>Next 50 requests</button><span id="forward-page"></span></div>
 <div class="table-wrap"><table><caption>Recorded requests · immutable selection</caption><thead><tr><th>Started UTC / record</th><th>Source / account / model</th><th>API-equivalent value</th><th>Actual writes</th><th>Selected / effective policy</th><th>Quality / coverage</th><th>Evidence</th></tr></thead><tbody id="forward-requests"></tbody></table></div>
-<details><summary>Exact forward pin and publication provenance</summary><pre id="forward-pin"></pre><pre id="forward-provenance"></pre></details>
+</div>
+<div class="usage-tech-section"><h4>Profiles &amp; accounts</h4>
 <details id="forward-profile-editor"><summary>Advanced · dated native profiles</summary>
 <p>These account memberships select recorded usage by UTC dates. Display key groups are separate metadata, not dated billing proof. Archived profiles remain selectable. Books, pricing, origin authority and coverage cannot be edited here.</p>
 <form id="forward-profile-read" class="toolbar"><label>Exact profile revision <input id="forward-profile-revision" inputmode="numeric" pattern="0|[1-9][0-9]*" maxlength="19" required></label><button id="forward-profile-load">Read this revision</button></form>
@@ -184,47 +168,16 @@ pre,code,kbd,samp{background:var(--field)}
 <p class="muted">Start/end are canonical UTC instants with millisecond precision, for example 2026-10-08T00:00:00Z. Start is inclusive; end is exclusive or blank for open-ended. An absent legacy membership list is not silently converted: enter the desired dated selection explicitly.</p>
 <div class="toolbar"><button id="forward-profile-save" disabled>Save explicit memberships</button><button id="forward-profile-new" type="button">Clear editor for a new profile</button></div></form>
 <details><summary>Retained bindings and profile metadata</summary><pre id="forward-profile-metadata"></pre></details>
-</details></section>
-<h3>Frozen history &amp; profile comparison</h3><div id="report-status" class="status">Load a prepared historical snapshot. This is separate from current native observations.</div>
-<form id="report-form" class="toolbar"><label>Profile <select id="report-profile"><option value="">All history</option><option value="unassigned">Unassigned history</option></select></label><label>From UTC <input type="date" id="report-from"></label><label>Before UTC <input type="date" id="report-to"></label><label>Model <input id="report-model" maxlength="256" placeholder="All models"></label><label>Key fingerprints <input id="report-keys" maxlength="6499" placeholder="Optional SHA-256 list"></label><button id="report-load">Load report</button></form>
-<p class="muted">Dates are start-inclusive and end-exclusive for requests. Overlapping whole quota windows retain their original attribution. Dated account profiles are not display groups. Missing prices, assumptions and boundary uncertainty remain visible.</p>
-<div id="report-totals"></div><div class="toolbar"><button id="report-json" disabled>Download JSON</button><button id="report-csv" disabled>Download daily CSV</button><button id="compare-csv" disabled>Download comparison CSV</button></div>
-<div class="table-wrap"><table><thead><tr><th>Profile</th><th>Requests</th><th>API-equivalent value</th><th>Write evidence</th></tr></thead><tbody id="report-profiles"></tbody></table></div>
-<details><summary>Dated memberships, assumptions and exact report pin</summary><pre id="report-provenance"></pre></details>
-<details><summary>Replay a saved report pin</summary><p class="muted">Paste the exported filter or report JSON. Replaying a pin ignores new filter fields and never advances its checkpoint.</p><textarea id="report-pin-input" rows="4" maxlength="60000" style="width:100%;color:inherit;background:#292a2d" aria-label="Saved report pin"></textarea><button id="report-replay" type="button">Replay saved pin</button></details>
-<h3>Daily usage</h3><div class="table-wrap"><table><thead><tr><th>UTC day</th><th>Requests</th><th>API-equivalent value</th><th>Write evidence</th></tr></thead><tbody id="report-daily"></tbody></table></div>
-<h3>Quota windows</h3><div class="toolbar"><label>State <select id="report-window-state"><option value="completed">Completed</option><option value="current">Current at checkpoint</option><option value="all">All, including uncertain</option></select></label><label>Kind <select id="report-window-kind"><option value="">All windows</option><option value="5h">5-hour</option><option value="weekly">Weekly</option></select></label><button id="report-window-load" disabled>Show windows</button><button id="report-window-next" disabled>Next windows</button><span id="report-window-count" class="muted"></span></div>
-<div class="table-wrap"><table><thead><tr><th>Account / window</th><th>Reset / attribution end</th><th>State / completion</th><th>Selected value / writes</th><th>Measured $ per %</th><th></th></tr></thead><tbody id="report-windows"></tbody></table></div>
-<h3>Requests</h3><div class="toolbar"><button id="report-request-prev" disabled>Previous requests</button><button id="report-request-next" disabled>Next requests</button><span id="report-request-page" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Started UTC</th><th>Account / model</th><th>API-equivalent value</th><th>Write evidence / outcome</th></tr></thead><tbody id="report-requests"></tbody></table></div>
-<details id="legacy-advanced"><summary>Legacy &amp; Scenarios · advanced frozen history</summary>
-<p>Read the older profile accounting, exhaustion estimates and retained forecast ledger, or compare subscription-tier scenarios. These views keep their original calculation rules. They do not refresh providers, issue forecasts or merge current native usage.</p>
-<div id="legacy-status" class="status" role="status">Load a frozen view to check historical preparation.</div>
-<form id="legacy-form" class="toolbar">
-<label>View <select id="legacy-view"><option value="profiles">Legacy profile totals</option><option value="history">Exhaustion history</option><option value="quota">Subscription scenarios</option></select></label>
-<label>Profile <select id="legacy-profile"><option value="">All history</option><option value="unassigned">Unassigned history</option></select></label>
-<label>From UTC <input type="date" id="legacy-from"></label><label>Before UTC <input type="date" id="legacy-to"></label>
-<label>Model <input id="legacy-model" maxlength="256" placeholder="All models"></label>
-<label>Key fingerprints <input id="legacy-keys" maxlength="6499" placeholder="SHA-256 list; never keys"></label>
-<label>Kind (history / scenarios) <select id="legacy-kind"><option value="">All</option><option value="5h">5-hour</option><option value="weekly">Weekly</option></select></label>
-<label>Scenario period <select id="legacy-period"><option value="current">Current at checkpoint</option><option value="history">Historical windows</option></select></label>
-<label>Tier rules <select id="legacy-basis"><option value="today">Pinned catalog benchmarks</option><option value="then">Rules valid then</option></select></label>
-<label><input type="checkbox" id="legacy-gateway">Assume gateway-only quota use (scenarios)</label>
-<button id="legacy-load" data-legacy-action>Load frozen view</button></form>
-<p class="muted">Dates are UTC, start-inclusive and end-exclusive. Exhaustion history supports dates and key fingerprints; clear profile/model filters for that view. Kind and tier controls apply only to their labeled views. Downloads retain the last loaded pin, even if controls are edited.</p>
-<p id="legacy-summary"></p><div class="toolbar"><button id="legacy-json" data-legacy-action disabled>Download view JSON</button><button id="legacy-csv" data-legacy-action disabled>Download view CSV</button></div>
-<div class="table-wrap"><table><caption>Legacy selected profile contributions · captured prices</caption><thead><tr><th>Profile</th><th>Requests / failed</th><th>Captured cost</th><th>Missing price requests</th></tr></thead><tbody id="legacy-profiles"></tbody></table></div>
-<div class="table-wrap"><table><caption>Frozen windows and exhaustion evidence</caption><thead><tr><th>Account / profile / window</th><th>State / source coverage</th><th>Provider-observed use / time</th><th>Captured cost / requests</th><th>Reset / attribution end</th><th>Exhaustion / estimator bounds</th><th>Uncertainty / reason</th><th>Details</th></tr></thead><tbody id="legacy-windows"></tbody></table></div>
-<section id="legacy-scenarios" hidden><h4>Subscription comparison</h4>
-<p class="muted">Catalog prices and multipliers are frozen source benchmarks, not current offers. Session multipliers do not establish weekly budgets. Outside applications may contribute to provider meters. Gateway-only and custom capacity ratios are explicit assumptions, not observations.</p>
-<form id="legacy-scenario-form" class="toolbar"><label>One window <select id="legacy-scenario-window"><option value="">Select a loaded window</option></select></label><label>Source plan <select id="legacy-source-plan"><option value="">Use captured assignment</option></select></label><label>Target plan <select id="legacy-target-plan"><option value="">Published comparisons</option></select></label><label>Assumed target / source capacity <input id="legacy-ratio" type="number" min="0" max="10000" step="any" placeholder="Blank: published ratios"></label><button id="legacy-apply" data-legacy-action disabled>Apply new scenario at same checkpoint</button></form>
-<div class="table-wrap"><table><caption>Selected usage versus observed shared quota</caption><thead><tr><th>Window</th><th>Selected captured cost / missing prices</th><th>Observed provider use</th><th>Selected quota attribution / assumption</th><th>Source plan / basis</th><th>Details</th></tr></thead><tbody id="legacy-quota"></tbody></table></div>
-<div class="table-wrap"><table><caption>Tier estimates and explicit scenarios</caption><thead><tr><th>Window / target tier</th><th>Catalog monthly USD / reviewed</th><th>Status</th><th>Target / source ratio</th><th>Estimated use</th><th>Reason / scope</th></tr></thead><tbody id="legacy-comparisons"></tbody></table></div></section>
-<h4>Saved forecasts and verification revisions</h4><p class="muted">This is the complete source-window ledger at the chosen checkpoint, not profile/key-attributed spend. Selection filters are cleared for this ledger only. An unscorable latest revision is not a verified forecast. No forecast worker is running here.</p>
-<form id="legacy-forecast-form" class="toolbar"><label>Window ID <input id="legacy-forecast-window" maxlength="256" required></label><button id="legacy-forecast-load" data-legacy-action>Read saved forecasts</button><button id="legacy-forecast-next" data-legacy-action type="button" disabled>Next saved forecasts</button><span id="legacy-forecast-count" class="muted"></span></form>
-<div class="table-wrap"><table><caption>Saved predictions · estimated, not observed spend</caption><thead><tr><th>ID / estimator</th><th>Issued UTC / target</th><th>Saved prediction USD / bounds</th><th>Latest retained state / reason</th><th>Event / observation bounds</th></tr></thead><tbody id="legacy-forecasts"></tbody></table></div>
-<div class="table-wrap"><table><caption>Every retained verification revision on this page</caption><thead><tr><th>Forecast / revision</th><th>Settled UTC / state</th><th>Observed use / time</th><th>Actual USD / measurement bounds</th><th>Signed error / accuracy</th><th>Reason</th></tr></thead><tbody id="legacy-verifications"></tbody></table></div>
-<details><summary>Exact loaded pin, assumptions and ledger checkpoint</summary><pre id="legacy-pin"></pre><pre id="legacy-forecast-pin"></pre></details>
-<details><summary>Replay a saved legacy or scenario pin</summary><p class="muted">Choose the matching view above and paste its exported filter or report. For raw exhaustion history, copy the exact loaded pin above; its original export has no filter field. Replay uses only that pin, ignoring editable selection controls. A workspace pin with a page field is not a legacy pin.</p><textarea id="legacy-pin-input" rows="4" maxlength="60000" style="width:100%;color:inherit;background:#292a2d" aria-label="Saved legacy or scenario pin"></textarea><button id="legacy-replay" data-legacy-action type="button">Replay saved pin</button></details>
+</details>
+</div>
+<div class="usage-tech-section"><h4>Downloads</h4>
+<div class="toolbar"><button id="forward-json" type="button" disabled>Download pinned summary JSON</button><button id="forward-csv" type="button" disabled>Download request CSV page</button><button id="forward-csv-next" type="button" disabled>Download next CSV page</button><span id="forward-download-status" role="status"></span></div>
+<p class="muted">CSV downloads contain at most 50 rows per page, each with its own header. They are not a whole-ledger export. JSON is the bounded pinned summary; oversized results are reported as errors.</p>
+<details><summary>CSV continuation at this pin</summary><pre id="forward-csv-cursor"></pre></details>
+</div>
+<div class="usage-tech-section"><h4>Diagnostics</h4>
+<details><summary>Exact forward pin and publication provenance</summary><pre id="forward-pin"></pre><pre id="forward-provenance"></pre></details>
+</div>
 </details>
 </section>
 <section id="models" hidden><h2>Model Settings</h2><p class="muted">CPA owns these settings. Changes apply to its catalogue, not a second Pacer model store.</p><label>Filter <input id="filter" type="search" placeholder="Model or provider"></label><div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>State</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
@@ -232,8 +185,8 @@ pre,code,kbd,samp{background:var(--field)}
 </section></main>
 <dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
 <dialog id="metadata-dialog"><form id="metadata-form" style="display:block"><h2 id="metadata-title">Edit label</h2><label id="metadata-name-label">Display name <input id="metadata-name" maxlength="120"></label><label id="metadata-hash-label">Key SHA-256 fingerprint <input id="metadata-hash" pattern="[a-f0-9]{64}" maxlength="64"></label><p class="muted">Never enter a key or token. Labels and lineage do not create, rotate or authorize a CPA credential.</p><fieldset id="metadata-members"><legend>Group members</legend><div id="member-options"></div></fieldset><div id="metadata-error" role="alert"></div><div class="toolbar"><button>Save metadata</button><button type="button" id="metadata-delete">Delete display group</button><button type="button" id="metadata-cancel">Cancel</button></div></form></dialog>
-<dialog id="evidence-dialog"><h2>Quota-window evidence</h2><p class="muted">Selected, shared and boundary contributions overlap; they are not additive spend. Values retain the saved price book and completion provenance.</p><div class="toolbar"><button id="evidence-json">Download JSON</button><button id="evidence-csv">Download CSV</button><button id="evidence-close">Close</button></div><pre id="evidence-body"></pre></dialog>
-<dialog id="legacy-proof-dialog"><h2>Frozen legacy proof</h2><p id="legacy-proof-summary"></p><p class="muted">Selected, shared and boundary rows overlap; do not add them together. Forecasts describe the whole source-account window.</p><div class="table-wrap"><table><thead><tr><th>Contribution</th><th>Requests</th><th>Captured cost</th><th>Missing price rows</th></tr></thead><tbody id="legacy-proof-totals"></tbody></table></div><div class="table-wrap"><table><thead><tr><th>Observation / source</th><th>Observed UTC</th><th>Observed use</th><th>Boundary evidence</th></tr></thead><tbody id="legacy-proof-observations"></tbody></table></div><div class="toolbar"><button id="legacy-proof-json" data-legacy-action>Download proof JSON</button><button id="legacy-proof-csv" data-legacy-action>Download proof CSV</button><button id="legacy-proof-close">Close</button></div><details><summary>Exact proof, price book, forecast revisions and bounds</summary><pre id="legacy-proof-body"></pre></details></dialog>
+<dialog id="usage-inspect-dialog"><div class="toolbar" style="justify-content:space-between;margin:0 0 10px"><h2 id="usage-inspect-title" style="margin:0">Inspect</h2><button type="button" id="usage-inspect-close">Close</button></div><div id="usage-inspect-summary" class="status"></div><p id="usage-inspect-per-percent" class="muted"></p><div id="usage-inspect-meter"></div><h3>Models</h3><div class="table-wrap"><table><thead><tr><th>Model</th><th>Share</th><th>Input</th><th>Cache write</th><th>Cache read</th><th>Output</th><th>Cache hit</th></tr></thead><tbody id="usage-inspect-models"></tbody></table></div><h3>Cost breakdown</h3><div id="usage-inspect-costs"></div><div id="usage-inspect-keys-wrap" hidden><h3>API key shares</h3><div id="usage-inspect-keys"></div></div><p id="usage-inspect-lifetimes" class="muted"></p></dialog>
+<dialog id="usage-windows-dialog"><div class="toolbar" style="justify-content:space-between;margin:0 0 10px"><h2 id="usage-windows-title" style="margin:0">Windows</h2><button type="button" id="usage-windows-close">Close</button></div><div id="usage-windows-status" role="status" class="status" hidden></div><div class="table-wrap"><table><thead><tr><th>Dates</th><th>Rate</th><th>Δ</th><th>Top model</th><th>Count in average</th><th></th><th></th></tr></thead><tbody id="usage-windows-rows"></tbody></table></div></dialog>
 <dialog id="forward-evidence-dialog"><h2>Forward recorded evidence</h2><p>Sanitized retained facts for the loaded pin. Unknown coverage and unresolved write evidence remain unknown.</p><button id="forward-evidence-close" type="button">Close evidence</button><pre id="forward-evidence-body"></pre></dialog>
 <script>
 (() => {
@@ -241,21 +194,18 @@ pre,code,kbd,samp{background:var(--field)}
   let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
   const pending = new Map();let allowBridge=true;
   let metadata={revision:0,keys:[],groups:[]}, metadataEdit=null;
-  let reportPin=null, reportCursor='', reportProfilesLoaded=false, reportBusy=false, evidenceWindow='', historyGeneration=0;
-  let legacyEpoch=0, legacyBusy=false, legacyDefaultPin=null, legacyLoaded=null, legacyProof=null, legacyForecast=null;
-  const legacyDownloads=new Set();
   const root = '/v0/management/plugins/pacer';
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
-  allowed.add('GET '+root+'/history/profiles');for(const op of ['report','windows','evidence','export','compare','compare-windows'])allowed.add('POST '+root+'/history/'+op);
-  allowed.add('GET '+root+'/history/legacy/status');for(const op of ['profiles','profile-proof','history','history-proof','forecasts','quota','export','quota-export'])allowed.add('POST '+root+'/history/legacy/'+op);
+  for(const op of ['profiles','windows','inspect'])allowed.add('POST '+root+'/usage/'+op);
+  allowed.add('PATCH '+root+'/usage/exclusions');
   allowed.add('GET '+forwardRoot+'/status');allowed.add('PATCH '+forwardRoot+'/profiles');for(const op of ['pin','report','requests','evidence','export-json','export-csv'])allowed.add('POST '+forwardRoot+'/'+op);
   function bridgeCall(path,method,body){
     if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
     return new Promise((resolve,reject)=>{
       const id='p'+Date.now().toString(36)+'_'+(++sequence);
-      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/history/')||path.startsWith(forwardRoot+'/')?35000:15000);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/usage/')||path.startsWith(forwardRoot+'/')?35000:15000);
       pending.set(id,{resolve,reject,timer});
       window.parent.postMessage({type:'pacer:request',version:1,id,method,path,...(body===undefined?{}:{body})},location.origin);
     });
@@ -329,172 +279,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }catch(error){el('metadata-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
   }
   const usd=n=>'$'+(n/1e9).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4});
-  function historyValue(value){if(!value||!Number.isFinite(value.low_nano_usd)||!Number.isFinite(value.high_nano_usd))return 'Unknown';const range=usd(value.low_nano_usd)+(value.low_nano_usd!==value.high_nano_usd?' – '+usd(value.high_nano_usd):'');return (value.missing_price_requests||value.invalid_counter_requests?'Partial · ':'')+range}
-  function historyWrites(value){if(!value)return 'Unknown';const t=value.tokens||{};return 'Observed 5m '+(t.cache_write_5m??'?')+' · 1h '+(t.cache_write_1h??'?')+' · assumed 5m '+(t.cache_write_assumed_5m??0)+' · unresolved '+(t.cache_write_unknown??'?')+(value.basis?' · '+value.basis:'')}
-  function reportButtons(enabled){for(const id of ['report-json','report-csv','compare-csv','report-window-load'])el(id).disabled=!enabled}
-  function clearReport(){reportPin=null;reportCursor='';evidenceWindow='';historyGeneration++;reportButtons(false);for(const id of ['report-profiles','report-daily','report-windows','report-requests'])el(id).replaceChildren();for(const id of ['report-totals','report-provenance','report-window-count','report-request-page','evidence-body'])el(id).textContent='';for(const id of ['report-window-next','report-request-prev','report-request-next'])el(id).disabled=true;el('evidence-dialog').close()}
-  async function ensureReportProfiles(){if(reportProfilesLoaded)return;const data=await api(root+'/history/profiles');for(const p of data.profiles||[]){const option=document.createElement('option');option.value=p.reference;option.textContent=p.name+(p.archived?' · archived':'');el('report-profile').append(option)}reportProfilesLoaded=true;el('report-status').textContent=data.coverage||'Frozen historical report'}
-  function reportQuery(){const from=el('report-from').value,to=el('report-to').value;const keys=el('report-keys').value.split(/[\s,]+/).filter(Boolean);if(keys.length>100||keys.some(v=>! /^[a-f0-9]{64}$/.test(v)))throw Error('Use at most 100 SHA-256 fingerprints, never API keys');return {profile_reference:el('report-profile').value,model:el('report-model').value.trim(),key_hashes:keys,...(from?{from:Date.parse(from+'T00:00:00Z')}:{}),...(to?{to:Date.parse(to+'T00:00:00Z')}:{} )}}
-  function showReport(data){
-    reportPin=data.filter;const totals=data.totals||{};
-    el('report-status').textContent='Frozen at '+date(reportPin.at/1000)+' · events through '+reportPin.through+' · '+(data.price_book?.policy||'Unknown valuation')+'. Current native usage is not merged into this snapshot.';
-    el('report-totals').textContent=(totals.requests??0)+' requests · '+(totals.failed??0)+' failed · API-equivalent '+historyValue(totals.api_value)+' · '+historyWrites(totals.api_value);
-    el('report-profiles').replaceChildren();for(const p of data.profiles||[])row('report-profiles',[p.name,p.selected?.requests,historyValue(p.selected?.api_value),historyWrites(p.selected?.api_value)]);
-    el('report-daily').replaceChildren();for(const day of data.timeline||[])row('report-daily',[day.key,day.requests,historyValue(day.api_value),historyWrites(day.api_value)]);
-    el('report-provenance').textContent=JSON.stringify({filter:reportPin,price_book:data.price_book,profiles:(data.profiles||[]).map(p=>({id:p.id,name:p.name,memberships:p.memberships,periods:p.periods,rates:p.rates})),captured_cost_nano_usd:totals.cost_nano_usd,captured_unpriced_requests:totals.unpriced},null,2);
-    el('report-requests').replaceChildren();for(const r of data.requests||[])row('report-requests',[date(r.started_at_ms/1000),(r.label||r.account)+' / '+r.model,historyValue(r.api_value),historyWrites(r.api_value)+' · '+(r.failed?'Failed':'Succeeded')]);
-    const page=reportPin.page||0;el('report-request-page').textContent='Request page '+(page+1);el('report-request-prev').disabled=page===0;el('report-request-next').disabled=(page+1)*(data.page_size||25)>=(totals.requests||0);reportButtons(true);
-  }
-  async function loadReport(query){if(reportBusy)return;reportBusy=true;el('report-load').disabled=true;clearReport();const id=historyGeneration;try{await ensureReportProfiles();const data=await api(root+'/history/report','POST',{query:query||reportQuery()});if(id!==historyGeneration)return;showReport(data);await loadReportWindows(false)}catch(error){el('report-status').textContent=error.message}finally{reportBusy=false;el('report-load').disabled=false}}
-  async function loadReportWindows(next){if(!reportPin)return;const id=historyGeneration;try{const data=await api(root+'/history/windows','POST',{query:{pin:reportPin},state:el('report-window-state').value,kind:el('report-window-kind').value,limit:25,...(next&&reportCursor?{cursor:reportCursor}:{})});if(id!==historyGeneration)return;el('report-windows').replaceChildren();for(const w of data.windows||[]){const n=w.normalization,range=n?.usd_per_percent;const tr=row('report-windows',[(w.label||w.account)+' / '+w.kind+' / '+w.scope,date(w.reset_ms/1000)+' / '+date(w.attribution_end_ms/1000),w.status+(w.stale?' · stale':'')+' · '+(w.valuation?.reason||'legacy completion'),historyValue(w.selected?.api_value)+' · '+historyWrites(w.selected?.api_value),range?'$'+range.low.toFixed(4)+' – $'+range.high.toFixed(4)+' / %':'Unknown · '+(n?.reason||n?.status||'no compatible sample')]);const td=document.createElement('td'),button=document.createElement('button');button.textContent='Evidence';button.onclick=()=>showWindowEvidence(w.id);td.append(button);tr.append(td)}reportCursor=data.next_cursor||'';el('report-window-next').disabled=!reportCursor;el('report-window-count').textContent=(data.windows||[]).length+' shown of '+data.total+' matching windows'}catch(error){el('report-window-count').textContent=error.message}}
-  async function showWindowEvidence(windowID){const id=historyGeneration;try{const data=await api(root+'/history/evidence','POST',{query:{pin:reportPin},window_id:windowID});if(id!==historyGeneration)return;evidenceWindow=windowID;el('evidence-body').textContent=JSON.stringify(data,null,2);el('evidence-dialog').showModal()}catch(error){message(error.message,true)}}
-  async function historyDownload(format,csv='',windowID=''){if(!reportPin)return;try{const data=await api(root+'/history/export','POST',{query:{pin:reportPin},format,csv,...(windowID?{window_id:windowID}:{})});if(typeof data.content!=='string'||data.filename!=='pacer-history.'+format)throw Error('Invalid report download');const blob=new Blob([data.content],{type:data.media_type+';charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=data.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(error){message(error.message,true)}}
-  const legacyDate=ms=>date(ms/1000);
-  const legacyNumber=n=>Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):'Unavailable';
-  const legacyPercent=n=>Number.isFinite(n)?legacyNumber(n)+'%':'Unavailable';
-  const legacyUSD=n=>Number.isFinite(n)?'$'+legacyNumber(n):'Unavailable';
-  const legacyCost=n=>Number.isFinite(n)?usd(n):'Unavailable';
-  const legacyMix=m=>Number.isFinite(m?.weighted_input_equivalent)?legacyUSD(m.weighted_input_equivalent/1e6):'Unavailable';
-  function legacyCurrent(ticket){return connected&&ticket.generation===generation&&ticket.epoch===legacyEpoch}
-  function legacyControls(){
-    el('legacy-advanced').querySelectorAll('[data-legacy-action]').forEach(b=>b.disabled=legacyBusy);
-    for(const id of ['legacy-json','legacy-csv'])el(id).disabled=legacyBusy||!legacyLoaded;
-    el('legacy-apply').disabled=legacyBusy||legacyLoaded?.view!=='quota';
-    el('legacy-forecast-next').disabled=legacyBusy||!legacyForecast?.cursor;
-    for(const id of ['legacy-proof-json','legacy-proof-csv'])el(id).disabled=legacyBusy||!legacyProof;
-  }
-  function clearLegacyRows(){
-    for(const id of ['legacy-profiles','legacy-windows','legacy-quota','legacy-comparisons','legacy-forecasts','legacy-verifications','legacy-proof-totals','legacy-proof-observations'])el(id).replaceChildren();
-    for(const id of ['legacy-summary','legacy-pin','legacy-forecast-pin','legacy-forecast-count','legacy-proof-summary','legacy-proof-body'])el(id).textContent='';
-    el('legacy-scenarios').hidden=true;el('legacy-proof-dialog').close();
-  }
-  function clearLegacy(){
-    legacyEpoch++;legacyBusy=false;legacyDefaultPin=null;legacyLoaded=null;legacyProof=null;legacyForecast=null;
-    clearLegacyRows();for(const id of ['legacy-form','legacy-scenario-form','legacy-forecast-form'])el(id).reset();
-    el('legacy-pin-input').value='';el('legacy-advanced').open=false;
-    while(el('legacy-profile').options.length>2)el('legacy-profile').remove(2);
-    for(const id of ['legacy-source-plan','legacy-target-plan','legacy-scenario-window'])while(el(id).options.length>1)el(id).remove(1);
-    for(const url of legacyDownloads)URL.revokeObjectURL(url);legacyDownloads.clear();
-    el('legacy-status').textContent='Load a frozen view to check historical preparation.';el('legacy-status').className='status';legacyControls();
-  }
-  async function legacyTask(work){
-    if(legacyBusy||!connected)return;
-    const ticket={generation,epoch:++legacyEpoch};legacyBusy=true;legacyControls();
-    try{await work(ticket)}catch(error){if(legacyCurrent(ticket)){el('legacy-status').textContent=error.message;el('legacy-status').className='status error'}}
-    finally{if(legacyCurrent(ticket)){legacyBusy=false;legacyControls()}}
-  }
-  async function legacyCall(op,body,ticket){
-    const data=await api(root+'/history/legacy/'+op,op==='status'?'GET':'POST',body);
-    if(!legacyCurrent(ticket))throw Error('Historical view changed');return data;
-  }
-  async function ensureLegacy(ticket){
-    if(legacyDefaultPin)return;
-    const status=await legacyCall('status',undefined,ticket);
-    if(!status.historical_ready)throw Error('This artifact needs offline re-preparation for historical views. Existing Workspace reports remain available.');
-    const profiles=await api(root+'/history/profiles');if(!legacyCurrent(ticket))throw Error('Historical view changed');
-    while(el('legacy-profile').options.length>2)el('legacy-profile').remove(2);
-    for(const p of profiles.profiles||[]){const option=document.createElement('option');option.value=p.reference;option.textContent=p.name+(p.archived?' · archived':'');el('legacy-profile').append(option)}
-    legacyDefaultPin=status.default_pin;
-  }
-  function legacySelection(){
-    const keys=el('legacy-keys').value.split(/[\s,]+/).filter(Boolean);
-    if(keys.length>100||keys.some(v=>! /^[a-f0-9]{64}$/.test(v)))throw Error('Use at most 100 SHA-256 fingerprints, never API keys');
-    const query={profile_reference:el('legacy-profile').value,model:el('legacy-model').value.trim(),key_hashes:keys};
-    for(const [id,field] of [['legacy-from','from'],['legacy-to','to']])if(el(id).value)query[field]=Date.parse(el(id).value+'T00:00:00Z');
-    if(query.to&&query.from>=query.to)throw Error('Before UTC must be later than From UTC');return query;
-  }
-  function legacyPinText(pin){return 'Frozen at '+legacyDate(pin.at)+' · events ≤ '+pin.through+' · observations ≤ '+pin.observations_through+' · forecasts/results ≤ '+pin.forecasts_through+'/'+pin.verifications_through+' · '+(pin.estimator||'quota-estimator-v2')}
-  function legacyActions(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.dataset.legacyAction='';button.disabled=legacyBusy;td.append(button)}tr.append(td)}
-  function legacyShowWindows(windows,view){
-    for(const w of windows||[]){
-      const c=w.comparison,cycle=c?.actual_cycle_projection;
-      const bounds=cycle?'Estimated final '+legacyMix(cycle.total_value_low)+' – '+legacyMix(cycle.total_value_high)+' · '+cycle.status:c?'Estimated capacity '+legacyMix(c.rounding_capacity_low)+' – '+legacyMix(c.rounding_capacity_high)+' · '+c.status:'Token estimate '+legacyNumber(w.estimated_remaining_tokens)+' remaining';
-      const tr=row('legacy-windows',[(w.label||w.account)+' / '+(w.profile_name||'source account')+' / '+w.kind+' / '+w.id,w.status+' · '+w.coverage,legacyPercent(w.last_used_percent)+' · '+legacyDate(w.last_observed_ms),legacyCost(w.cost_nano_usd)+' / '+w.requests+' requests · '+w.unpriced_requests+' unpriced',legacyDate(w.reset_ms)+' / '+legacyDate(w.attribution_end_ms),(w.projected_exhaustion_ms?'Projected exhaustion '+legacyDate(w.projected_exhaustion_ms):'Exhaustion unavailable')+' · '+bounds,'Boundary-uncertain '+w.boundary_uncertain_requests+' · '+[...(w.notes||[]),...(c?.notes||[]),...(cycle?.availability_reasons||[])].join(' · ')]);
-      legacyActions(tr,[['Proof',()=>loadLegacyProof(view==='profiles'?'profile-proof':'history-proof',w.id)],['Saved forecasts',()=>loadLegacyForecasts(w.id,false)]]);
-    }
-  }
-  function legacyShowQuota(data){
-    el('legacy-scenarios').hidden=false;
-    for(const id of ['legacy-source-plan','legacy-target-plan','legacy-scenario-window'])while(el(id).options.length>1)el(id).remove(1);
-    for(const tier of data.tiers||[])for(const id of ['legacy-source-plan','legacy-target-plan']){const option=document.createElement('option');option.value=tier.id;option.textContent=tier.name+' · '+tier.provider;el(id).append(option)}
-    for(const w of data.windows||[]){
-      const option=document.createElement('option');option.value=w.id;option.textContent=(w.label||w.account)+' / '+w.kind+' / '+w.id;el('legacy-scenario-window').append(option);
-      const a=w.attribution||{};
-      const tr=row('legacy-quota',[(w.label||w.account)+' / '+w.kind+' / '+w.id,legacyCost(w.selected?.cost_nano_usd)+' / '+(w.selected?.unpriced??'?')+' unpriced',legacyPercent(w.used_percent)+' · '+legacyDate(w.last_observed_ms)+' · '+w.status+(w.stale?' · stale':''),a.status+' · '+legacyPercent(a.percent)+' · '+(a.reason||'')+' · unassigned observed delta '+legacyPercent(a.unattributed_delta),(w.source_plan||'Unassigned')+' · '+w.plan_basis]);
-      legacyActions(tr,[['Saved forecasts',()=>loadLegacyForecasts(w.id,false)]]);
-      for(const c of w.comparisons||[])row('legacy-comparisons',[w.id+' / '+c.tier.name,legacyUSD(c.tier.monthly_usd)+' / '+legacyDate(c.tier.reviewed_ms),c.status,legacyNumber(c.capacity_ratio),legacyPercent(c.percent),c.reason+' · scope '+c.tier.scope]);
-    }
-    el('legacy-scenario-window').value=data.filter.window||'';el('legacy-source-plan').value=data.filter.source_plan||'';el('legacy-target-plan').value=data.filter.target_plan||'';el('legacy-ratio').value=data.filter.capacity_ratio||'';
-  }
-  function legacyShow(data,view,query,kind){
-    const pin=data.filter||query.pin;
-    legacyLoaded={view,query:{pin},kind:kind||''};legacyProof=null;legacyForecast=null;clearLegacyRows();
-    el('legacy-status').className='status';el('legacy-status').textContent=legacyPinText(pin)+'. Historical only; current native usage is separate.';
-    el('legacy-pin').textContent=JSON.stringify({view,pin,kind:kind||undefined,normalization:data.normalization,config:data.config,policy:'Captured prices and original estimator semantics; v3 assumed-write valuation is not applied by these legacy views.'},null,2);
-    const t=data.totals||{};
-    if(view==='history')el('legacy-summary').textContent='Source-account windows at '+legacyDate(data.generated_at_ms)+' · event/observation checkpoint '+data.through_event_id+'/'+data.through_observation_row+'. Pending/backfill counts describe the frozen source, not an active ingestion worker.';
-    else el('legacy-summary').textContent=(t.requests??0)+' requests · '+(t.failed??0)+' failed · captured '+legacyCost(t.cost_nano_usd)+' · '+(t.unpriced??0)+' missing-price requests. '+(view==='quota'?'Deduplicated matched-window requests: '+(data.matched_totals?.requests??0)+'.':'Legacy bindings use first matching ownership; shared provider meters are not additive profile spend.');
-    if(view==='profiles'){for(const b of data.by_profile||[]){const name=data.config?.profiles?.find(p=>p.id===b.key)?.name||b.key;row('legacy-profiles',[name,b.requests+' / '+b.failed,legacyCost(b.cost_nano_usd),b.unpriced])}legacyShowWindows(data.windows,view)}
-    else if(view==='history')legacyShowWindows(data.windows,view);else legacyShowQuota(data);
-  }
-  function loadLegacy(replay,replayKind=''){return legacyTask(async ticket=>{
-    const view=el('legacy-view').value;await ensureLegacy(ticket);
-    let query=replay?{pin:replay}:{selection:legacySelection()},kind='';
-    if(view==='history'){
-      if(query.selection&&(query.selection.profile_reference||query.selection.model))throw Error('Exhaustion history supports dates and keys only. Choose All history and clear Model.');
-      kind=replay?replayKind:el('legacy-kind').value;
-      // Raw history has no returned filter: anchor a complete pin before calling.
-      if(!replay){const s=query.selection;query={pin:{...legacyDefaultPin,from:s.from||0,to:s.to||0,api_key:s.key_hashes.length?'keys:'+s.key_hashes.join(','):''}}}
-    }else if(view==='quota'&&!replay)query={...query,kind:el('legacy-kind').value,period:el('legacy-period').value,basis:el('legacy-basis').value,gateway_only:el('legacy-gateway').checked};
-    const data=await legacyCall(view,{query,...(view==='history'?{kind}:{})},ticket);legacyShow(data,view,query,kind);
-  })}
-  function applyLegacyScenario(){return legacyTask(async ticket=>{
-    if(legacyLoaded?.view!=='quota')return;
-    const windowID=el('legacy-scenario-window').value,raw=el('legacy-ratio').value,ratio=raw===''?0:Number(raw);
-    if(!windowID||!Number.isFinite(ratio)||ratio<0||ratio>10000)throw Error('Select one window and a finite ratio from 0 to 10,000.');
-    if(ratio>0&&!el('legacy-target-plan').value)throw Error('An assumed ratio requires a target tier.');
-    const query={pin:{...legacyLoaded.query.pin,window:windowID,source_plan:el('legacy-source-plan').value,target_plan:el('legacy-target-plan').value,capacity_ratio:ratio,gateway_only:el('legacy-gateway').checked}};
-    const data=await legacyCall('quota',{query},ticket);legacyShow(data,'quota',query,'');
-  })}
-  function legacyLedgerPin(){
-    const p=legacyLoaded?.query.pin||legacyDefaultPin;
-    // Copy only source ProfileFilter fields; a quota pin has additional fields.
-    const pin={};for(const k of ['at','through','observations_through','forecasts_through','verifications_through','revision','estimator','valuation_rule','token_evidence_through'])if(p[k]!==undefined)pin[k]=p[k];
-    return {...pin,profile:'',account:'',model:'',api_key:'',from:0,to:0};
-  }
-  function loadLegacyForecasts(windowID,next){return legacyTask(async ticket=>{
-    await ensureLegacy(ticket);
-    const request=next?{...legacyForecast.request,cursor:legacyForecast.cursor}:{query:{pin:legacyLedgerPin()},window_id:windowID,limit:25};
-    const page=await legacyCall('forecasts',request,ticket);
-    legacyForecast={request:{query:request.query,window_id:request.window_id,limit:request.limit},cursor:page.next_cursor||''};
-    el('legacy-forecast-window').value=request.window_id;el('legacy-forecasts').replaceChildren();el('legacy-verifications').replaceChildren();
-    el('legacy-forecast-count').textContent=(page.forecasts||[]).length+' shown / '+page.total+' saved predictions';
-    el('legacy-forecast-pin').textContent=JSON.stringify({window_id:request.window_id,pin:page.pin,scope:'Full source-window ledger; no selection attribution'},null,2);
-    for(const item of page.forecasts||[]){const f=item.forecast,results=item.results||[],latest=results[results.length-1];
-      row('legacy-forecasts',[f.id+' / '+f.estimator_id,legacyDate(f.issued_ms)+' / '+legacyPercent(f.target_percent)+' · '+(f.target_kind||'forward_incremental_api_value'),legacyUSD(f.predicted_incremental_usd)+' ['+legacyUSD(f.predicted_low_usd)+' – '+legacyUSD(f.predicted_high_usd)+']',latest?latest.state+' · '+(latest.reason||'No additional reason'):'No retained verification',f.through_event_id+' / '+f.through_observation_row]);
-      for(const v of results)row('legacy-verifications',[f.id+' / '+v.id,legacyDate(v.settled_ms)+' / '+v.state,legacyPercent(v.actual_percent)+' / '+legacyDate(v.observed_ms),legacyUSD(v.actual_usd)+' ['+legacyUSD(v.actual_low_usd)+' – '+legacyUSD(v.actual_high_usd)+']',legacyPercent(v.signed_error_percent)+' / '+legacyPercent(v.accuracy_percent),v.reason||'No additional reason']);
-    }
-    el('legacy-status').className='status';el('legacy-status').textContent=legacyPinText(page.pin)+'. Saved source-window ledger; no new predictions or verification.';
-  })}
-  function loadLegacyProof(view,windowID){return legacyTask(async ticket=>{
-    if(!legacyLoaded)return;let query=legacyLoaded.query;
-    if(view==='history-proof')query={pin:{...query.pin,from:0,to:0,profile:'',account:'',model:''}};
-    const data=await legacyCall(view,{query,window_id:windowID},ticket);legacyProof={view,query,window_id:windowID};
-    el('legacy-proof-summary').textContent=windowID+' · '+legacyPinText(query.pin)+' · selected reconciled: '+data.reconciled+' · shared reconciled: '+data.shared_reconciled;
-    el('legacy-proof-totals').replaceChildren();el('legacy-proof-observations').replaceChildren();
-    for(const [name,events] of [['Selected',data.events||[]],['Shared',data.shared_events||[]],['Boundary',data.boundary_events||[]]])row('legacy-proof-totals',[name,events.length,legacyCost(events.reduce((n,e)=>n+(e.cost_nano_usd??0),0)),events.filter(e=>!Number.isFinite(e.cost_nano_usd)).length]);
-    for(const o of data.observations||[])row('legacy-proof-observations',[o.id+' / '+(o.source||'Unknown'),legacyDate(o.observed_at_ms),legacyPercent(o.used_percent),o.boundary||'Unknown']);
-    el('legacy-proof-body').textContent=JSON.stringify(data,null,2);el('legacy-proof-dialog').showModal();
-  })}
-  function legacyDownload(format,proof=false){return legacyTask(async ticket=>{
-    const state=proof?legacyProof:legacyLoaded;if(!state)return;
-    const quota=state.view==='quota',op=quota?'quota-export':'export';
-    const data=await legacyCall(op,{query:state.query,format,...(!quota?{view:state.view,...(state.window_id?{window_id:state.window_id}:{}),...(state.kind?{kind:state.kind}:{})}:{})},ticket);
-    if(typeof data.content!=='string'||data.filename!=='pacer-legacy-'+state.view+'.'+format||data.media_type!==(format==='csv'?'text/csv':'application/json'))throw Error('Invalid historical download');
-    const url=URL.createObjectURL(new Blob([data.content],{type:data.media_type+';charset=utf-8'}));legacyDownloads.add(url);
-    const a=document.createElement('a');a.href=url;a.download=data.filename;a.click();
-    setTimeout(()=>{URL.revokeObjectURL(url);legacyDownloads.delete(url)},1000);
-  })}
+
   // Forward UI owns only captured selection state. All values/proof remain native.
   const forwardVersion='pacer-forward-ledger-v1',forwardLimit=50;
   let forwardEpoch=0,forwardBusy=false,forwardLoaded=null,forwardProfiles=null,forwardPageCursor='',forwardNextCursor='',forwardCSVNext='',forwardPageNumber=0;
@@ -664,15 +449,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('forward-evidence-close').onclick=()=>el('forward-evidence-dialog').close();
   el('forward-profile-read').onsubmit=event=>{event.preventDefault();return forwardTask(t=>forwardReadProfiles(el('forward-profile-revision').value,t),'forward-profile-status')};
   el('forward-profile-form').onsubmit=event=>{event.preventDefault();return forwardSaveProfile()};el('forward-profile-new').onclick=forwardNewProfile;el('forward-membership-add').onclick=()=>{try{forwardMembership()}catch(e){el('forward-profile-status').textContent=e.message}};
-  const compareCache = new Map();
-  let currentCompareData = null;
-  let compareMode = 'latest';
-  let compareGeneration = 0;
-  let compareDateTimer = null;
-  const compareSelectedWindows = new Map();
-  const compareInflight = new Map(); // one shared request per filter, however many callers ask
+  const usageCache = new Map();
+  let currentUsageData = null;
+  let usageMode = 'latest';
+  let usageGeneration = 0;
+  let usageDateTimer = null;
+  const usageSelectedWindows = new Map();
+  const usageInflight = new Map();
 
+  const cleanModelName = name => (name || '').replace(/^(claude|gpt|gemini)-/, '');
   const pct1 = n => (Math.round(Number(n) * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+
   function formatUSDPerPercent(range) {
     if (!range || !Number.isFinite(range.low) || !Number.isFinite(range.high)) return 'Unavailable';
     const fmt = n => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -681,6 +468,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }
     return fmt(range.low) + ' – ' + fmt(range.high) + ' / 1%';
   }
+
   function formatTokens(range) {
     if (!range || !Number.isFinite(range.low) || !Number.isFinite(range.high)) return 'Unknown';
     if (Math.abs(range.low - range.high) < 1) {
@@ -688,20 +476,40 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }
     return Math.round(range.low).toLocaleString() + ' – ' + Math.round(range.high).toLocaleString() + ' tokens';
   }
+
   function formatNanoRange(lowNano, highNano) {
     if (!Number.isFinite(lowNano) || !Number.isFinite(highNano)) return 'Unknown';
     const low = usd(lowNano);
     const high = usd(highNano);
     return low === high ? low : low + ' – ' + high;
   }
+
+  function compactNum(n) {
+    if (n == null || !Number.isFinite(Number(n))) return '0';
+    const num = Number(n);
+    if (Math.abs(num) >= 1e9) return (num / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (Math.abs(num) >= 1e6) return (num / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (Math.abs(num) >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return num.toLocaleString();
+  }
+
+  function compareSpan(fromMS, toMS) {
+    if (!fromMS || !toMS) return 'Unknown span';
+    const f = new Date(fromMS).toISOString(), t = new Date(toMS).toISOString();
+    const midnight = f.slice(11, 16) === '00:00' && t.slice(11, 16) === '00:00';
+    const cut = v => midnight ? v.slice(0, 10) : v.slice(0, 10) + ' ' + v.slice(11, 16);
+    return cut(f) + ' → ' + cut(t) + ' UTC';
+  }
+
   function findMainPool(pools, kind) {
     if (!pools) return null;
     const match = pools.filter(p => p.kind === kind);
     if (!match.length) return null;
     return match.find(p => p.main) || match[0];
   }
-  function showCompareError(msg) {
-    const s = el('compare-status');
+
+  function showUsageError(msg) {
+    const s = el('usage-status');
     if (msg) {
       s.hidden = false;
       s.textContent = msg;
@@ -712,9 +520,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       s.className = 'status';
     }
   }
-  function updateCompareAPIKeys(apiKeys) {
+
+  function updateUsageAPIKeys(apiKeys) {
     if (!Array.isArray(apiKeys)) return;
-    const sel = el('compare-key');
+    const sel = el('usage-key');
     const cur = sel.value;
     const existing = Array.from(sel.options).map(o => o.value);
     const updated = ['', ...apiKeys.map(k => k.id)];
@@ -728,94 +537,212 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }
     if (updated.includes(cur)) sel.value = cur;
   }
-  function clearCompare() {
-    compareGeneration++;
-    clearTimeout(compareDateTimer);
-    compareCache.clear();
-    compareInflight.clear();
-    compareSelectedWindows.clear();
-    currentCompareData = null;
-    compareMode = 'latest';
-    el('compare-mode-latest').setAttribute('aria-pressed', 'true');
-    el('compare-mode-average').setAttribute('aria-pressed', 'false');
-    el('compare-key').value = '';
-    while (el('compare-key').options.length > 1) el('compare-key').remove(1);
-    el('compare-from').value = '';
-    el('compare-through').value = '';
-    el('compare-grid').replaceChildren();
-    el('compare-footer').replaceChildren();
-    showCompareError('');
+
+  function clearUsage() {
+    usageGeneration++;
+    clearTimeout(usageDateTimer);
+    usageCache.clear();
+    usageInflight.clear();
+    usageSelectedWindows.clear();
+    currentUsageData = null;
+    usageMode = 'latest';
+    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
+    el('usage-mode-average').setAttribute('aria-pressed', 'false');
+    el('usage-key').value = '';
+    while (el('usage-key').options.length > 1) el('usage-key').remove(1);
+    el('usage-from').value = '';
+    el('usage-through').value = '';
+    el('usage-grid').replaceChildren();
+    showUsageError('');
   }
-  async function loadCompare() {
+
+  async function loadUsage() {
     if (!connected) return;
-    const ticket = { generation, count: ++compareGeneration };
-    const keyVal = el('compare-key').value;
-    const fromVal = el('compare-from').value;
-    const throughVal = el('compare-through').value;
+    const ticket = { generation, count: ++usageGeneration };
+    const keyVal = el('usage-key').value;
+    const fromVal = el('usage-from').value;
+    const throughVal = el('usage-through').value;
     const cacheKey = `${keyVal}|${fromVal}|${throughVal}`;
 
-    compareSelectedWindows.clear();
+    usageSelectedWindows.clear();
 
-    if (compareCache.has(cacheKey)) {
-      currentCompareData = compareCache.get(cacheKey);
-      showCompareError('');
-      renderCompare();
+    if (usageCache.has(cacheKey)) {
+      currentUsageData = usageCache.get(cacheKey);
+      showUsageError('');
+      renderUsage();
       return;
     }
 
-    showCompareError('');
+    showUsageError('');
     const query = {};
     if (keyVal) query.key = keyVal;
     if (fromVal) query.from = fromVal;
     if (throughVal) query.through = throughVal;
 
-    let pending = compareInflight.get(cacheKey);
+    let pending = usageInflight.get(cacheKey);
     if (!pending) {
-      pending = api(root + '/history/compare', 'POST', query);
-      compareInflight.set(cacheKey, pending);
-      pending.then(() => {}, () => {}).then(() => { if (compareInflight.get(cacheKey) === pending) compareInflight.delete(cacheKey); });
+      pending = api(root + '/usage/profiles', 'POST', query);
+      usageInflight.set(cacheKey, pending);
+      pending.then(() => {}, () => {}).then(() => {
+        if (usageInflight.get(cacheKey) === pending) usageInflight.delete(cacheKey);
+      });
     }
     try {
       const data = await pending;
       if (!connected || ticket.generation !== generation) return;
-      compareCache.set(cacheKey, data);
-      if (ticket.count !== compareGeneration) return;
-      currentCompareData = data;
-      updateCompareAPIKeys(data.api_keys);
-      renderCompare();
+      usageCache.set(cacheKey, data);
+      if (ticket.count !== usageGeneration) return;
+      currentUsageData = data;
+      updateUsageAPIKeys(data.api_keys);
+      renderUsage();
     } catch (error) {
-      if (!connected || ticket.generation !== generation || ticket.count !== compareGeneration) return;
-      showCompareError(error.message);
+      if (!connected || ticket.generation !== generation || ticket.count !== usageGeneration) return;
+      showUsageError(error.message);
     }
   }
-  function renderCompare() {
-    el('compare-grid').replaceChildren();
-    el('compare-footer').replaceChildren();
-    if (!currentCompareData) return;
 
-    const data = currentCompareData;
+  function usageStat(parent, text, className = 'usage-stat') {
+    const div = document.createElement('div');
+    div.className = className;
+    div.textContent = text;
+    parent.append(div);
+    return div;
+  }
+
+  function appendRateDisplay(col, rate) {
+    if (!rate || rate.status !== 'available') {
+      usageStat(col, 'No rate', 'usage-rate-big usage-rate-unavailable');
+      usageStat(col, rate?.reason || rate?.status || 'Unavailable', 'usage-stat muted');
+      return;
+    }
+    usageStat(col, formatUSDPerPercent(rate.usd_per_percent), 'usage-rate-big');
+    if (rate.equivalent_tokens_per_percent) {
+      usageStat(col, formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%' + (rate.reference_name ? ' (' + rate.reference_name + ')' : ''));
+    }
+    if (rate.start_percent != null && rate.end_percent != null) {
+      usageStat(col, `Meter ${pct1(rate.start_percent)}% → ${pct1(rate.end_percent)}% (Δ ${pct1(rate.delta_pp)} pp)`);
+    } else if (rate.delta_pp != null) {
+      usageStat(col, `Meter Δ ${pct1(rate.delta_pp)} pp`);
+    }
+  }
+
+  function formatModelMix(models) {
+    if (!Array.isArray(models) || models.length === 0) return '';
+    return models
+      .map(m => cleanModelName(m.model) + ' ' + Math.round(m.share_percent) + '%')
+      .join(' · ');
+  }
+
+  function renderUsageCol(profile, pool, kind, colTitle) {
+    const col = document.createElement('div');
+    col.className = 'usage-col';
+
+    const colH = document.createElement('div');
+    colH.className = 'usage-col-header';
+    colH.textContent = colTitle;
+    col.append(colH);
+
+    if (!pool) {
+      usageStat(col, 'No recorded window');
+      return col;
+    }
+
+    const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
+    const activeWindow = usageSelectedWindows.get(overrideKey) || pool.latest;
+
+    if (usageMode === 'average' && !usageSelectedWindows.has(overrideKey)) {
+      const rate = pool.average || {};
+      appendRateDisplay(col, rate);
+      const samples = rate.samples || 0;
+      const excluded = pool.excluded || 0;
+      usageStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'} · ${excluded} excluded`);
+      const mix = formatModelMix(pool.average_models);
+      if (mix) usageStat(col, mix, 'usage-model-mix');
+    } else {
+      if (!activeWindow) {
+        usageStat(col, 'No recorded window');
+      } else {
+        appendRateDisplay(col, activeWindow.rate || {});
+        if (activeWindow.start_ms && activeWindow.end_ms) {
+          usageStat(col, compareSpan(activeWindow.start_ms, activeWindow.end_ms));
+        }
+        if (activeWindow.selected) {
+          const sel = activeWindow.selected;
+          let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
+          if (currentUsageData?.key_filtered && activeWindow.token_share_percent != null) {
+            selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
+          }
+          usageStat(col, selText);
+        }
+        const mix = formatModelMix(activeWindow.models);
+        if (mix) usageStat(col, mix, 'usage-model-mix');
+
+        if (pool.newest_unmeasured && activeWindow === pool.latest) {
+          const note = document.createElement('div');
+          note.className = 'usage-stat muted';
+          note.textContent = 'Newer window not measured yet';
+          col.append(note);
+        }
+        if (activeWindow.excluded) {
+          const tag = document.createElement('span');
+          tag.className = 'pill';
+          tag.textContent = 'excluded from average';
+          col.append(tag);
+        }
+      }
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'usage-col-actions';
+    const inspectBtn = document.createElement('button');
+    inspectBtn.type = 'button';
+    inspectBtn.className = 'usage-inspect-btn';
+    inspectBtn.textContent = 'Inspect';
+    inspectBtn.onclick = () => {
+      const win = (usageMode === 'latest' || usageSelectedWindows.has(overrideKey)) ? activeWindow : null;
+      return openInspect(profile, pool, win);
+    };
+
+    const windowsBtn = document.createElement('button');
+    windowsBtn.type = 'button';
+    windowsBtn.className = 'usage-windows-btn';
+    windowsBtn.textContent = 'Windows';
+    windowsBtn.onclick = () => openWindows(profile, pool, overrideKey);
+
+    actions.append(inspectBtn, windowsBtn);
+    col.append(actions);
+
+    return col;
+  }
+
+  function renderUsage() {
+    el('usage-grid').replaceChildren();
+    if (!currentUsageData) return;
+
+    const data = currentUsageData;
     const profiles = [...(data.profiles || [])].sort((a, b) => (a.archived === b.archived ? 0 : a.archived ? 1 : -1));
 
     if (profiles.length === 0) {
       const p = document.createElement('p');
       p.className = 'muted';
       p.textContent = 'No profiles found.';
-      el('compare-grid').append(p);
+      el('usage-grid').append(p);
+      return;
     }
 
     for (const profile of profiles) {
       const card = document.createElement('div');
-      card.className = 'compare-card';
+      card.className = 'usage-card';
 
       const header = document.createElement('div');
-      header.className = 'compare-card-header';
+      header.className = 'usage-card-header';
 
       const prov = document.createElement('span');
-      prov.className = 'compare-provider';
+      prov.className = 'usage-provider';
       prov.textContent = profile.provider || 'unknown';
 
       const name = document.createElement('span');
-      name.className = 'compare-profile-name';
+      name.className = 'usage-profile-name';
       name.textContent = profile.name || '';
 
       header.append(prov, name);
@@ -827,14 +754,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
 
       const cred = document.createElement('span');
-      cred.className = 'compare-meta';
+      cred.className = 'usage-meta';
       cred.textContent = (profile.credentials || 0) + ' credential' + (profile.credentials === 1 ? '' : 's');
       header.append(cred);
       card.append(header);
 
       if (Array.isArray(profile.current) && profile.current.length > 0) {
         const metersDiv = document.createElement('div');
-        metersDiv.className = 'compare-meters';
+        metersDiv.className = 'usage-meters';
         for (const meter of profile.current) {
           const mLine = document.createElement('div');
           const kindLbl = meter.kind === 'weekly' ? '7-day' : meter.kind === '5h' ? '5-hour' : (meter.kind || '');
@@ -850,219 +777,364 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
 
       const colsDiv = document.createElement('div');
-      colsDiv.className = 'compare-columns';
+      colsDiv.className = 'usage-columns';
       const mainWeekly = findMainPool(profile.pools, 'weekly');
       const main5h = findMainPool(profile.pools, '5h');
 
-      colsDiv.append(renderCompareCol(profile, mainWeekly, 'weekly', '7-day'));
-      colsDiv.append(renderCompareCol(profile, main5h, '5h', '5-hour'));
+      colsDiv.append(renderUsageCol(profile, mainWeekly, 'weekly', '7-day'));
+      colsDiv.append(renderUsageCol(profile, main5h, '5h', '5-hour'));
       card.append(colsDiv);
 
       const otherPools = (profile.pools || []).filter(p => p !== mainWeekly && p !== main5h);
       if (otherPools.length > 0) {
         const details = document.createElement('details');
+        details.className = 'usage-other-limits';
         const summary = document.createElement('summary');
-        summary.textContent = 'Other quota pools';
+        summary.textContent = 'Other limits';
         details.append(summary);
         for (const op of otherPools) {
-          const opDiv = document.createElement('div');
-          opDiv.className = 'compare-stat';
-          const r = op.latest?.rate;
-          const rText = r?.status === 'available' ? formatUSDPerPercent(r.usd_per_percent) : (r?.reason || r?.status || 'No recorded rate');
-          opDiv.textContent = `${op.kind} (${op.scope}) · ${op.windows} windows · ${rText}`;
-          details.append(opDiv);
+          const kindLbl = op.kind === 'weekly' ? '7-day' : op.kind === '5h' ? '5-hour' : op.kind;
+          details.append(renderUsageCol(profile, op, op.kind, `${kindLbl} (${op.scope})`));
         }
         card.append(details);
       }
 
-      el('compare-grid').append(card);
-    }
-
-    const frozenP = document.createElement('p');
-    frozenP.className = 'muted';
-    frozenP.textContent = 'Frozen at ' + date((data.frozen_at_ms || 0) / 1000);
-    el('compare-footer').append(frozenP);
-    if (Array.isArray(data.notes) && data.notes.length > 0) {
-      const notesP = document.createElement('p');
-      notesP.className = 'muted';
-      notesP.textContent = data.notes.join(' · ');
-      el('compare-footer').append(notesP);
+      el('usage-grid').append(card);
     }
   }
 
-  function compareStat(parent, text, className = 'compare-stat') {
-    const div = document.createElement('div');
-    div.className = className;
-    div.textContent = text;
-    parent.append(div);
-    return div;
-  }
-  // UTC, minute precision; the date alone when both ends are midnight.
-  function compareSpan(fromMS, toMS) {
-    const f = new Date(fromMS).toISOString(), t = new Date(toMS).toISOString();
-    const midnight = f.slice(11, 16) === '00:00' && t.slice(11, 16) === '00:00';
-    const cut = v => midnight ? v.slice(0, 10) : v.slice(0, 10) + ' ' + v.slice(11, 16);
-    return cut(f) + ' → ' + cut(t) + ' UTC';
-  }
-  function appendCompareRate(col, rate) {
-    if (rate.status !== 'available') {
-      compareStat(col, 'No rate', 'compare-big-num compare-unavailable');
-      compareStat(col, rate.reason || rate.status || 'Unavailable');
-      return;
-    }
-    compareStat(col, formatUSDPerPercent(rate.usd_per_percent), 'compare-big-num');
-    if (rate.equivalent_tokens_per_percent) compareStat(col, formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%' + (rate.reference_name ? ' (' + rate.reference_name + ')' : ''));
-    if (rate.start_percent != null && rate.end_percent != null) compareStat(col, `Meter ${pct1(rate.start_percent)}% → ${pct1(rate.end_percent)}% (Δ${pct1(rate.delta_pp)} pp)`);
-    else compareStat(col, `Meter Δ${pct1(rate.delta_pp)} pp`);
-  }
-  function renderCompareCol(profile, pool, kind, colTitle) {
-    const col = document.createElement('div');
-    col.className = 'compare-col';
-
-    const colH = document.createElement('div');
-    colH.className = 'compare-col-header';
-    colH.textContent = colTitle;
-    col.append(colH);
-
-    if (!pool) {
-      const noneDiv = document.createElement('div');
-      noneDiv.className = 'compare-stat';
-      noneDiv.textContent = 'No recorded window';
-      col.append(noneDiv);
-      return col;
-    }
-
-    const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
-
-    if (compareMode === 'average') {
-      const rate = pool.average || {};
-      appendCompareRate(col, rate);
-      if (rate.status === 'available' && rate.from_ms && rate.through_ms) compareStat(col, 'Measured ' + compareSpan(rate.from_ms, rate.through_ms));
-      const samples = rate.samples || 0;
-      const skipped = rate.skipped_windows ?? 0;
-      compareStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'} · ${skipped} skipped · ${pool.windows || 0} in range`);
-    } else {
-      const activeWindow = compareSelectedWindows.get(overrideKey) || pool.latest;
-      if (!activeWindow) {
-        compareStat(col, 'No recorded window');
-      } else {
-        appendCompareRate(col, activeWindow.rate || {});
-        if (activeWindow.start_ms && activeWindow.end_ms) compareStat(col, 'Window ' + compareSpan(activeWindow.start_ms, activeWindow.end_ms));
-        if (activeWindow.selected) {
-          const sel = activeWindow.selected;
-          let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
-          if (currentCompareData?.key_filtered && activeWindow.token_share_percent != null) {
-            selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
-          }
-          compareStat(col, selText);
-        }
-
-        if (pool.newest_unmeasured && activeWindow === pool.latest) {
-          const note = document.createElement('small');
-          note.className = 'muted';
-          note.textContent = 'Newer window not measured yet';
-          col.append(note);
-        }
-      }
-    }
-
-    const olderBtn = document.createElement('button');
-    olderBtn.type = 'button';
-    olderBtn.className = 'compare-older-btn';
-    olderBtn.textContent = 'Older windows';
-    olderBtn.onclick = async () => {
-      olderBtn.disabled = true;
-      try {
-        const body = {
-          profile: profile.reference,
-          kind: pool.kind,
-          scope: pool.scope,
-        };
-        const keyVal = el('compare-key').value;
-        const fromVal = el('compare-from').value;
-        const throughVal = el('compare-through').value;
-        if (keyVal) body.key = keyVal;
-        if (fromVal) body.from = fromVal;
-        if (throughVal) body.through = throughVal;
-
-        const listData = await api(root + '/history/compare-windows', 'POST', body);
-        let listContainer = col.olderListContainer;
-        if (!listContainer) {
-          listContainer = document.createElement('div');
-          listContainer.className = 'compare-older-list';
-          col.olderListContainer = listContainer;
-          col.append(listContainer);
-        }
-        listContainer.replaceChildren();
-        for (const w of listData.windows || []) {
-          const itemBtn = document.createElement('button');
-          itemBtn.type = 'button';
-          itemBtn.className = 'compare-older-item';
-          const wDate = date(w.start_ms / 1000).slice(0, 10) + ' → ' + date(w.end_ms / 1000).slice(0, 10);
-          const wRate = w.rate?.status === 'available' ? formatUSDPerPercent(w.rate.usd_per_percent) : (w.rate?.reason || w.rate?.status || 'No rate');
-          const wDelta = w.rate?.status === 'available' ? 'Δ' + pct1(w.rate.delta_pp) + ' pp' : '';
-          itemBtn.textContent = [wDate, wRate, wDelta].filter(Boolean).join(' · ');
-          itemBtn.onclick = () => {
-            compareSelectedWindows.set(overrideKey, w);
-            if (compareMode !== 'latest') {
-              compareMode = 'latest';
-              el('compare-mode-latest').setAttribute('aria-pressed', 'true');
-              el('compare-mode-average').setAttribute('aria-pressed', 'false');
-            }
-            renderCompare();
-          };
-          listContainer.append(itemBtn);
-        }
-        if (!(listData.windows || []).length) {
-          const emptyNote = document.createElement('div');
-          emptyNote.className = 'compare-stat';
-          emptyNote.textContent = 'No older windows';
-          listContainer.append(emptyNote);
-        }
-      } catch (err) {
-        showCompareError(err.message);
-      } finally {
-        olderBtn.disabled = false;
-      }
+  async function openInspect(profile, pool, window) {
+    const query = {
+      profile: profile.reference,
+      kind: pool.kind,
+      scope: pool.scope,
     };
-    col.append(olderBtn);
+    if (window?.id) query.window = window.id;
+    const keyVal = el('usage-key').value;
+    const fromVal = el('usage-from').value;
+    const throughVal = el('usage-through').value;
+    if (keyVal) query.key = keyVal;
+    if (fromVal) query.from = fromVal;
+    if (throughVal) query.through = throughVal;
 
-    return col;
+    try {
+      const data = await api(root + '/usage/inspect', 'POST', query);
+      const kindLbl = data.query.kind === 'weekly' ? '7-day' : data.query.kind === '5h' ? '5-hour' : data.query.kind;
+      const titleParts = [data.profile_name || profile.name, kindLbl];
+      if (data.mode === 'window' && data.window) {
+        titleParts.push(compareSpan(data.window.start_ms, data.window.end_ms));
+      } else {
+        titleParts.push(`average of ${data.windows} window${data.windows === 1 ? '' : 's'} (${data.excluded} excluded)`);
+      }
+      if (keyVal) {
+        const keyObj = currentUsageData?.api_keys?.find(k => k.id === keyVal);
+        titleParts.push(keyObj?.label || keyVal);
+      }
+      if (fromVal || throughVal) {
+        titleParts.push(`${fromVal || 'start'} → ${throughVal || 'now'}`);
+      }
+      el('usage-inspect-title').textContent = titleParts.filter(Boolean).join(' · ');
+
+      const tot = data.totals || {};
+      const summaryParts = [
+        formatNanoRange(tot.value_low_nano_usd, tot.value_high_nano_usd),
+        `${(tot.requests || 0).toLocaleString()} requests`,
+        `${tot.failed_percent != null ? pct1(tot.failed_percent) : '0'}% failed`,
+        `${tot.avg_tokens_per_request != null ? Math.round(tot.avg_tokens_per_request).toLocaleString() + ' tokens/req' : ''}`,
+        `${tot.cache_hit_percent != null ? pct1(tot.cache_hit_percent) : '0'}% cache hit`
+      ].filter(Boolean);
+      el('usage-inspect-summary').textContent = summaryParts.join(' · ');
+
+      if (data.per_percent) {
+        el('usage-inspect-per-percent').hidden = false;
+        el('usage-inspect-per-percent').textContent = `1% ≈ ${pct1(data.per_percent.requests)} requests ≈ ${Math.round(data.per_percent.output_tokens).toLocaleString()} output tokens`;
+      } else {
+        el('usage-inspect-per-percent').hidden = true;
+      }
+
+      el('usage-inspect-meter').replaceChildren();
+      const meterParts = [];
+      if (data.meter.start_percent != null && data.meter.end_percent != null) {
+        meterParts.push(`${pct1(data.meter.start_percent)}% → ${pct1(data.meter.end_percent)}%`);
+      }
+      meterParts.push(`Δ ${pct1(data.meter.delta_pp)} pp`);
+      meterParts.push(`${data.meter.readings} reading${data.meter.readings === 1 ? '' : 's'}`);
+      if (data.meter.from_ms && data.meter.through_ms) {
+        meterParts.push(compareSpan(data.meter.from_ms, data.meter.through_ms));
+      }
+      const meterLine = document.createElement('div');
+      meterLine.className = 'usage-stat';
+      meterLine.textContent = meterParts.join(' · ');
+      el('usage-inspect-meter').append(meterLine);
+
+      if (Array.isArray(data.meter.notes) && data.meter.notes.length > 0) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Notes';
+        details.append(summary);
+        for (const note of data.meter.notes) {
+          const p = document.createElement('p');
+          p.className = 'muted';
+          p.textContent = note;
+          details.append(p);
+        }
+        el('usage-inspect-meter').append(details);
+      }
+
+      el('usage-inspect-models').replaceChildren();
+      for (const m of data.models || []) {
+        const tr = document.createElement('tr');
+        const vals = [
+          m.model,
+          pct1(m.share_percent) + '%',
+          compactNum(m.tokens?.input),
+          compactNum(m.tokens?.cache_write),
+          compactNum(m.tokens?.cache_read),
+          compactNum(m.tokens?.output),
+          m.cache_hit_percent != null ? pct1(m.cache_hit_percent) + '%' : '0%'
+        ];
+        for (const v of vals) {
+          const td = document.createElement('td');
+          td.textContent = v;
+          tr.append(td);
+        }
+        el('usage-inspect-models').append(tr);
+      }
+      const totTr = document.createElement('tr');
+      totTr.className = 'usage-models-total';
+      const totVals = [
+        'Total',
+        '100%',
+        compactNum(tot.tokens?.input),
+        compactNum(tot.tokens?.cache_write),
+        compactNum(tot.tokens?.cache_read),
+        compactNum(tot.tokens?.output),
+        tot.cache_hit_percent != null ? pct1(tot.cache_hit_percent) + '%' : '0%'
+      ];
+      for (const v of totVals) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        totTr.append(td);
+      }
+      el('usage-inspect-models').append(totTr);
+
+      el('usage-inspect-costs').replaceChildren();
+      const c = tot.cost || {};
+      const inMid = c.input_nano_usd || 0;
+      const cwMid = ((c.cache_write_low_nano_usd || 0) + (c.cache_write_high_nano_usd || 0)) / 2;
+      const crMid = c.cache_read_nano_usd || 0;
+      const outMid = c.output_nano_usd || 0;
+      const totNano = inMid + cwMid + crMid + outMid;
+      const pctCost = val => totNano > 0 ? pct1(val * 100 / totNano) + '%' : '0%';
+      const costDiv = document.createElement('div');
+      costDiv.className = 'usage-cost-split';
+      costDiv.textContent = [
+        `Input: ${usd(inMid)} (${pctCost(inMid)})`,
+        `Cache write: ${formatNanoRange(c.cache_write_low_nano_usd, c.cache_write_high_nano_usd)} (${pctCost(cwMid)})`,
+        `Cache read: ${usd(crMid)} (${pctCost(crMid)})`,
+        `Output: ${usd(outMid)} (${pctCost(outMid)})`
+      ].join(' · ');
+      el('usage-inspect-costs').append(costDiv);
+
+      if (Array.isArray(data.keys) && data.keys.length > 0) {
+        el('usage-inspect-keys-wrap').hidden = false;
+        el('usage-inspect-keys').replaceChildren();
+        for (const k of data.keys) {
+          const kDiv = document.createElement('div');
+          kDiv.className = 'usage-stat';
+          kDiv.textContent = `${k.label || k.key}: ${pct1(k.share_percent)}% · ${k.requests.toLocaleString()} requests`;
+          el('usage-inspect-keys').append(kDiv);
+        }
+      } else {
+        el('usage-inspect-keys-wrap').hidden = true;
+      }
+
+      el('usage-inspect-lifetimes').textContent = 'Cache write lifetimes: ' +
+        compactNum(tot.cache_write_5m) + ' (5m) · ' +
+        compactNum(tot.cache_write_1h) + ' (1h) · ' +
+        compactNum(tot.cache_write_unresolved) + ' (unresolved) · ' +
+        compactNum(tot.cache_write_assumed_5m) + ' (assumed 5m)';
+
+      el('usage-inspect-dialog').showModal();
+    } catch (err) {
+      showUsageError(err.message);
+    }
   }
 
-  el('compare-key').onchange = () => loadCompare();
-  function onCompareDateInput() {
-    clearTimeout(compareDateTimer);
-    compareDateTimer = setTimeout(() => {
-      loadCompare();
+  async function openWindows(profile, pool, overrideKey) {
+    const query = {
+      profile: profile.reference,
+      kind: pool.kind,
+      scope: pool.scope,
+    };
+    const keyVal = el('usage-key').value;
+    const fromVal = el('usage-from').value;
+    const throughVal = el('usage-through').value;
+    if (keyVal) query.key = keyVal;
+    if (fromVal) query.from = fromVal;
+    if (throughVal) query.through = throughVal;
+
+    try {
+      const data = await api(root + '/usage/windows', 'POST', query);
+      const kindLbl = pool.kind === 'weekly' ? '7-day' : pool.kind === '5h' ? '5-hour' : pool.kind;
+      el('usage-windows-title').textContent = `${profile.name} · ${kindLbl} (${pool.scope}) windows`;
+      el('usage-windows-status').hidden = true;
+      el('usage-windows-rows').replaceChildren();
+
+      for (const w of data.windows || []) {
+        const tr = document.createElement('tr');
+        tr.className = 'usage-window-row';
+        if (w.excluded) tr.className += ' usage-window-excluded';
+
+        const tdDate = document.createElement('td');
+        tdDate.textContent = compareSpan(w.start_ms, w.end_ms);
+        if (w.note) {
+          const noteDiv = document.createElement('div');
+          noteDiv.className = 'usage-window-note';
+          noteDiv.textContent = w.note;
+          tdDate.append(noteDiv);
+        }
+        tr.append(tdDate);
+
+        const tdRate = document.createElement('td');
+        tdRate.textContent = w.rate?.status === 'available' ? formatUSDPerPercent(w.rate.usd_per_percent) : (w.rate?.reason || w.rate?.status || 'No rate');
+        tr.append(tdRate);
+
+        const tdDelta = document.createElement('td');
+        tdDelta.textContent = w.rate?.delta_pp != null ? 'Δ ' + pct1(w.rate.delta_pp) + ' pp' : '—';
+        tr.append(tdDelta);
+
+        const tdModel = document.createElement('td');
+        tdModel.textContent = (w.models && w.models.length > 0) ? cleanModelName(w.models[0].model) + ' ' + Math.round(w.models[0].share_percent) + '%' : '—';
+        tr.append(tdModel);
+
+        const tdCount = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'usage-window-count-checkbox';
+        cb.checked = !w.excluded;
+        if (!currentUsageData?.exclusions_editable) {
+          cb.disabled = true;
+          cb.title = "Needs Pacer's usage store";
+        } else {
+          cb.onchange = async () => {
+            const willBeExcluded = !cb.checked;
+            let note = '';
+            if (willBeExcluded) {
+              const res = prompt('Optional short note for exclusion:');
+              if (res === null) {
+                cb.checked = true;
+                return;
+              }
+              note = res.trim();
+            }
+            try {
+              const patchBody = {
+                revision: currentUsageData ? currentUsageData.exclusions_revision : 0,
+                profile: profile.reference,
+                window: w.id,
+                excluded: willBeExcluded,
+              };
+              if (note) patchBody.note = note;
+              await api(root + '/usage/exclusions', 'PATCH', patchBody);
+              usageCache.clear();
+              await loadUsage();
+              await openWindows(profile, pool, overrideKey);
+            } catch (err) {
+              if (err.status === 409 || (err.message && err.message.includes('409'))) {
+                usageCache.clear();
+                await loadUsage();
+                await openWindows(profile, pool, overrideKey);
+                const s = el('usage-windows-status');
+                s.hidden = false;
+                s.className = 'status error';
+                s.textContent = 'Exclusions changed meanwhile. Reloaded.';
+              } else {
+                const s = el('usage-windows-status');
+                s.hidden = false;
+                s.className = 'status error';
+                s.textContent = err.message;
+              }
+            }
+          };
+        }
+        tdCount.append(cb);
+        tr.append(tdCount);
+
+        const tdInspect = document.createElement('td');
+        const inspBtn = document.createElement('button');
+        inspBtn.type = 'button';
+        inspBtn.className = 'usage-window-inspect-btn';
+        inspBtn.textContent = 'Inspect';
+        inspBtn.onclick = () => {
+          el('usage-windows-dialog').close();
+          openInspect(profile, pool, w);
+        };
+        tdInspect.append(inspBtn);
+        tr.append(tdInspect);
+
+        const tdCard = document.createElement('td');
+        const cardBtn = document.createElement('button');
+        cardBtn.type = 'button';
+        cardBtn.className = 'usage-window-card-btn';
+        cardBtn.textContent = 'Show on card';
+        cardBtn.onclick = () => {
+          usageSelectedWindows.set(overrideKey, w);
+          if (usageMode !== 'latest') {
+            usageMode = 'latest';
+            el('usage-mode-latest').setAttribute('aria-pressed', 'true');
+            el('usage-mode-average').setAttribute('aria-pressed', 'false');
+          }
+          renderUsage();
+          el('usage-windows-dialog').close();
+        };
+        tdCard.append(cardBtn);
+        tr.append(tdCard);
+
+        el('usage-windows-rows').append(tr);
+      }
+
+      el('usage-windows-dialog').showModal();
+    } catch (err) {
+      showUsageError(err.message);
+    }
+  }
+
+  el('usage-key').onchange = () => loadUsage();
+  function onUsageDateInput() {
+    clearTimeout(usageDateTimer);
+    usageDateTimer = setTimeout(() => {
+      loadUsage();
     }, 250);
   }
-  el('compare-from').oninput = onCompareDateInput;
-  el('compare-from').onchange = onCompareDateInput;
-  el('compare-through').oninput = onCompareDateInput;
-  el('compare-through').onchange = onCompareDateInput;
-  el('compare-mode-latest').onclick = () => {
-    if (compareMode === 'latest') return;
-    compareMode = 'latest';
-    el('compare-mode-latest').setAttribute('aria-pressed', 'true');
-    el('compare-mode-average').setAttribute('aria-pressed', 'false');
-    renderCompare();
+  el('usage-from').oninput = onUsageDateInput;
+  el('usage-from').onchange = onUsageDateInput;
+  el('usage-through').oninput = onUsageDateInput;
+  el('usage-through').onchange = onUsageDateInput;
+  el('usage-mode-latest').onclick = () => {
+    if (usageMode === 'latest') return;
+    usageMode = 'latest';
+    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
+    el('usage-mode-average').setAttribute('aria-pressed', 'false');
+    renderUsage();
   };
-  el('compare-mode-average').onclick = () => {
-    if (compareMode === 'average') return;
-    compareMode = 'average';
-    el('compare-mode-latest').setAttribute('aria-pressed', 'false');
-    el('compare-mode-average').setAttribute('aria-pressed', 'true');
-    renderCompare();
+  el('usage-mode-average').onclick = () => {
+    if (usageMode === 'average') return;
+    usageMode = 'average';
+    el('usage-mode-latest').setAttribute('aria-pressed', 'false');
+    el('usage-mode-average').setAttribute('aria-pressed', 'true');
+    renderUsage();
   };
+  el('usage-inspect-close').onclick = () => el('usage-inspect-dialog').close();
+  el('usage-windows-close').onclick = () => el('usage-windows-dialog').close();
   async function refresh(){message('');forwardControls();try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
-    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadCompare()}
+    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage()}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearCompare();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
+  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
   el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
@@ -1090,17 +1162,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('model-reset').onclick=()=>saveModel(true);
   el('add-key').onclick=()=>editMetadata('add-key');el('add-group').onclick=()=>editMetadata('put-group');
   el('metadata-form').onsubmit=event=>{event.preventDefault();saveMetadata()};el('metadata-delete').onclick=()=>saveMetadata(true);el('metadata-cancel').onclick=()=>el('metadata-dialog').close();
-  el('report-form').onsubmit=event=>{event.preventDefault();loadReport()};
-  el('report-replay').onclick=()=>{try{const saved=JSON.parse(el('report-pin-input').value);loadReport({pin:saved.filter||saved})}catch{el('report-status').textContent='Invalid saved JSON pin'}};
-  el('report-json').onclick=()=>historyDownload('json');el('report-csv').onclick=()=>historyDownload('csv','daily');el('compare-csv').onclick=()=>historyDownload('csv','comparisons');
-  el('report-window-load').onclick=()=>loadReportWindows(false);el('report-window-next').onclick=()=>loadReportWindows(true);
-  el('report-request-prev').onclick=()=>loadReport({pin:{...reportPin,page:Math.max(0,(reportPin?.page||0)-1)}});el('report-request-next').onclick=()=>loadReport({pin:{...reportPin,page:(reportPin?.page||0)+1}});
-  el('evidence-json').onclick=()=>historyDownload('json','',evidenceWindow);el('evidence-csv').onclick=()=>historyDownload('csv','',evidenceWindow);el('evidence-close').onclick=()=>el('evidence-dialog').close();
-  el('legacy-form').onsubmit=event=>{event.preventDefault();loadLegacy()};
-  el('legacy-replay').onclick=()=>{try{const saved=JSON.parse(el('legacy-pin-input').value);loadLegacy(saved.filter||saved.pin||saved,saved.pin?(saved.kind||''):'')}catch{el('legacy-status').textContent='Invalid saved legacy JSON pin'}};
-  el('legacy-scenario-form').onsubmit=event=>{event.preventDefault();applyLegacyScenario()};
-  el('legacy-forecast-form').onsubmit=event=>{event.preventDefault();loadLegacyForecasts(el('legacy-forecast-window').value,false)};el('legacy-forecast-next').onclick=()=>{if(legacyForecast?.cursor)loadLegacyForecasts('',true)};
-  el('legacy-json').onclick=()=>legacyDownload('json');el('legacy-csv').onclick=()=>legacyDownload('csv');el('legacy-proof-json').onclick=()=>legacyDownload('json',true);el('legacy-proof-csv').onclick=()=>legacyDownload('csv',true);el('legacy-proof-close').onclick=()=>el('legacy-proof-dialog').close();
   if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
 })();
 </script></body></html>
