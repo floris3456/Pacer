@@ -114,6 +114,34 @@ pre,code,kbd,samp{background:var(--field)}
 #forward .toolbar>label{width:100%}
 #forward .toolbar>label>input,#forward .toolbar>label>select{width:100%}
 }
+#compare-panel{border:1px solid var(--line);border-radius:0;padding:16px;margin:18px 0;background:var(--surface)}
+#compare-panel h3{margin-top:0}
+.compare-toggle{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
+.compare-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
+.compare-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
+.compare-toggle button+button{border-left:1px solid var(--line-strong)}
+.compare-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin:12px 0}
+.compare-card{border:1px solid var(--line);background:var(--bg);padding:12px;display:flex;flex-direction:column;gap:8px}
+.compare-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px}
+.compare-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
+.compare-profile-name{font-weight:600;font-size:14px}
+.compare-meta{color:var(--muted);font-size:12px}
+.compare-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.compare-columns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.compare-col{display:flex;flex-direction:column;gap:4px;min-width:0}
+.compare-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
+.compare-big-num{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3}
+.compare-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.compare-older-btn{align-self:flex-start;font-size:11px;min-height:22px;padding:1px 6px;margin-top:4px}
+.compare-older-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.compare-older-item{background:var(--raised);border:1px solid var(--line);padding:3px 6px;text-align:left;cursor:pointer;color:var(--text);border-radius:var(--r);font-size:11px}
+.compare-older-item:hover{background:var(--hover);border-color:var(--line-strong)}
+#compare-footer{margin-top:10px;font-size:12px}
+#compare-footer p{margin:4px 0}
+@media(max-width:680px){
+#compare-panel{padding:12px}
+.compare-columns{grid-template-columns:1fr}
+}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
@@ -121,7 +149,7 @@ pre,code,kbd,samp{background:var(--field)}
 <div id="message" role="status" class="status" hidden></div>
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
-<section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p><div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div><details><summary>History and valuation coverage</summary><pre id="history"></pre></details>
+<section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p><section id="compare-panel" aria-labelledby="compare-title"><h3 id="compare-title">Compare profiles</h3><div class="toolbar"><label>API key <select id="compare-key"><option value="">All keys</option></select></label><label>From <input id="compare-from" type="date"></label><label>Through <input id="compare-through" type="date"></label><div class="compare-toggle" role="group" aria-label="Statistics view"><button type="button" id="compare-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="compare-mode-average" aria-pressed="false">Average</button></div></div><div id="compare-status" role="status" class="status" hidden></div><div id="compare-grid" class="compare-grid"></div><div id="compare-footer" class="muted"></div></section><div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div><details><summary>History and valuation coverage</summary><pre id="history"></pre></details>
 <section id="forward" aria-labelledby="forward-title">
 <h3 id="forward-title">Forward recorded usage</h3>
 <p>Native recorded attempts at a sealed checkpoint. Load captures one generation and selection; editing controls or refreshing status does not change that pin.</p>
@@ -216,7 +244,7 @@ pre,code,kbd,samp{background:var(--field)}
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
-  allowed.add('GET '+root+'/history/profiles');for(const op of ['report','windows','evidence','export'])allowed.add('POST '+root+'/history/'+op);
+  allowed.add('GET '+root+'/history/profiles');for(const op of ['report','windows','evidence','export','compare','compare-windows'])allowed.add('POST '+root+'/history/'+op);
   allowed.add('GET '+root+'/history/legacy/status');for(const op of ['profiles','profile-proof','history','history-proof','forecasts','quota','export','quota-export'])allowed.add('POST '+root+'/history/legacy/'+op);
   allowed.add('GET '+forwardRoot+'/status');allowed.add('PATCH '+forwardRoot+'/profiles');for(const op of ['pin','report','requests','evidence','export-json','export-csv'])allowed.add('POST '+forwardRoot+'/'+op);
   function bridgeCall(path,method,body){
@@ -632,16 +660,453 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('forward-evidence-close').onclick=()=>el('forward-evidence-dialog').close();
   el('forward-profile-read').onsubmit=event=>{event.preventDefault();return forwardTask(t=>forwardReadProfiles(el('forward-profile-revision').value,t),'forward-profile-status')};
   el('forward-profile-form').onsubmit=event=>{event.preventDefault();return forwardSaveProfile()};el('forward-profile-new').onclick=forwardNewProfile;el('forward-membership-add').onclick=()=>{try{forwardMembership()}catch(e){el('forward-profile-status').textContent=e.message}};
+  const compareCache = new Map();
+  let currentCompareData = null;
+  let compareMode = 'latest';
+  let compareGeneration = 0;
+  let compareDateTimer = null;
+  const compareSelectedWindows = new Map();
+
+  function formatUSDPerPercent(range) {
+    if (!range || !Number.isFinite(range.low) || !Number.isFinite(range.high)) return 'Unavailable';
+    const fmt = n => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    if (Math.abs(range.low - range.high) < 0.00005) {
+      return fmt(range.low) + ' / 1%';
+    }
+    return fmt(range.low) + ' – ' + fmt(range.high) + ' / 1%';
+  }
+  function formatTokens(range) {
+    if (!range || !Number.isFinite(range.low) || !Number.isFinite(range.high)) return 'Unknown';
+    if (Math.abs(range.low - range.high) < 1) {
+      return Math.round(range.low).toLocaleString() + ' tokens';
+    }
+    return Math.round(range.low).toLocaleString() + ' – ' + Math.round(range.high).toLocaleString() + ' tokens';
+  }
+  function formatNanoRange(lowNano, highNano) {
+    if (!Number.isFinite(lowNano) || !Number.isFinite(highNano)) return 'Unknown';
+    const low = usd(lowNano);
+    const high = usd(highNano);
+    return low === high ? low : low + ' – ' + high;
+  }
+  function findMainPool(pools, kind) {
+    if (!pools) return null;
+    const match = pools.filter(p => p.kind === kind);
+    if (!match.length) return null;
+    return match.find(p => p.main) || match[0];
+  }
+  function showCompareError(msg) {
+    const s = el('compare-status');
+    if (msg) {
+      s.hidden = false;
+      s.textContent = msg;
+      s.className = 'status error';
+    } else {
+      s.hidden = true;
+      s.textContent = '';
+      s.className = 'status';
+    }
+  }
+  function updateCompareAPIKeys(apiKeys) {
+    if (!Array.isArray(apiKeys)) return;
+    const sel = el('compare-key');
+    const cur = sel.value;
+    const existing = Array.from(sel.options).map(o => o.value);
+    const updated = ['', ...apiKeys.map(k => k.id)];
+    if (existing.length === updated.length && existing.every((v, i) => v === updated[i])) return;
+    while (sel.options.length > 1) sel.remove(1);
+    for (const k of apiKeys) {
+      const opt = document.createElement('option');
+      opt.value = k.id;
+      opt.textContent = k.label || k.id;
+      sel.append(opt);
+    }
+    if (updated.includes(cur)) sel.value = cur;
+  }
+  function clearCompare() {
+    compareGeneration++;
+    clearTimeout(compareDateTimer);
+    compareCache.clear();
+    compareSelectedWindows.clear();
+    currentCompareData = null;
+    compareMode = 'latest';
+    el('compare-mode-latest').setAttribute('aria-pressed', 'true');
+    el('compare-mode-average').setAttribute('aria-pressed', 'false');
+    el('compare-key').value = '';
+    while (el('compare-key').options.length > 1) el('compare-key').remove(1);
+    el('compare-from').value = '';
+    el('compare-through').value = '';
+    el('compare-grid').replaceChildren();
+    el('compare-footer').replaceChildren();
+    showCompareError('');
+  }
+  async function loadCompare() {
+    if (!connected) return;
+    const ticket = { generation, count: ++compareGeneration };
+    const keyVal = el('compare-key').value;
+    const fromVal = el('compare-from').value;
+    const throughVal = el('compare-through').value;
+    const cacheKey = `${keyVal}|${fromVal}|${throughVal}`;
+
+    compareSelectedWindows.clear();
+
+    if (compareCache.has(cacheKey)) {
+      currentCompareData = compareCache.get(cacheKey);
+      showCompareError('');
+      renderCompare();
+      return;
+    }
+
+    showCompareError('');
+    const query = {};
+    if (keyVal) query.key = keyVal;
+    if (fromVal) query.from = fromVal;
+    if (throughVal) query.through = throughVal;
+
+    try {
+      const data = await api(root + '/history/compare', 'POST', query);
+      if (!connected || ticket.generation !== generation || ticket.count !== compareGeneration) return;
+      compareCache.set(cacheKey, data);
+      currentCompareData = data;
+      updateCompareAPIKeys(data.api_keys);
+      renderCompare();
+    } catch (error) {
+      if (!connected || ticket.generation !== generation || ticket.count !== compareGeneration) return;
+      showCompareError(error.message);
+    }
+  }
+  function renderCompare() {
+    el('compare-grid').replaceChildren();
+    el('compare-footer').replaceChildren();
+    if (!currentCompareData) return;
+
+    const data = currentCompareData;
+    const profiles = [...(data.profiles || [])].sort((a, b) => (a.archived === b.archived ? 0 : a.archived ? 1 : -1));
+
+    if (profiles.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'muted';
+      p.textContent = 'No profiles found.';
+      el('compare-grid').append(p);
+    }
+
+    for (const profile of profiles) {
+      const card = document.createElement('div');
+      card.className = 'compare-card';
+
+      const header = document.createElement('div');
+      header.className = 'compare-card-header';
+
+      const prov = document.createElement('span');
+      prov.className = 'compare-provider';
+      prov.textContent = profile.provider || 'unknown';
+
+      const name = document.createElement('span');
+      name.className = 'compare-profile-name';
+      name.textContent = profile.name || '';
+
+      header.append(prov, name);
+      if (profile.archived) {
+        const badge = document.createElement('span');
+        badge.className = 'pill';
+        badge.textContent = 'Archived';
+        header.append(badge);
+      }
+
+      const cred = document.createElement('span');
+      cred.className = 'compare-meta';
+      cred.textContent = (profile.credentials || 0) + ' credential' + (profile.credentials === 1 ? '' : 's');
+      header.append(cred);
+      card.append(header);
+
+      if (Array.isArray(profile.current) && profile.current.length > 0) {
+        const metersDiv = document.createElement('div');
+        metersDiv.className = 'compare-meters';
+        for (const meter of profile.current) {
+          const mLine = document.createElement('div');
+          const kindLbl = meter.kind === 'weekly' ? '7-day' : meter.kind === '5h' ? '5-hour' : (meter.kind || '');
+          const usedStr = meter.used_percent != null ? meter.used_percent + '% used' : 'Unknown used';
+          const rstStr = meter.reset_ms ? 'resets ' + date(meter.reset_ms / 1000) : '';
+          const parts = [kindLbl + ' ' + usedStr];
+          if (rstStr) parts.push(rstStr);
+          if (meter.stale) parts.push('stale');
+          mLine.textContent = parts.join(' · ');
+          metersDiv.append(mLine);
+        }
+        card.append(metersDiv);
+      }
+
+      const colsDiv = document.createElement('div');
+      colsDiv.className = 'compare-columns';
+      const mainWeekly = findMainPool(profile.pools, 'weekly');
+      const main5h = findMainPool(profile.pools, '5h');
+
+      colsDiv.append(renderCompareCol(profile, mainWeekly, 'weekly', '7-day'));
+      colsDiv.append(renderCompareCol(profile, main5h, '5h', '5-hour'));
+      card.append(colsDiv);
+
+      const otherPools = (profile.pools || []).filter(p => p !== mainWeekly && p !== main5h);
+      if (otherPools.length > 0) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Other quota pools';
+        details.append(summary);
+        for (const op of otherPools) {
+          const opDiv = document.createElement('div');
+          opDiv.className = 'compare-stat';
+          const r = op.latest?.rate;
+          const rText = r?.status === 'available' ? formatUSDPerPercent(r.usd_per_percent) : (r?.reason || r?.status || 'No recorded rate');
+          opDiv.textContent = `${op.kind} (${op.scope}) · ${op.windows} windows · ${rText}`;
+          details.append(opDiv);
+        }
+        card.append(details);
+      }
+
+      el('compare-grid').append(card);
+    }
+
+    const frozenP = document.createElement('p');
+    frozenP.className = 'muted';
+    frozenP.textContent = 'Frozen at ' + date((data.frozen_at_ms || 0) / 1000);
+    el('compare-footer').append(frozenP);
+    if (Array.isArray(data.notes) && data.notes.length > 0) {
+      const notesP = document.createElement('p');
+      notesP.className = 'muted';
+      notesP.textContent = data.notes.join(' · ');
+      el('compare-footer').append(notesP);
+    }
+  }
+
+  function renderCompareCol(profile, pool, kind, colTitle) {
+    const col = document.createElement('div');
+    col.className = 'compare-col';
+
+    const colH = document.createElement('div');
+    colH.className = 'compare-col-header';
+    colH.textContent = colTitle;
+    col.append(colH);
+
+    if (!pool) {
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'compare-stat';
+      noneDiv.textContent = 'No recorded window';
+      col.append(noneDiv);
+      return col;
+    }
+
+    const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
+
+    if (compareMode === 'average') {
+      const rate = pool.average || {};
+      const bigNum = document.createElement('div');
+      bigNum.className = 'compare-big-num';
+      if (rate.status === 'available') {
+        bigNum.textContent = formatUSDPerPercent(rate.usd_per_percent);
+      } else {
+        bigNum.textContent = rate.reason || rate.status || 'Unavailable';
+      }
+      col.append(bigNum);
+
+      if (rate.equivalent_tokens_per_percent) {
+        const tokDiv = document.createElement('div');
+        tokDiv.className = 'compare-stat';
+        let tokStr = formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%';
+        if (rate.reference_name) tokStr += ' (' + rate.reference_name + ')';
+        tokDiv.textContent = tokStr;
+        col.append(tokDiv);
+      }
+
+      if (rate.start_percent != null && rate.end_percent != null) {
+        const measDiv = document.createElement('div');
+        measDiv.className = 'compare-stat';
+        measDiv.textContent = `measured ${rate.start_percent}% → ${rate.end_percent}% (Δ${rate.delta_pp} pp)`;
+        col.append(measDiv);
+      } else if (rate.delta_pp != null) {
+        const measDiv = document.createElement('div');
+        measDiv.className = 'compare-stat';
+        measDiv.textContent = `measured Δ${rate.delta_pp} pp`;
+        col.append(measDiv);
+      }
+
+      if (rate.from_ms && rate.through_ms) {
+        const datesDiv = document.createElement('div');
+        datesDiv.className = 'compare-stat';
+        datesDiv.textContent = `${date(rate.from_ms / 1000)} → ${date(rate.through_ms / 1000)}`;
+        col.append(datesDiv);
+      }
+
+      const avgStats = document.createElement('div');
+      avgStats.className = 'compare-stat';
+      const samples = rate.samples || 0;
+      const skipped = rate.skipped ?? rate.skipped_windows ?? 0;
+      avgStats.textContent = `${samples} window${samples === 1 ? '' : 's'} measured, ${skipped} skipped · ${pool.windows || 0} windows`;
+      col.append(avgStats);
+    } else {
+      const activeWindow = compareSelectedWindows.get(overrideKey) || pool.latest;
+      if (!activeWindow) {
+        const noneDiv = document.createElement('div');
+        noneDiv.className = 'compare-stat';
+        noneDiv.textContent = 'No recorded window';
+        col.append(noneDiv);
+      } else {
+        const rate = activeWindow.rate || {};
+        const bigNum = document.createElement('div');
+        bigNum.className = 'compare-big-num';
+        if (rate.status === 'available') {
+          bigNum.textContent = formatUSDPerPercent(rate.usd_per_percent);
+        } else {
+          bigNum.textContent = rate.reason || rate.status || 'Unavailable';
+        }
+        col.append(bigNum);
+
+        if (rate.equivalent_tokens_per_percent) {
+          const tokDiv = document.createElement('div');
+          tokDiv.className = 'compare-stat';
+          let tokStr = formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%';
+          if (rate.reference_name) tokStr += ' (' + rate.reference_name + ')';
+          tokDiv.textContent = tokStr;
+          col.append(tokDiv);
+        }
+
+        if (rate.start_percent != null && rate.end_percent != null) {
+          const measDiv = document.createElement('div');
+          measDiv.className = 'compare-stat';
+          measDiv.textContent = `measured ${rate.start_percent}% → ${rate.end_percent}% (Δ${rate.delta_pp} pp)`;
+          col.append(measDiv);
+        } else if (rate.delta_pp != null) {
+          const measDiv = document.createElement('div');
+          measDiv.className = 'compare-stat';
+          measDiv.textContent = `measured Δ${rate.delta_pp} pp`;
+          col.append(measDiv);
+        }
+
+        if (activeWindow.start_ms && activeWindow.end_ms) {
+          const datesDiv = document.createElement('div');
+          datesDiv.className = 'compare-stat';
+          datesDiv.textContent = `${date(activeWindow.start_ms / 1000)} → ${date(activeWindow.end_ms / 1000)}`;
+          col.append(datesDiv);
+        }
+
+        if (activeWindow.selected) {
+          const sel = activeWindow.selected;
+          const selDiv = document.createElement('div');
+          selDiv.className = 'compare-stat';
+          const valRange = formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd);
+          let selText = `${valRange} · ${sel.requests} requests`;
+          if (currentCompareData?.key_filtered && activeWindow.token_share_percent != null) {
+            selText += ` · this key: ${activeWindow.token_share_percent}% of window`;
+          }
+          selDiv.textContent = selText;
+          col.append(selDiv);
+        }
+
+        if (pool.newest_unmeasured && activeWindow === pool.latest) {
+          const note = document.createElement('small');
+          note.className = 'muted';
+          note.textContent = 'Newer window not measured yet';
+          col.append(note);
+        }
+      }
+    }
+
+    const olderBtn = document.createElement('button');
+    olderBtn.type = 'button';
+    olderBtn.className = 'compare-older-btn';
+    olderBtn.textContent = 'Older windows';
+    olderBtn.onclick = async () => {
+      olderBtn.disabled = true;
+      try {
+        const body = {
+          profile: profile.reference,
+          kind: pool.kind,
+          scope: pool.scope,
+        };
+        const keyVal = el('compare-key').value;
+        const fromVal = el('compare-from').value;
+        const throughVal = el('compare-through').value;
+        if (keyVal) body.key = keyVal;
+        if (fromVal) body.from = fromVal;
+        if (throughVal) body.through = throughVal;
+
+        const listData = await api(root + '/history/compare-windows', 'POST', body);
+        let listContainer = col.olderListContainer;
+        if (!listContainer) {
+          listContainer = document.createElement('div');
+          listContainer.className = 'compare-older-list';
+          col.olderListContainer = listContainer;
+          col.append(listContainer);
+        }
+        listContainer.replaceChildren();
+        for (const w of listData.windows || []) {
+          const itemBtn = document.createElement('button');
+          itemBtn.type = 'button';
+          itemBtn.className = 'compare-older-item';
+          const wDate = date(w.start_ms / 1000).slice(0, 10);
+          const wRate = w.rate?.status === 'available' ? formatUSDPerPercent(w.rate.usd_per_percent) : (w.rate?.reason || w.rate?.status || 'No rate');
+          const wDelta = w.rate?.delta_pp != null ? 'Δ' + w.rate.delta_pp + ' pp' : '';
+          itemBtn.textContent = [wDate, wRate, wDelta].filter(Boolean).join(' · ');
+          itemBtn.onclick = () => {
+            compareSelectedWindows.set(overrideKey, w);
+            if (compareMode !== 'latest') {
+              compareMode = 'latest';
+              el('compare-mode-latest').setAttribute('aria-pressed', 'true');
+              el('compare-mode-average').setAttribute('aria-pressed', 'false');
+            }
+            renderCompare();
+          };
+          listContainer.append(itemBtn);
+        }
+        if (!(listData.windows || []).length) {
+          const emptyNote = document.createElement('div');
+          emptyNote.className = 'compare-stat';
+          emptyNote.textContent = 'No older windows';
+          listContainer.append(emptyNote);
+        }
+      } catch (err) {
+        showCompareError(err.message);
+      } finally {
+        olderBtn.disabled = false;
+      }
+    };
+    col.append(olderBtn);
+
+    return col;
+  }
+
+  el('compare-key').onchange = () => loadCompare();
+  function onCompareDateInput() {
+    clearTimeout(compareDateTimer);
+    compareDateTimer = setTimeout(() => {
+      loadCompare();
+    }, 250);
+  }
+  el('compare-from').oninput = onCompareDateInput;
+  el('compare-from').onchange = onCompareDateInput;
+  el('compare-through').oninput = onCompareDateInput;
+  el('compare-through').onchange = onCompareDateInput;
+  el('compare-mode-latest').onclick = () => {
+    if (compareMode === 'latest') return;
+    compareMode = 'latest';
+    el('compare-mode-latest').setAttribute('aria-pressed', 'true');
+    el('compare-mode-average').setAttribute('aria-pressed', 'false');
+    renderCompare();
+  };
+  el('compare-mode-average').onclick = () => {
+    if (compareMode === 'average') return;
+    compareMode = 'average';
+    el('compare-mode-latest').setAttribute('aria-pressed', 'false');
+    el('compare-mode-average').setAttribute('aria-pressed', 'true');
+    renderCompare();
+  };
   async function refresh(){message('');forwardControls();try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
-    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.'}
+    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadCompare()}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
+  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearCompare();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();clearReport();clearLegacy();reportProfilesLoaded=false;el('report-form').reset();el('report-pin-input').value='';while(el('report-profile').options.length>2)el('report-profile').remove(2);for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
   el('disconnect').onclick=disconnect;
-  document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
+  document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected){refresh();if(tab==='usage')loadCompare()}});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
