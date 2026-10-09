@@ -101,11 +101,16 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-pool{display:flex;flex-direction:column;gap:6px}
 .usage-pool-title{font-size:12px;font-weight:650;color:var(--text);margin-top:4px}
 .usage-verified{border-color:#5f8f6a;color:#bfe3c6;cursor:help}
-.usage-card-actions{display:flex;gap:6px;flex-wrap:wrap}
+.usage-card-actions{display:flex;gap:6px;flex-wrap:wrap;background:transparent;border:0;margin-top:auto;padding-top:4px}
+.usage-archived{grid-column:1/-1;margin-top:4px}
+.usage-archived>summary{color:var(--muted);font-size:13px}
+.usage-archived>.usage-grid{margin-top:8px}
+.usage-rate-reason{font-size:11px;color:var(--muted);margin-top:2px;max-width:32ch}
 .usage-card-actions button{min-height:24px;padding:2px 8px;font-size:12px}
 .usage-exclude-editor td{background:var(--raised)}
 .usage-exclude-editor form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0}
-.usage-exclude-editor input{flex:1 1 220px;min-width:0}
+.usage-exclude-editor label{flex:1 1 320px;min-width:0}
+.usage-exclude-editor input{flex:1 1 200px;min-width:0}
 #usage-manage-dialog,#price-dialog{max-width:820px;width:95%;max-height:90vh;overflow:auto}
 .manage-account{border-bottom:1px solid var(--line);padding:8px 0;display:flex;flex-direction:column;gap:6px}
 .manage-account-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
@@ -147,7 +152,7 @@ pre,code,kbd,samp{background:var(--field)}
 #forward-evidence-body{max-height:60vh;overflow:auto}
 #forward-coverage{border-color:var(--line);border-left-color:var(--muted);color:var(--text);background:var(--raised)}
 #usage-technical :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-#usage-inspect-dialog,#usage-windows-dialog{max-width:760px;width:95%;max-height:90vh;overflow:auto}
+#usage-inspect-dialog,#usage-windows-dialog{max-width:900px;width:95%;max-height:90vh;overflow:auto}
 #usage-windows-dialog table,#usage-inspect-dialog table{margin:10px 0}
 tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 .usage-window-note{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px}
@@ -305,7 +310,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   let modelChannel = '', modelChannels = [], prices = null, priceIndex = new Map(), pricesError = '', priceEditing = null;
   const priceKey = (provider, model) => provider + '\u0000' + model;
   const channelProvider = ch => String(ch || '').startsWith('compat:') ? ch.slice(7) : ch;
-  const channelLabel = ch => modelChannels.find(c => c.id === ch)?.label || providerName(ch) || ch;
+  const channelLabel = ch => { const label = modelChannels.find(c => c.id === ch)?.label; return providerNames[ch] || (label && label !== ch ? label : ch); };
   const perMillion = n => '$' + Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
   const tokenCount = n => n >= 1e6 && n % 1e5 === 0 ? (n / 1e6) + 'M' : n >= 1000 && n % 1000 === 0 ? (n / 1000) + 'k' : String(n);
   function priceText(p) {
@@ -982,6 +987,9 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       return;
     }
 
+    // Archived profiles stay available, folded away at the end.
+    let archivedGrid = null;
+    const archivedCount = profiles.filter(p => p.archived).length;
     for (const profile of profiles) {
       const card = document.createElement('div');
       card.className = 'usage-card';
@@ -1054,7 +1062,19 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       actions.append(manage);
       card.append(actions);
 
-      el('usage-grid').append(card);
+      if (profile.archived) {
+        if (!archivedGrid) {
+          const details = document.createElement('details');
+          details.className = 'usage-archived';
+          const summary = document.createElement('summary');
+          summary.textContent = 'Archived profiles (' + archivedCount + ')';
+          archivedGrid = document.createElement('div');
+          archivedGrid.className = 'usage-grid';
+          details.append(summary, archivedGrid);
+          el('usage-grid').append(details);
+        }
+        archivedGrid.append(card);
+      } else el('usage-grid').append(card);
     }
   }
 
@@ -1256,7 +1276,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         tr.append(tdDate);
 
         const tdRate = document.createElement('td');
-        tdRate.textContent = w.rate?.status === 'available' ? formatUSDPerPercent(w.rate.usd_per_percent) : (w.rate?.reason || w.rate?.status || 'No rate');
+        if (w.rate?.status === 'available') tdRate.textContent = formatUSDPerPercent(w.rate.usd_per_percent);
+        else {
+          tdRate.textContent = 'No rate';
+          const why = document.createElement('div');
+          why.className = 'usage-rate-reason';
+          why.textContent = w.rate?.reason || w.rate?.status || '';
+          tdRate.append(why);
+        }
         if (w.verified) tdRate.append(document.createTextNode(' '), verifiedBadge(w.verified));
         tr.append(tdRate);
 
@@ -1406,51 +1433,56 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function accountProfiles(ref) {
     return (accountsData?.profiles || []).filter(p => !p.archived && p.accounts.some(m => m.account === ref && !m.to_ms));
   }
-  function loginLines(account) {
+  const plural = (n, word) => (n || 0).toLocaleString() + ' ' + word + (n === 1 ? '' : 's');
+  function loginList(account) {
     const box = document.createElement('div');
     box.className = 'manage-logins';
-    const others = (accountsData.accounts || []).filter(a => a.provider === account.provider && a.ref !== account.ref);
     for (const login of account.logins) {
       const line = document.createElement('div');
       line.className = 'manage-row';
       const when = [login.first_ms && 'first ' + day(login.first_ms), login.last_ms && 'last ' + day(login.last_ms)].filter(Boolean).join(', ');
-      line.append(span(login.label + ' · ' + (login.source === 'imported' ? 'imported' : 'Pacer') + (when ? ' · ' + when : '') + (login.certified ? ' · same account (certified at the switch)' : '')));
-      if (login.same_as) {
-        line.append(button('Unlink', () => linkEdit({ login: login.ref, linked: false }, 'Unlinked.')));
-      }
-      box.append(line);
-    }
-    if (others.length && account.logins.length === 1 && !account.logins[0].same_as) {
-      const line = document.createElement('div');
-      line.className = 'manage-row';
-      const label = document.createElement('label');
-      label.textContent = 'This is a new login of ';
-      const select = document.createElement('select');
-      select.className = 'manage-link-select';
-      select.append(new Option('choose the earlier account…', ''));
-      for (const o of others) select.append(new Option(o.label + (o.last_ms ? ' (last used ' + day(o.last_ms) + ')' : ''), o.ref));
-      label.append(select);
-      const link = button('Link as one account', () => { if (select.value) linkEdit({ login: account.logins[0].ref, same_as: select.value, linked: true }, 'Linked: both logins now count as one account.'); }, 'manage-link');
-      link.disabled = true;
-      select.onchange = () => { link.disabled = !select.value; };
-      line.append(label, link);
+      line.append(span(login.label + ' · ' + (login.source === 'imported' ? 'imported' : 'Pacer') + (when ? ' · ' + when : '') + (login.certified ? ' · certified as this account at the switch' : '')));
+      if (login.same_as) line.append(button('Unlink', () => linkEdit({ login: login.ref, linked: false }, 'Unlinked: the login is its own account again.')));
       box.append(line);
     }
     return box;
   }
-  function accountBlock(account, controls) {
+  // A re-login is the same provider account: linking continues its history.
+  function linkRow(account) {
+    const others = (accountsData.accounts || []).filter(a => a.provider === account.provider && a.ref !== account.ref);
+    if (!others.length || account.logins.length !== 1 || account.logins[0].same_as) return null;
+    const line = document.createElement('div');
+    line.className = 'manage-row';
+    const label = document.createElement('label');
+    label.textContent = 'New login of an earlier account? ';
+    const select = document.createElement('select');
+    select.className = 'manage-link-select';
+    select.append(new Option('no', ''));
+    for (const o of others) select.append(new Option(o.label + (o.last_ms ? ' (last used ' + day(o.last_ms) + ')' : ''), o.ref));
+    label.append(select);
+    const link = button('Link as one account', () => { if (select.value) linkEdit({ login: account.logins[0].ref, same_as: select.value, linked: true }, 'Linked: both logins now count as one account, with one history.'); }, 'manage-link');
+    link.disabled = true;
+    select.onchange = () => { link.disabled = !select.value; };
+    line.append(label, link);
+    return line;
+  }
+  function accountBlock(account, controls, withProvider = true) {
     const block = document.createElement('div');
     block.className = 'manage-account';
     const head = document.createElement('div');
     head.className = 'manage-account-head';
-    head.append(span(account.label, 'manage-account-name'), span(providerName(account.provider) + ' · ' + (account.requests || 0).toLocaleString() + ' requests' + (account.last_ms ? ' · last ' + day(account.last_ms) : '') + (account.logins.length > 1 ? ' · ' + account.logins.length + ' logins' : ''), 'usage-meta'));
+    head.append(span(account.label, 'manage-account-name'), span((withProvider ? providerName(account.provider) + ' · ' : '') + plural(account.requests, 'request') + (account.last_ms ? ' · last ' + day(account.last_ms) : ''), 'usage-meta'));
     block.append(head);
     if (controls) block.append(controls);
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = account.logins.length > 1 ? 'Logins (' + account.logins.length + ')' : 'Login';
-    details.append(summary, loginLines(account));
-    block.append(details);
+    const link = linkRow(account);
+    if (link) block.append(link);
+    if (account.logins.length > 1 || account.logins.some(l => l.same_as || l.certified)) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = plural(account.logins.length, 'login');
+      details.append(summary, loginList(account));
+      block.append(details);
+    }
     return block;
   }
   function addToProfileRow(account, profiles) {
@@ -1541,7 +1573,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         label.textContent = 'Account ';
         const select = document.createElement('select');
         select.className = 'manage-add-account';
-        for (const a of candidates) select.append(new Option(a.label + ' · ' + (a.requests || 0).toLocaleString() + ' requests' + (a.last_ms ? ' · last ' + day(a.last_ms) : ''), a.ref));
+        for (const a of candidates) select.append(new Option(a.label + ' · ' + plural(a.requests, 'request') + (a.last_ms ? ' · last ' + day(a.last_ms) : ''), a.ref));
         label.append(select);
         const when = document.createElement('select');
         when.className = 'manage-add-when';
@@ -1594,7 +1626,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         const inProfiles = accountProfiles(account.ref);
         if (!unassignedOnly) controls.append(span(inProfiles.length ? 'Counted on: ' + inProfiles.map(p => p.name).join(', ') : 'In no profile', 'usage-stat'));
         controls.append(addToProfileRow(account, profiles));
-        section.append(accountBlock(account, controls));
+        section.append(accountBlock(account, controls, false));
       }
       body.append(section);
     }
