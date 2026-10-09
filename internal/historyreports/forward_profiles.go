@@ -146,6 +146,12 @@ type ForwardProfileEdit struct {
 }
 
 func (s *ForwardStore) EditProfiles(ctx context.Context, expected int64, edit ForwardProfileEdit) (revision int64, err error) {
+	return s.editProfiles(ctx, expected, edit, false)
+}
+
+// editProfiles: known means the caller already checked every membership
+// account against the accounts it knows.
+func (s *ForwardStore) editProfiles(ctx context.Context, expected int64, edit ForwardProfileEdit, known bool) (revision int64, err error) {
 	if expected < 0 || (edit.ArchiveID == "") == (edit.Profile.ID == "") {
 		return 0, ErrInput
 	}
@@ -188,12 +194,14 @@ func (s *ForwardStore) EditProfiles(ctx context.Context, expected int64, edit Fo
 				if m.Account == "" || m.Start < 0 || m.End < 0 || m.End > 0 && m.End <= m.Start {
 					return ErrInput
 				}
-				var n int
-				if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM forward_base_events WHERE account=? AND provider=? UNION ALL SELECT 1 FROM forward_native WHERE account=? AND provider=?)`, m.Account, p.Provider, m.Account, p.Provider).Scan(&n); e != nil {
-					return e
-				}
-				if n == 0 {
-					return ErrInput
+				if !known {
+					var n int
+					if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM forward_base_events WHERE account=? AND provider=? UNION ALL SELECT 1 FROM forward_native WHERE account=? AND provider=?)`, m.Account, p.Provider, m.Account, p.Provider).Scan(&n); e != nil {
+						return e
+					}
+					if n == 0 {
+						return ErrInput
+					}
 				}
 				for _, prev := range p.Memberships[:i] {
 					if prev.Account == m.Account && (prev.End == 0 || m.Start < prev.End) && (m.End == 0 || prev.Start < m.End) {
