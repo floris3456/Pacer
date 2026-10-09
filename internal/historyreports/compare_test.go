@@ -183,7 +183,7 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: "profile:" + hash("missing"), Kind: "weekly", Scope: "all"}, nil); !errors.Is(e, ErrInput) {
 		t.Fatal(e)
 	}
-	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: view.Profiles[0].Reference, Kind: "monthly", Scope: "all"}, nil); !errors.Is(e, ErrInput) {
+	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: view.Profiles[0].Reference, Kind: "daily", Scope: "all"}, nil); !errors.Is(e, ErrInput) {
 		t.Fatal(e)
 	}
 	// Compare never needs the database once facts are loaded.

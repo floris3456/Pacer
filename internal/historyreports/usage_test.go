@@ -191,7 +191,7 @@ func TestInspectWindowAndAverage(t *testing.T) {
 	}
 	ref := view.Profiles[0].Reference
 	for _, q := range []InspectQuery{
-		{Profile: ref, Kind: "monthly", Scope: "all"},
+		{Profile: ref, Kind: "daily", Scope: "all"},
 		{Profile: ref, Kind: "weekly"},
 		{Profile: "profile:" + hash("missing"), Kind: "weekly", Scope: "all"},
 		{Profile: ref, Kind: "weekly", Scope: "all", Window: hash("no-such-window")[:32]},
