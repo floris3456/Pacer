@@ -644,3 +644,26 @@ func KeyHashes(selector string) []string {
 // WindowID is CPAMP's window identity for an observation (account, kind,
 // scope, reset), used for native readings so windows keep one ID scheme.
 func WindowID(o Observation) string { return windowID(o) }
+
+// AccountEvidence reads one account's events (token evidence enriched and
+// valued with the facts' book) and meter readings at the facts pin, exactly as
+// BuildQuotaFacts does, for the live build's pre-H tail.
+func (s *Service) AccountEvidence(ctx context.Context, q *QuotaFacts, account string) ([]Event, []Observation, error) {
+	if err := s.acquireHistory(ctx); err != nil {
+		return nil, nil, err
+	}
+	defer s.releaseHistory()
+	f := q.Filter
+	events, obs, err := s.evidence(ctx, account, f.Through, f.ObservationsThrough)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err = s.enrichTokenEvidence(ctx, events, q.PriceBook, f.TokenEvidenceThrough); err != nil {
+		return nil, nil, err
+	}
+	valueEvents(events, q.PriceBook)
+	return events, obs, nil
+}
+
+// ValueEvents values events with a comparison book as BuildQuotaFacts does.
+func ValueEvents(events []Event, book ComparisonPriceBook) { valueEvents(events, book) }

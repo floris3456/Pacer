@@ -146,14 +146,16 @@ type ComparePriceBook struct {
 }
 
 type CompareView struct {
-	Version     string           `json:"version"`
-	FrozenAtMS  int64            `json:"frozen_at_ms"`
-	Query       CompareQuery     `json:"query"`
-	KeyFiltered bool             `json:"key_filtered"`
-	PriceBook   ComparePriceBook `json:"price_book"`
-	APIKeys     []cpamp.APIKey   `json:"api_keys"`
-	Profiles    []CompareProfile `json:"profiles"`
-	Notes       []string         `json:"notes"`
+	Version    string `json:"version"`
+	FrozenAtMS int64  `json:"frozen_at_ms"` // data as of (now when Pacer's own record continues it)
+	// ImportedThroughMS is H: imported history before it, Pacer's own record after.
+	ImportedThroughMS int64            `json:"imported_through_ms"`
+	Query             CompareQuery     `json:"query"`
+	KeyFiltered       bool             `json:"key_filtered"`
+	PriceBook         ComparePriceBook `json:"price_book"`
+	APIKeys           []cpamp.APIKey   `json:"api_keys"`
+	Profiles          []CompareProfile `json:"profiles"`
+	Notes             []string         `json:"notes"`
 	// Set by the caller from the exclusion store.
 	ExclusionsRevision int64 `json:"exclusions_revision"`
 	ExclusionsEditable bool  `json:"exclusions_editable"`
@@ -233,7 +235,7 @@ func mainScope(scope string) bool {
 }
 
 func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclusions) (*cpamp.QuotaFacts, Workspace, error) {
-	facts, e := r.quotaFacts(ctx)
+	facts, e := r.usageFacts(ctx)
 	if e != nil {
 		return nil, Workspace{}, e
 	}
@@ -259,7 +261,7 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 	if e != nil {
 		return CompareView{}, e
 	}
-	out := CompareView{Version: CompareVersion, FrozenAtMS: facts.Filter.At, Query: q, KeyFiltered: q.Key != "", APIKeys: append([]cpamp.APIKey{}, w.APIKeys...), Profiles: []CompareProfile{}}
+	out := CompareView{Version: CompareVersion, FrozenAtMS: facts.Filter.At, ImportedThroughMS: r.importedThrough(ctx), Query: q, KeyFiltered: q.Key != "", APIKeys: append([]cpamp.APIKey{}, w.APIKeys...), Profiles: []CompareProfile{}}
 	out.PriceBook = ComparePriceBook{ID: w.PriceBook.ID, Policy: w.PriceBook.Policy, CapturedMS: w.PriceBook.Captured}
 	if h := w.PriceBook.Historical; h != nil {
 		out.PriceBook.Historical = h.Wording
