@@ -135,11 +135,13 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p>
 <div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div></div>
 <div id="usage-status" role="status" class="status" hidden></div>
+<p id="usage-asof" class="muted"></p>
 <div id="usage-grid" class="usage-grid"></div>
 <h3>Accounts right now</h3>
 <div class="table-wrap"><table><thead><tr><th>Account / scope</th><th>Remaining</th><th>Provider reset</th><th>State / source</th></tr></thead><tbody id="windows"></tbody></table></div>
 <details id="usage-technical"><summary>Technical details</summary>
 <div class="usage-tech-section"><h4>Data sources</h4>
+<p id="usage-record"></p>
 <pre id="history"></pre>
 <div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status" style="white-space:pre-line">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
 <details><summary>Exact status receipt · separate, non-atomic metadata</summary><pre id="forward-status-receipt"></pre></details>
@@ -553,10 +555,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('usage-from').value = '';
     el('usage-through').value = '';
     el('usage-grid').replaceChildren();
+    el('usage-asof').textContent = '';
+    el('usage-record').textContent = '';
     showUsageError('');
   }
 
-  async function loadUsage() {
+  async function loadUsage(refreshing = false) {
     if (!connected) return;
     const ticket = { generation, count: ++usageGeneration };
     const keyVal = el('usage-key').value;
@@ -566,8 +570,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
     usageSelectedWindows.clear();
 
-    if (usageCache.has(cacheKey)) {
-      currentUsageData = usageCache.get(cacheKey);
+    const cached = usageCache.get(cacheKey);
+    if (cached && refreshing && Date.now() - cached.at > 60000) usageCache.delete(cacheKey);
+    else if (cached) {
+      currentUsageData = cached.data;
       showUsageError('');
       renderUsage();
       return;
@@ -590,7 +596,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     try {
       const data = await pending;
       if (!connected || ticket.generation !== generation) return;
-      usageCache.set(cacheKey, data);
+      usageCache.set(cacheKey, { data, at: Date.now() });
       if (ticket.count !== usageGeneration) return;
       currentUsageData = data;
       updateUsageAPIKeys(data.api_keys);
@@ -715,11 +721,29 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     return col;
   }
 
+  // One plain sentence about where the numbers come from (technical details),
+  // and one short "as of" line on the page.
+  function renderUsageRecord(data) {
+    const h = data.imported_through_ms, live = data.live || {}, stats = live.stats || {};
+    el('usage-asof').textContent = data.frozen_at_ms ? 'Data as of ' + date(data.frozen_at_ms / 1000) : '';
+    const parts = [];
+    if (h) parts.push('Imported history (CPAMP) up to ' + date(h / 1000) + '.');
+    if (live.state === 'live') {
+      parts.push("Pacer's own record continues from there: " + (stats.native_requests || 0) + ' requests and ' + (stats.native_readings || 0) + ' meter readings, last updated ' + date(live.built_at_ms / 1000) + '.');
+      if (stats.new_accounts) parts.push(stats.new_accounts + (stats.new_accounts === 1 ? ' account is' : ' accounts are') + ' not linked to an imported account yet and count as unassigned.');
+      if (stats.ambiguous_account) parts.push(stats.ambiguous_account + ' records were left out because their account link is ambiguous.');
+    } else if (live.state === 'waiting') parts.push("Pacer's own record starts there; nothing recorded since.");
+    else if (live.state === 'error' || live.state === 'starting') parts.push(live.error || "Pacer's own record is starting.");
+    el('usage-record').textContent = parts.join(' ');
+  }
+
   function renderUsage() {
     el('usage-grid').replaceChildren();
+    el('usage-asof').textContent = '';
     if (!currentUsageData) return;
 
     const data = currentUsageData;
+    renderUsageRecord(data);
     const profiles = [...(data.profiles || [])].sort((a, b) => (a.archived === b.archived ? 0 : a.archived ? 1 : -1));
 
     if (profiles.length === 0) {
@@ -1130,7 +1154,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   async function refresh(){message('');forwardControls();try{
     if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
-    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage()}
+    else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};

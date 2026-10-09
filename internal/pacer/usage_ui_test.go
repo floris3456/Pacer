@@ -352,6 +352,10 @@ const ui = sandbox.ui;
   const cards = grid.children.filter(c => c.className === 'usage-card');
   assert.equal(cards.length, profilesData.profiles.length, 'All profiles must be rendered once');
 
+  // One short "as of" line on the page; where the numbers come from is in technical details.
+  assert(el('usage-asof').textContent.startsWith('Data as of '), 'as-of line');
+  assert(el('usage-record').textContent.startsWith('Imported history (CPAMP) up to '), 'record line');
+
   // Verify archived profiles ordered last with badge
   const nonArchivedCount = profilesData.profiles.filter(p => !p.archived).length;
   for (let i = 0; i < profilesData.profiles.length; i++) {
@@ -496,6 +500,8 @@ const ui = sandbox.ui;
   el('disconnect').onclick();
   assert.equal(ui.state().currentUsageData, null, 'Disconnect clears usage data');
   assert.equal(ui.state().usageCache.size, 0, 'Disconnect clears usage cache');
+  assert.equal(el('usage-asof').textContent, '', 'Disconnect clears the as-of line');
+  assert.equal(el('usage-record').textContent, '', 'Disconnect clears the record line');
   assert.equal(grid.children.length, 0, 'Disconnect clears usage grid');
 
   console.log('PASS: usage UI syntax and contracts verified.');
