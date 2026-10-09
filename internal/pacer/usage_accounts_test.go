@@ -125,6 +125,11 @@ func TestUsageOnlyProvidersAreObservedAndRecordedNotRouted(t *testing.T) {
 	if changes := p.usageLive.take(); changes[ref] != at.UnixMilli() {
 		t.Fatal("the usage loop was not told", changes)
 	}
+	// The request may have moved the meter: one read after the burst ends.
+	job, ok, err := p.observer.Status(ag.Account)
+	if err != nil || !ok || !job.Activity.Equal(at.UTC()) || job.Next.Before(at.Add(5*time.Minute)) || job.Next.After(at.Add(15*time.Minute)) {
+		t.Fatal("antigravity request did not schedule a meter read", job, ok, err)
+	}
 }
 
 // The settings routes: accounts with opaque references, a re-login link, a

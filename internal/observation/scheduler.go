@@ -14,16 +14,33 @@ import (
 )
 
 const (
-	AccountMinGap  = 15 * time.Minute
+	AccountMinGap = 15 * time.Minute
+	// EndpointMinGap spaces reads of one provider endpoint across accounts.
 	EndpointMinGap = 30 * time.Second
-	IdleInterval   = time.Hour
+	// IdleInterval is the longest a meter goes unread: an idle account, use
+	// outside CPA and a silent early reset show up within this time.
+	IdleInterval = 30 * time.Minute
+	// ActivityQuiet is how long after its last request an account whose meter
+	// only a direct read reveals is read again.
+	ActivityQuiet  = 5 * time.Minute
 	MaxBackoff     = 6 * time.Hour
 	ReasonSeed     = "seed"
 	ReasonPartial  = "partial"
 	ReasonDeadline = "deadline"
 	ReasonIdle     = "idle"
 	ReasonManual   = "manual"
+	ReasonActivity = "activity"
 )
+
+// directOnly names providers whose ordinary responses carry no quota: only a
+// direct read of their meter gives the balance and the reset.
+func directOnly(provider string) bool {
+	switch providerName(provider) {
+	case "antigravity", "opencode-go":
+		return true
+	}
+	return false
+}
 
 var ErrStaleJob = errors.New("observation: stale or unowned job token")
 
@@ -45,6 +62,8 @@ type Job struct {
 	AccountNotBefore  time.Time `json:"account_not_before"`
 	EndpointNotBefore time.Time `json:"endpoint_not_before"`
 	Failures          int       `json:"failures"`
+	// Activity is the last request served by a direct-only account.
+	Activity time.Time `json:"activity"`
 }
 
 type budget struct {
@@ -100,6 +119,8 @@ func queueDue(account, endpoint, reason string, due, now time.Time) time.Time {
 		return due.Add(jitter(account+endpoint+reason, due, 30*time.Second, 90*time.Second))
 	case ReasonIdle:
 		return due.Add(IdleInterval)
+	case ReasonActivity:
+		return due.Add(ActivityQuiet)
 	default:
 		return due
 	}
@@ -107,12 +128,12 @@ func queueDue(account, endpoint, reason string, due, now time.Time) time.Time {
 
 func getJob(c *sql.Conn, account string) (Job, bool, error) {
 	var j Job
-	var due, started int64
-	err := c.QueryRowContext(context.Background(), "SELECT account,endpoint,reason,due,state,token,started,joined,cancelled FROM observation_jobs WHERE account=?", account).Scan(&j.Account, &j.Endpoint, &j.Reason, &due, &j.State, &j.Token, &started, &j.Joined, &j.Cancelled)
+	var due, started, activity int64
+	err := c.QueryRowContext(context.Background(), "SELECT account,endpoint,reason,due,state,token,started,joined,cancelled,activity FROM observation_jobs WHERE account=?", account).Scan(&j.Account, &j.Endpoint, &j.Reason, &due, &j.State, &j.Token, &started, &j.Joined, &j.Cancelled, &activity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return j, false, nil
 	}
-	j.Due, j.Started = fromNS(due), fromNS(started)
+	j.Due, j.Started, j.Activity = fromNS(due), fromNS(started), fromNS(activity)
 	return j, err == nil, err
 }
 
@@ -135,31 +156,43 @@ func putBudget(c *sql.Conn, kind, key string, b budget) error {
 
 // coverage requires Claude's known shared 5h AND 7d fields (explicit null counts).
 // Codex legitimately has just a weekly primary. Scoped-only evidence cannot
-// accidentally stand in for the main budget. Unknown adapters are never claimed
-// complete by these provider-specific rules.
-func coverage(windows []Window, now time.Time) (bool, time.Time, string) {
+// accidentally stand in for the main budget. A direct-only provider (no quota in
+// its responses) is covered by its last read while that is fresh; a request it
+// served after that read asks for one more read ActivityQuiet after the last
+// such request. Unknown adapters are never claimed complete.
+func coverage(windows []Window, now, activity time.Time) (bool, time.Time, string) {
 	if len(windows) == 0 {
 		return false, time.Time{}, ReasonPartial
 	}
-	claude5, claude7, codex := false, false, false
-	var next time.Time
+	claude5, claude7, codex, direct := false, false, false, false
+	var next, read time.Time
 	reason := ReasonIdle
 	for _, w := range windows {
-		if !w.FreshComplete(now, IdleInterval) {
+		fresh := w.FreshComplete(now, IdleInterval)
+		if !fresh && directOnly(w.Provider) {
+			// A bucket with no running window may carry a balance and no reset.
+			fresh = w.State(now) == "partial" && w.Remaining != nil && w.Reset.IsZero() && !w.Usage.At.After(now) && now.Sub(w.Usage.At) < IdleInterval
+		}
+		if !fresh {
 			return false, time.Time{}, ReasonPartial
 		}
-		switch w.Provider {
-		case "claude":
+		switch {
+		case w.Provider == "claude":
 			claude5 = claude5 || (w.Scope == "all" && w.Seconds == 18000)
 			claude7 = claude7 || (w.Scope == "all" && w.Seconds == 604800)
-		case "codex":
+		case w.Provider == "codex":
 			codex = codex || w.Scope == "all"
+		case directOnly(w.Provider):
+			direct = true
 		default:
 			return false, time.Time{}, ReasonPartial
 		}
 		at := w.Usage.At
 		if w.NotApplicable || w.Dormant {
 			at = w.StatusEvidence.At
+		}
+		if at.After(read) {
+			read = at
 		}
 		candidate := at.Add(IdleInterval)
 		if next.IsZero() || candidate.Before(next) {
@@ -174,7 +207,12 @@ func coverage(windows []Window, now time.Time) (bool, time.Time, string) {
 			}
 		}
 	}
-	return (claude5 && claude7) || codex, next, reason
+	if direct && activity.After(read) {
+		if quiet := activity.Add(ActivityQuiet); quiet.Before(next) {
+			next, reason = quiet, ReasonActivity
+		}
+	}
+	return (claude5 && claude7) || codex || direct, next, reason
 }
 
 // reconcileJob cancels satisfied work, retaining an idle/deadline wake-up. This
@@ -188,7 +226,7 @@ func (s *Store) reconcileJob(c *sql.Conn, account string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	complete, next, reason := coverage(windows, now)
+	complete, next, reason := coverage(windows, now, j.Activity)
 	if complete {
 		cancelled := j.Cancelled
 		if j.State == "queued" {
@@ -257,6 +295,45 @@ func (s *Store) Queue(account, endpoint, reason string, due time.Time) error {
 				reason = j.Reason
 			}
 			_, err = c.ExecContext(context.Background(), "UPDATE observation_jobs SET joined=joined+1,state='queued',reason=?,due=? WHERE account=?", reason, ns(requested), account)
+		}
+		if err != nil {
+			return err
+		}
+		return s.reconcileJob(c, account, now)
+	})
+}
+
+// Activity notes a request that a direct-only account served at the given time.
+// Its meter is read once ActivityQuiet after the last such request, never
+// sooner than the account and endpoint floors allow. Other providers report
+// quota with their responses, so for them this is a no-op.
+func (s *Store) Activity(account, provider string, at time.Time) error {
+	if account == "" {
+		return errors.New("observation: account required")
+	}
+	if !directOnly(provider) {
+		return nil
+	}
+	endpoint, err := endpointKey(provider)
+	if err != nil {
+		return err
+	}
+	return s.write(func(c *sql.Conn) error {
+		now := s.clock().UTC()
+		if at.IsZero() || at.After(now) {
+			at = now
+		}
+		j, exists, err := getJob(c, account)
+		if err != nil {
+			return err
+		}
+		if exists && j.Endpoint != endpoint {
+			return errors.New("observation: account already uses a different endpoint budget")
+		}
+		if !exists {
+			_, err = c.ExecContext(context.Background(), "INSERT INTO observation_jobs(account,endpoint,reason,due,state,activity) VALUES(?,?,?,?,'queued',?)", account, endpoint, ReasonActivity, ns(queueDue(account, endpoint, ReasonActivity, at, now)), ns(at))
+		} else if at.After(j.Activity) {
+			_, err = c.ExecContext(context.Background(), "UPDATE observation_jobs SET activity=? WHERE account=?", ns(at), account)
 		}
 		if err != nil {
 			return err

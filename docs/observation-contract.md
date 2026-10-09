@@ -137,7 +137,8 @@ It remains estimated. A relative-only correction does not downgrade an absolute 
 | --- | --- |
 | `ReasonSeed` | base + stable 1–5m jitter |
 | `ReasonDeadline` | reported reset + stable 30–90s jitter |
-| `ReasonIdle` | last evidence/base + 1h |
+| `ReasonIdle` | last evidence/base + 30m |
+| `ReasonActivity` | last request of a direct-only account + 5m |
 | `ReasonPartial`, `ReasonManual`, custom reason | requested time, subject to every shared floor |
 
 There is one inflight job per account **and** endpoint, at least 15m between account starts,
@@ -147,12 +148,19 @@ erase a pending seed's jitter. Passed-reset grace also survives manual requests.
 
 Fresh complete evidence cancels queued fallback work and retains a `waiting` idle/deadline
 wake-up. More fresh passive observations postpone it, so sustained complete passive traffic
-causes zero periodic direct calls. Freshness ages balances/status after 1h; an older, future
+causes zero periodic direct calls. Freshness ages balances/status after 30m; an older, future
 absolute reset remains evidence. Claude completeness requires both known shared 5h and 7d
 windows; explicit null counts. Codex can legitimately have only one shared weekly primary.
 Every already-known scoped window must also be complete. A scoped-only signal cannot prove
 main-account coverage. A successful partial observation retries no earlier than 15m; a
-successful call with no stored evidence defaults to hourly background reconciliation.
+successful call with no stored evidence defaults to a background read after 30m.
+
+Antigravity and OpenCode Go answer requests without quota, so only a direct read reveals their
+meters (direct-only providers). Their last read covers them while it is fresh (30m); a bucket
+with no running window may carry a balance and no reset. `Activity` notes each request such an
+account serves; the scheduler then reads the meter 5m after the last request of a burst, at most
+30m after the previous read under steady use, and always subject to the floors above. For other
+providers `Activity` does nothing, because their responses carry the quota.
 
 429/transport/other failures persist account **and** shared-endpoint not-before. Fallback is
 15m, 30m, 1h, 2h, 4h, 6h, with nonnegative jitter up to 10% and a 6h fallback cap. The maximum

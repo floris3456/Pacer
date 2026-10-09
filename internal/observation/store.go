@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS observation_jobs (
  account TEXT PRIMARY KEY, endpoint TEXT NOT NULL, reason TEXT NOT NULL,
  due INTEGER NOT NULL, state TEXT NOT NULL, token TEXT NOT NULL DEFAULT '',
  started INTEGER NOT NULL DEFAULT 0, joined INTEGER NOT NULL DEFAULT 0,
- cancelled INTEGER NOT NULL DEFAULT 0);
+ cancelled INTEGER NOT NULL DEFAULT 0, activity INTEGER NOT NULL DEFAULT 0);
 CREATE UNIQUE INDEX IF NOT EXISTS observation_endpoint_inflight
  ON observation_jobs(endpoint) WHERE state='inflight';
 CREATE TABLE IF NOT EXISTS observation_budgets (
@@ -56,10 +56,39 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 		clock = time.Now
 	}
 	s := &Store{db: db, clock: clock}
-	if err := s.write(func(c *sql.Conn) error { _, err := c.ExecContext(context.Background(), schema); return err }); err != nil {
+	if err := s.write(func(c *sql.Conn) error {
+		if _, err := c.ExecContext(context.Background(), schema); err != nil {
+			return err
+		}
+		return addActivityColumn(c)
+	}); err != nil {
 		return nil, fmt.Errorf("observation schema: %w", err)
 	}
 	return s, nil
+}
+
+// addActivityColumn upgrades a jobs table created before activity reads.
+func addActivityColumn(c *sql.Conn) error {
+	rows, err := c.QueryContext(context.Background(), "SELECT name FROM pragma_table_info('observation_jobs')")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		found = found || name == "activity"
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || found {
+		return err
+	}
+	_, err = c.ExecContext(context.Background(), "ALTER TABLE observation_jobs ADD COLUMN activity INTEGER NOT NULL DEFAULT 0")
+	return err
 }
 
 // BEGIN IMMEDIATE makes read/check/write acquisition atomic even with separate

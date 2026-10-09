@@ -3,9 +3,10 @@ package pacer
 // Providers Pacer records only for the Usage Quota page (Antigravity, OpenCode
 // Go and any other non-routed provider): their credentials are discovered
 // separately from Claude/Codex, never enter routing, coverage or the forward
-// ledger, and their requests go straight to the usage record. Their meters are
-// read by the same observation scheduler (one read per account at most every
-// 15 minutes).
+// ledger, and their requests go straight to the usage record. Their responses
+// carry no quota, so the observation scheduler reads their meters: every 30
+// minutes, shortly after a burst of requests ends and just after a reset (never
+// more than once per account in 15 minutes).
 
 import (
 	"context"
@@ -81,9 +82,18 @@ func (p *Plugin) recordUsageOnly(raw []byte, authID, authIndex, provider string)
 			c, ok = x, true
 		}
 	}
-	store, source := p.recordStore, p.measurementSource
+	store, source, observer := p.recordStore, p.measurementSource, p.observer
 	p.mu.Unlock()
-	if !ok || store == nil || source == "" {
+	if !ok {
+		return
+	}
+	if observer != nil && observation.Endpoint(c.Provider) != "" {
+		// The request may have moved the meter: read it once the burst ends.
+		if err := observer.Activity(c.Account, c.Provider, p.now()); err != nil {
+			p.metricError(err)
+		}
+	}
+	if store == nil || source == "" {
 		return
 	}
 	cred := measurement.NativeCredential{Provider: c.Provider, AccountID: c.Account, CredentialRef: tracker.Digest(c.Provider + "\x00" + c.ID + "\x00" + c.Index), AuthID: c.ID, AuthIndex: c.Index}

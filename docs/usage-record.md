@@ -144,7 +144,8 @@ a window the provider ended before its reset.
 
 Credentials of providers other than Claude and Codex (Antigravity, OpenCode Go, ...) are discovered separately. They
 never enter routing, coverage, the measurement report or the forward ledger. Their final requests go straight to the
-record file; their meters are read by the observation scheduler (at most every 15 minutes per account):
+record file. Their responses carry no quota, so the observation scheduler reads their meters every 30 minutes, 5
+minutes after a burst of requests ends and just after a reset (never more than once per account in 15 minutes):
 - Antigravity: `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` with the login's
   project, parsed like CPAMP's poll (Gemini group; Claude and GPT group; 5h and weekly buckets);
 - OpenCode Go: `GET https://opencode.ai/zen/go/v1/usage` with the login's key (`rolling`, `weekly`, `monthly`).

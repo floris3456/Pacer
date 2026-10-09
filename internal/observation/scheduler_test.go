@@ -44,7 +44,7 @@ func finish(t *testing.T, s *Store, j *Job, code int, h http.Header) {
 	}
 }
 
-func TestFreshCompleteSuppressesCallsAndHourlyIdle(t *testing.T) {
+func TestFreshCompleteSuppressesCallsAndIdleRead(t *testing.T) {
 	s, c, _ := testStore(t)
 	queue(t, s, "a", "codex", ReasonSeed, time.Time{})
 	seed := status(t, s, "a")
@@ -66,15 +66,15 @@ func TestFreshCompleteSuppressesCallsAndHourlyIdle(t *testing.T) {
 		t.Fatalf("passive traffic caused %d direct starts: %v", count, err)
 	}
 	due := status(t, s, "a").Next
-	if !due.Equal(c.Now().Add(time.Hour)) {
-		t.Fatalf("hourly idle wake-up = %s", due)
+	if !due.Equal(c.Now().Add(30 * time.Minute)) {
+		t.Fatalf("idle wake-up = %s, want 30 minutes after the last reading", due)
 	}
 	c.Set(due)
 	job := acquire(t, s, "a", true)
 	observe(t, s, "a", "codex", sample(c.Now(), instant("2026-10-14T07:34:00Z"), 30))
 	finish(t, s, job, 200, nil)
-	if !status(t, s, "a").Next.Equal(c.Now().Add(time.Hour)) {
-		t.Fatal("successful complete response not hourly")
+	if !status(t, s, "a").Next.Equal(c.Now().Add(30 * time.Minute)) {
+		t.Fatal("successful complete response not read again after 30 minutes")
 	}
 }
 
@@ -350,12 +350,12 @@ func TestManualCannotEraseSeedOrDeadlineJitter(t *testing.T) {
 	}
 }
 
-func TestNoSignalSuccessUsesHourlyDefault(t *testing.T) {
+func TestNoSignalSuccessUsesIdleDefault(t *testing.T) {
 	s, c, _ := testStore(t)
 	queue(t, s, "a", "known-adapter:usage", ReasonManual, c.Now())
 	j := acquire(t, s, "a", true)
 	finish(t, s, j, 200, nil)
-	if next := status(t, s, "a"); !next.Next.Equal(c.Now().Add(time.Hour)) || next.Reason != ReasonIdle {
+	if next := status(t, s, "a"); !next.Next.Equal(c.Now().Add(30*time.Minute)) || next.Reason != ReasonIdle {
 		t.Fatalf("no-signal background retry too soon: %v", next)
 	}
 }
