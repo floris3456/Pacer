@@ -146,15 +146,7 @@ func (s *Service) BuildQuotaFacts(ctx context.Context, f ProfileWorkspaceFilter)
 	if err != nil {
 		return out, err
 	}
-	profiles := out.Config.Profiles
-	unassigned := len(profiles)
-	cardIDs := make([]string, 0, unassigned+1)
-	for _, p := range profiles {
-		cardIDs = append(cardIDs, p.ID)
-	}
-	cardIDs = append(cardIDs, "unassigned")
-	buckets := map[string]*FactBucket{}
-	bucketOrder := []string{}
+	acc := newFactsAccumulator(&out)
 	for _, a := range accounts {
 		if err = ctx.Err(); err != nil {
 			return out, err
@@ -176,146 +168,179 @@ func (s *Service) BuildQuotaFacts(ctx context.Context, f ProfileWorkspaceFilter)
 			cred.First, cred.Last = events[0].Started, events[len(events)-1].Started
 		}
 		out.Credentials = append(out.Credentials, cred)
-		belongs := func(index int, at int64) bool {
-			if index < unassigned {
-				return quotaProfileContains(out.Config, profiles[index], a.ID, at)
-			}
-			for _, p := range profiles {
-				if quotaProfileContains(out.Config, p, a.ID, at) {
-					return false
-				}
-			}
-			return true
-		}
-		cardsAt := func(at int64) []int {
-			cards := []int{}
-			for i := 0; i <= unassigned; i++ {
-				if belongs(i, at) {
-					cards = append(cards, i)
-				}
-			}
-			return cards
-		}
-		eventCards := make([][]int, len(events))
-		unassignedAccount := false
-		for n, e := range events {
-			cards := cardsAt(e.Started)
-			eventCards[n] = cards
-			if e.Started <= 0 {
-				out.OrderSensitive = true
-			}
-			if hasCard(cards, unassigned) {
-				unassignedAccount = true
-			}
-			key := strings.Join([]string{a.ID, time.UnixMilli(e.Started).UTC().Format("2006-01-02"), e.Model, e.APIKeyHash, cardKey(cards)}, "\x00")
-			b := buckets[key]
-			if b == nil {
-				b = &FactBucket{Account: a.ID, Day: time.UnixMilli(e.Started).UTC().Format("2006-01-02"), Model: e.Model, Key: e.APIKeyHash, Cards: cards, First: e.Started, Last: e.Started}
-				buckets[key] = b
-				bucketOrder = append(bucketOrder, key)
-			}
-			b.First, b.Last = min(b.First, e.Started), max(b.Last, e.Started)
-			b.Totals.add(e)
-		}
-		if unassignedAccount {
-			out.UnassignedPeriods = append(out.UnassignedPeriods, ProfileMembership{Account: a.ID})
-		}
+		acc.addAccount(a, events, obs)
+	}
+	acc.finish()
+	return out, nil
+}
 
-		derived := deriveValuationWindows(a, obs, events, f.At, out.PriceBook)
-		latest := map[string]string{}
-		latestAt := map[string]int64{}
-		for _, w := range derived {
-			key := w.Kind + "|" + w.Scope
-			if w.Status == "current" && (latest[key] == "" || w.LastObserved > latestAt[key] || w.LastObserved == latestAt[key] && w.ID < latest[key]) {
-				latest[key], latestAt[key] = w.ID, w.LastObserved
+// factsAccumulator is BuildQuotaFacts' per-account step, shared with the live
+// (post-H) build: buckets and windows from one account's valued events (sorted
+// by start) and meter readings, at out.Filter.At with out.Config/PriceBook.
+type factsAccumulator struct {
+	out         *QuotaFacts
+	profiles    []Profile
+	unassigned  int
+	cardIDs     []string
+	buckets     map[string]*FactBucket
+	bucketOrder []string
+}
+
+func newFactsAccumulator(out *QuotaFacts) *factsAccumulator {
+	profiles := out.Config.Profiles
+	acc := &factsAccumulator{out: out, profiles: profiles, unassigned: len(profiles), cardIDs: make([]string, 0, len(profiles)+1), buckets: map[string]*FactBucket{}}
+	for _, p := range profiles {
+		acc.cardIDs = append(acc.cardIDs, p.ID)
+	}
+	acc.cardIDs = append(acc.cardIDs, "unassigned")
+	return acc
+}
+
+func (acc *factsAccumulator) finish() {
+	for _, key := range acc.bucketOrder {
+		acc.out.Buckets = append(acc.out.Buckets, *acc.buckets[key])
+	}
+	acc.bucketOrder = nil
+}
+
+func (acc *factsAccumulator) addAccount(a Account, events []Event, obs []Observation) {
+	out, f := acc.out, acc.out.Filter
+	profiles, unassigned, cardIDs, buckets := acc.profiles, acc.unassigned, acc.cardIDs, acc.buckets
+	belongs := func(index int, at int64) bool {
+		if index < unassigned {
+			return quotaProfileContains(out.Config, profiles[index], a.ID, at)
+		}
+		for _, p := range profiles {
+			if quotaProfileContains(out.Config, p, a.ID, at) {
+				return false
 			}
 		}
-		for _, w := range derived {
-			if w.Kind != "5h" && w.Kind != "weekly" {
+		return true
+	}
+	cardsAt := func(at int64) []int {
+		cards := []int{}
+		for i := 0; i <= unassigned; i++ {
+			if belongs(i, at) {
+				cards = append(cards, i)
+			}
+		}
+		return cards
+	}
+	eventCards := make([][]int, len(events))
+	unassignedAccount := false
+	for n, e := range events {
+		cards := cardsAt(e.Started)
+		eventCards[n] = cards
+		if e.Started <= 0 {
+			out.OrderSensitive = true
+		}
+		if hasCard(cards, unassigned) {
+			unassignedAccount = true
+		}
+		key := strings.Join([]string{a.ID, time.UnixMilli(e.Started).UTC().Format("2006-01-02"), e.Model, e.APIKeyHash, cardKey(cards)}, "\x00")
+		b := buckets[key]
+		if b == nil {
+			b = &FactBucket{Account: a.ID, Day: time.UnixMilli(e.Started).UTC().Format("2006-01-02"), Model: e.Model, Key: e.APIKeyHash, Cards: cards, First: e.Started, Last: e.Started}
+			buckets[key] = b
+			acc.bucketOrder = append(acc.bucketOrder, key)
+		}
+		b.First, b.Last = min(b.First, e.Started), max(b.Last, e.Started)
+		b.Totals.add(e)
+	}
+	if unassignedAccount {
+		out.UnassignedPeriods = append(out.UnassignedPeriods, ProfileMembership{Account: a.ID})
+	}
+
+	derived := deriveValuationWindows(a, obs, events, f.At, out.PriceBook)
+	latest := map[string]string{}
+	latestAt := map[string]int64{}
+	for _, w := range derived {
+		key := w.Kind + "|" + w.Scope
+		if w.Status == "current" && (latest[key] == "" || w.LastObserved > latestAt[key] || w.LastObserved == latestAt[key] && w.ID < latest[key]) {
+			latest[key], latestAt[key] = w.ID, w.LastObserved
+		}
+	}
+	for _, w := range derived {
+		if w.Kind != "5h" && w.Kind != "weekly" {
+			continue
+		}
+		for _, at := range []int64{w.Start, w.Reset} {
+			if at > f.At && (out.NextTransition == 0 || at < out.NextTransition) {
+				out.NextTransition = at
+			}
+		}
+		windowEvents := []Event{}
+		windowCards := [][]int{}
+		decision := windowValuation(w, out.PriceBook)
+		start := sort.Search(len(events), func(i int) bool { return events[i].Started >= w.Start })
+		end := max(start, sort.Search(len(events), func(i int) bool { return events[i].Started >= w.AttributionEnd }))
+		for n := start; n < end; n++ {
+			e := events[n]
+			if inWindow(e, w) {
+				if out.PriceBook.Policy == profileValuePolicy {
+					v := valueWindowEvent(e, out.PriceBook, decision)
+					e.Value = &v
+				}
+				windowEvents = append(windowEvents, e)
+				windowCards = append(windowCards, eventCards[n])
+			}
+		}
+		base := QuotaUsageWindow{ID: w.ID, Account: w.Account, Provider: w.Provider, Label: w.Label, Kind: w.Kind, Scope: w.Scope, Start: w.Start, Reset: w.Reset, AttributionEnd: w.AttributionEnd, LastObserved: w.LastObserved, Used: w.Final, Status: w.Status, Stale: w.Status == "current" && f.At-w.LastObserved > 600000, Assigned: !strings.HasPrefix(w.Scope, "unknown"), AccountUsage: ProfileTotals{Tokens: w.Tokens, Requests: w.Requests, Failed: w.Failed, Unpriced: w.Unpriced, CostNano: w.CostNano}, Attribution: attributeKeyQuota(w, obs, windowEvents, "", false), Comparisons: []TierComparison{}, Notes: []string{"Quota is the credential's reported meter. Request totals follow the saved credential dates and selected API key. Historical quota is the last observed reading, not necessarily the final usage at reset."}}
+		normalizedByPeriod := map[string]*ProfileNormalization{}
+		normalization := func(profile string) *ProfileNormalization {
+			periods := normalizationPeriods(out.Config, profile, a.ID, w, f.ProfileFilter)
+			key := string(encode(periods))
+			if prior := normalizedByPeriod[key]; prior != nil {
+				return prior
+			}
+			n := normalizeProfileWindow(w, obs, events, out.PriceBook, f.ProfileFilter, periods)
+			normalizedByPeriod[key] = &n
+			return &n
+		}
+		base.Normalization = normalization("")
+		if out.PriceBook.Policy == profileValuePolicy {
+			base.Valuation = &decision
+		}
+		if w.BoundaryRevision {
+			base.Notes = append(base.Notes, "The provider revised this reset; the earlier window remains in history.")
+		}
+		selections := map[string]*FactSelection{}
+		selectionOrder := []string{}
+		owned := make([]int64, unassigned+1)
+		for n, e := range windowEvents {
+			if e.Value != nil {
+				base.AccountUsage.Value.add(*e.Value)
+				base.AccountUsage.Valued = true
+			}
+			cards := windowCards[n]
+			for _, c := range cards {
+				owned[c]++
+			}
+			key := strings.Join([]string{e.APIKeyHash, e.Model, cardKey(cards)}, "\x00")
+			sel := selections[key]
+			if sel == nil {
+				sel = &FactSelection{Key: e.APIKeyHash, Model: e.Model, Cards: cards}
+				selections[key] = sel
+				selectionOrder = append(selectionOrder, key)
+			}
+			sel.Totals.add(e)
+		}
+		fw := FactWindow{Account: a.ID, Base: base, KeyAttribution: attributeKeyQuota(w, obs, windowEvents, UnknownAPIKey, false), Latest: latest[w.Kind+"|"+w.Scope] == w.ID, TokensTotal: w.Tokens.Total, Readings: w.Observations, FirstObserved: w.FirstObserved, Selections: []FactSelection{}, Cards: []FactCard{}}
+		for _, key := range selectionOrder {
+			fw.Selections = append(fw.Selections, *selections[key])
+		}
+		for i, id := range cardIDs {
+			qf := QuotaUsageFilter{ProfileFilter: ProfileFilter{Profile: id}}
+			if i < unassigned && !quotaWindowSelected(out.Config, qf, w) {
 				continue
 			}
-			for _, at := range []int64{w.Start, w.Reset} {
-				if at > f.At && (out.NextTransition == 0 || at < out.NextTransition) {
-					out.NextTransition = at
-				}
+			if i == unassigned && owned[i] == 0 {
+				continue
 			}
-			windowEvents := []Event{}
-			windowCards := [][]int{}
-			decision := windowValuation(w, out.PriceBook)
-			start := sort.Search(len(events), func(i int) bool { return events[i].Started >= w.Start })
-			end := max(start, sort.Search(len(events), func(i int) bool { return events[i].Started >= w.AttributionEnd }))
-			for n := start; n < end; n++ {
-				e := events[n]
-				if inWindow(e, w) {
-					if out.PriceBook.Policy == profileValuePolicy {
-						v := valueWindowEvent(e, out.PriceBook, decision)
-						e.Value = &v
-					}
-					windowEvents = append(windowEvents, e)
-					windowCards = append(windowCards, eventCards[n])
-				}
-			}
-			base := QuotaUsageWindow{ID: w.ID, Account: w.Account, Provider: w.Provider, Label: w.Label, Kind: w.Kind, Scope: w.Scope, Start: w.Start, Reset: w.Reset, AttributionEnd: w.AttributionEnd, LastObserved: w.LastObserved, Used: w.Final, Status: w.Status, Stale: w.Status == "current" && f.At-w.LastObserved > 600000, Assigned: !strings.HasPrefix(w.Scope, "unknown"), AccountUsage: ProfileTotals{Tokens: w.Tokens, Requests: w.Requests, Failed: w.Failed, Unpriced: w.Unpriced, CostNano: w.CostNano}, Attribution: attributeKeyQuota(w, obs, windowEvents, "", false), Comparisons: []TierComparison{}, Notes: []string{"Quota is the credential's reported meter. Request totals follow the saved credential dates and selected API key. Historical quota is the last observed reading, not necessarily the final usage at reset."}}
-			normalizedByPeriod := map[string]*ProfileNormalization{}
-			normalization := func(profile string) *ProfileNormalization {
-				periods := normalizationPeriods(out.Config, profile, a.ID, w, f.ProfileFilter)
-				key := string(encode(periods))
-				if prior := normalizedByPeriod[key]; prior != nil {
-					return prior
-				}
-				n := normalizeProfileWindow(w, obs, events, out.PriceBook, f.ProfileFilter, periods)
-				normalizedByPeriod[key] = &n
-				return &n
-			}
-			base.Normalization = normalization("")
-			if out.PriceBook.Policy == profileValuePolicy {
-				base.Valuation = &decision
-			}
-			if w.BoundaryRevision {
-				base.Notes = append(base.Notes, "The provider revised this reset; the earlier window remains in history.")
-			}
-			selections := map[string]*FactSelection{}
-			selectionOrder := []string{}
-			owned := make([]int64, unassigned+1)
-			for n, e := range windowEvents {
-				if e.Value != nil {
-					base.AccountUsage.Value.add(*e.Value)
-					base.AccountUsage.Valued = true
-				}
-				cards := windowCards[n]
-				for _, c := range cards {
-					owned[c]++
-				}
-				key := strings.Join([]string{e.APIKeyHash, e.Model, cardKey(cards)}, "\x00")
-				sel := selections[key]
-				if sel == nil {
-					sel = &FactSelection{Key: e.APIKeyHash, Model: e.Model, Cards: cards}
-					selections[key] = sel
-					selectionOrder = append(selectionOrder, key)
-				}
-				sel.Totals.add(e)
-			}
-			fw := FactWindow{Account: a.ID, Base: base, KeyAttribution: attributeKeyQuota(w, obs, windowEvents, UnknownAPIKey, false), Latest: latest[w.Kind+"|"+w.Scope] == w.ID, TokensTotal: w.Tokens.Total, Readings: w.Observations, FirstObserved: w.FirstObserved, Selections: []FactSelection{}, Cards: []FactCard{}}
-			for _, key := range selectionOrder {
-				fw.Selections = append(fw.Selections, *selections[key])
-			}
-			for i, id := range cardIDs {
-				qf := QuotaUsageFilter{ProfileFilter: ProfileFilter{Profile: id}}
-				if i < unassigned && !quotaWindowSelected(out.Config, qf, w) {
-					continue
-				}
-				if i == unassigned && owned[i] == 0 {
-					continue
-				}
-				fw.Cards = append(fw.Cards, FactCard{Index: i, Normalization: normalization(id), CurrentAtPin: fw.Latest && belongs(i, f.At)})
-			}
-			out.Windows = append(out.Windows, fw)
+			fw.Cards = append(fw.Cards, FactCard{Index: i, Normalization: normalization(id), CurrentAtPin: fw.Latest && belongs(i, f.At)})
 		}
+		out.Windows = append(out.Windows, fw)
 	}
-	for _, key := range bucketOrder {
-		out.Buckets = append(out.Buckets, *buckets[key])
-	}
-	return out, nil
 }
 
 // filteredNormalization is normalizeProfileWindow's result under a key or model
