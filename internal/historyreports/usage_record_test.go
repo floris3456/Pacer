@@ -224,10 +224,10 @@ func TestRealRecordProbe(t *testing.T) {
 			t.Log(d)
 		}
 	}
-	t.Logf("pool mapping: compared %d windows, %d in renamed pools, %d differences (expected only in merged pools)", compared, skipped, len(diffs))
+	t.Logf("pool mapping: compared %d windows, %d in renamed pools, %d differences (expected only in Codex pools: merged pool, joined twins, early ends)", compared, skipped, len(diffs))
 	for _, d := range diffs {
-		if !strings.Contains(d, "codex-main") {
-			t.Error("difference outside the merged Codex pool:", d[:min(200, len(d))])
+		if !strings.Contains(d, "codex-main") && !strings.Contains(d, sparkScope) {
+			t.Error("difference outside the Codex pools:", d[:min(200, len(d))])
 		}
 	}
 	// Sealing: a month on, then a fresh process.

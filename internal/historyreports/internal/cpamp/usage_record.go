@@ -16,6 +16,35 @@ import (
 // weekly and monthly quota meters.
 func FactKind(kind string) bool { return kind == "5h" || kind == "weekly" || kind == "monthly" }
 
+// usageRates is the usage page's average (Pacer's rule). CPAMP's v3 policy
+// leaves two kinds of measured windows out of a profile's average: a window
+// the provider ended early ("superseded") and one whose cycle completion is
+// uncertain because its reset boundary overlaps another window (the window
+// that began after an early reset). Both measure $ per 1% exactly like any
+// other window: the rate comes from the window's own meter readings and the
+// requests between them. Pacer counts them. Each account's time still counts
+// once (overlapping intervals keep the largest measured one), and the user's
+// exclusions apply before this.
+//
+// aggregateProfileRates consults the policy only for that skip; the rule ID
+// and reference units are read from the book unchanged.
+func usageRates(windows []QuotaUsageWindow, book ComparisonPriceBook) []ProfileRateGroup {
+	book.Policy = ""
+	return aggregateProfileRates(windows, book)
+}
+
+// UsageRates exposes usageRates to tests that state the rule against the
+// original workspace's windows.
+func UsageRates(windows []QuotaUsageWindow, book ComparisonPriceBook) []ProfileRateGroup {
+	return usageRates(windows, book)
+}
+
+// EndedEarlyOrOverlapping reports whether CPAMP's v3 average leaves a window
+// out (and Pacer's counts it): superseded, or cycle completion uncertain.
+func EndedEarlyOrOverlapping(w QuotaUsageWindow, book ComparisonPriceBook) bool {
+	return book.Policy == profileValuePolicy && (w.Status == "superseded" || w.Valuation != nil && w.Valuation.Completion.Status == "uncertain")
+}
+
 // Range bounds one imported evidence read: events that started in
 // [EventsFrom, EventsTo) and meter readings observed in [ObsFrom, ObsTo).
 type Range struct {

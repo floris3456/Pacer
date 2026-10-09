@@ -158,10 +158,17 @@ class Element {
   set innerHTML(v) { throw Error('Unsafe HTML assignment'); }
   set textContent(v) { this._text = String(v ?? ''); this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent || '').join(' '); }
-  append(...items) { this.children.push(...items); }
-  replaceChildren(...items) { this._text = ''; this.children = items.filter(Boolean); }
+  append(...items) { for (const c of items) if (c && typeof c === 'object') c.parent = this; this.children.push(...items); }
+  replaceChildren(...items) { this._text = ''; this.children = items.filter(Boolean); for (const c of this.children) if (typeof c === 'object') c.parent = this; }
   get options() { return this.children; }
-  remove(i) { this.children.splice(i, 1); }
+  // remove() detaches this element; remove(i) removes a select option.
+  remove(i) {
+    if (i !== undefined) { this.children.splice(i, 1); return; }
+    const k = this.parent ? this.parent.children.indexOf(this) : -1;
+    if (k >= 0) this.parent.children.splice(k, 1);
+  }
+  after(node) { const k = this.parent.children.indexOf(this); node.parent = this.parent; this.parent.children.splice(k + 1, 0, node); }
+  focus() {}
   showModal() { this.open = true; }
   close() { this.open = false; }
   reset() {}
@@ -239,6 +246,13 @@ function response(path, body, method) {
     if (exclusionsPatched && d.windows?.length) {
       d.windows[0].excluded = true;
       d.windows[0].note = 'test note';
+    }
+    if (d.windows?.length) {
+      // A window the provider ended a day before its reset (Codex does).
+      const early = { ...d.windows[0], id: 'ended-early', status: 'closed', excluded: false, note: '' };
+      early.reset_ms = early.start_ms + 7 * 86400000;
+      early.end_ms = early.reset_ms - 86400000;
+      d.windows.push(early);
     }
     return d;
   }
@@ -470,16 +484,40 @@ const ui = sandbox.ui;
   assert(!checkbox.disabled, 'Checkbox must be enabled when exclusions_editable');
   assert(checkbox.checked, 'Initial window should be checked (not excluded)');
 
-  // Uncheck window -> prompt note -> PATCH -> reload
-  checkbox.checked = false;
+  // Ended early: said under the dates, with the reset that was due.
+  const windowsData = JSON.parse(fs.readFileSync(process.env.USAGE_WINDOWS_DATA, 'utf8'));
+  assert.equal(winRows.length, windowsData.windows.length + 1, 'one row per window (plus the injected early one)');
+  for (const [i, w] of windowsData.windows.entries()) {
+    const early = w.status !== 'current' && w.end_ms && w.reset_ms && w.end_ms < w.reset_ms - 60000;
+    assert.equal(winRows[i].textContent.includes('Ended early'), !!early, 'row ' + i + ' ended-early mark');
+  }
+  const earlyRow = winRows[winRows.length - 1];
+  assert.match(earlyRow.textContent, /Ended early · reset was due \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/, 'ended-early row');
+  assert(earlyRow.querySelector('input[type=checkbox]').checked, 'an ended-early window counts in the average');
+
+  // Uncheck window -> inline note editor (no browser prompt) -> PATCH -> reload
+  const settle = async () => { for (let i = 0; i < 50; i++) await new Promise(r => setImmediate(r)); };
+  const leaveOut = async (row, note) => {
+    const box = row.querySelector('input[type=checkbox]');
+    box.checked = false;
+    await box.onchange();
+    assert(box.checked, 'the box stays checked until the note is saved');
+    const rows = el('usage-windows-rows').children;
+    const editor = rows[rows.indexOf(row) + 1];
+    assert(editor && editor.className === 'usage-exclude-editor', 'inline editor opens under the row');
+    editor.querySelector('.usage-exclude-note').value = note;
+    editor.querySelector('form').onsubmit({ preventDefault() {} });
+    await settle();
+  };
+  sandbox.prompt = sandbox.window.prompt = () => { throw Error('browser prompt used'); };
   const callsBeforeWinChange = calls.length;
-  await checkbox.onchange();
+  await leaveOut(winRows[0], ' test note ');
 
   const patchCall = calls.find(c => c.method === 'PATCH' && c.path.endsWith('/usage/exclusions'));
   assert(patchCall, 'Unchecking sends a PATCH request');
   assert.equal(patchCall.body.revision, 0, 'PATCH sent with revision 0');
   assert.equal(patchCall.body.excluded, true, 'PATCH sent with excluded = true');
-  assert.equal(patchCall.body.note, 'test note', 'PATCH sent with prompted note');
+  assert.equal(patchCall.body.note, 'test note', 'PATCH sent with the typed note');
 
   // Verify reload occurred
   const profilesCallsAfter = calls.filter(c => c.path.endsWith('/usage/profiles'));
@@ -490,8 +528,7 @@ const ui = sandbox.ui;
 
   // 9b. 409 conflict reloads and shows "changed meanwhile"
   triggerConflict = true;
-  checkbox.checked = false;
-  await checkbox.onchange();
+  await leaveOut(el('usage-windows-rows').children[0], 'again');
   assert.match(el('usage-windows-status').textContent, /changed meanwhile/i, '409 shows changed meanwhile');
   assert.equal(el('usage-windows-status').hidden, false);
 

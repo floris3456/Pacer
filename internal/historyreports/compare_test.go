@@ -38,7 +38,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 			if len(view.Profiles) != len(unfiltered.Profiles) || view.Version != CompareVersion || view.KeyFiltered {
 				t.Fatalf("profiles %d/%d", len(view.Profiles), len(unfiltered.Profiles))
 			}
-			measured := 0
+			measured, countedEarly := 0, false
 			for i, p := range unfiltered.Profiles {
 				got := view.Profiles[i]
 				if got.Reference != "profile:"+hash(p.ID) || got.Name != p.Name || !reflect.DeepEqual(got.Lifetime, compareTotals(p.Lifetime)) || !reflect.DeepEqual(got.Selected, compareTotals(p.Selected)) {
@@ -75,8 +75,10 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 							t.Fatalf("profile %d pool %s/%s latest differs", i, pool.Kind, pool.Scope)
 						}
 					}
+					// The average is the original's, except that windows the
+					// provider ended early (or that overlap one) count too.
 					found := false
-					for _, g := range p.Rates {
+					for _, g := range cpamp.UsageRates(p.Windows, unfiltered.PriceBook) {
 						if g.Kind == pool.Kind && g.Scope == pool.Scope {
 							n := g.Normalization
 							found = reflect.DeepEqual(pool.Average, compareRate(&n))
@@ -85,10 +87,32 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 					if !found {
 						t.Fatalf("profile %d pool %s/%s average differs", i, pool.Kind, pool.Scope)
 					}
+					for _, g := range p.Rates {
+						if g.Kind != pool.Kind || g.Scope != pool.Scope {
+							continue
+						}
+						n := g.Normalization
+						if original := compareRate(&n); !reflect.DeepEqual(pool.Average, original) {
+							endedEarly := 0
+							for _, w := range p.Windows {
+								if w.Kind == pool.Kind && w.Scope == pool.Scope && w.Normalization != nil && w.Normalization.Status == "available" && cpamp.EndedEarlyOrOverlapping(w, unfiltered.PriceBook) {
+									endedEarly++
+								}
+							}
+							if endedEarly == 0 || pool.Average.Samples <= original.Samples || pool.Average.Samples > original.Samples+endedEarly {
+								t.Fatalf("profile %d pool %s/%s: average differs from CPAMP's without an early-ended window (%d) to explain it: %d vs %d samples", i, pool.Kind, pool.Scope, endedEarly, pool.Average.Samples, original.Samples)
+							}
+							t.Logf("profile %d pool %s/%s: %d → %d samples (%d measured windows ended early or overlap one)", i, pool.Kind, pool.Scope, original.Samples, pool.Average.Samples, endedEarly)
+							countedEarly = true
+						}
+					}
 				}
 			}
 			if measured == 0 {
 				t.Fatal("fixture has no measured window; comparison is vacuous")
+			}
+			if !countedEarly {
+				t.Fatal("fixture has no measured window that ended early; the average rule is not exercised")
 			}
 
 			// A key keeps account-wide rates and filters recorded totals exactly.

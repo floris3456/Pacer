@@ -91,8 +91,54 @@ Every reading is mapped to one canonical pool before derivation; window IDs are 
 | OpenCode Go | `all`: 5h (rolling), weekly, monthly (calendar month from the reset) |
 
 On real data the Fable pool gets a rate for the first time (Claude Max 20x: $6.00–8.27 per 1% over 6 windows) and
-the duplicate empty Codex pool disappears without changing the measured Codex rate. A pool that stopped reporting
-while the card's other pools kept reporting is shown under "Ended limits".
+the duplicate empty Codex pool disappears. A pool that stopped reporting while the card's other pools kept reporting
+is shown under "Ended limits".
+
+### Codex cycles: one window each, ending where the next begins
+
+Two things in Codex's readings made CPAMP's derivation split or stretch its weekly windows. `codexCycles` fixes both
+before derivation (Codex only; `PoolsVersion` `pools-v2` re-derives the record once):
+
+- **Twins.** Codex reports a reset as seconds from now, so response headers and API polls put one window's
+  boundaries 3–4 s apart, and Derive joins readings only within 2 s. The twin became a second window of the same
+  meter (same percentage at the same moments), listed twice, and every twin reading restarted the real window's
+  measurement (one week measured 11 of its 95 points). A group whose start and reset are within 10 s of a larger
+  group's now joins it (its readings take the larger group's boundaries and window ID, so the ID stays).
+- **Early ends.** Codex often ends a cycle early. Derive notices that only through the next window's first reading
+  and skips it when it looks like an idle forecast (0% at the window's start), which a new cycle's first reading
+  usually is; the earlier window then kept its scheduled reset and its requests overlapped the next window's for days.
+  When a later cycle starts inside a window's week and after its last reading, Pacer attaches closure evidence to
+  the next cycle's first reading (`CycleClosure`: end = the next cycle's start, earliest = the window's last reading),
+  the source-backed early end CPAMP's v3 derivation accepts (it applies under the v3 price policy, which the import
+  uses). The window becomes "closed" and ends where the next one begins; its readings and
+  rate are unchanged. A window whose readings continue past a later window's start (two meters reported at once, seen
+  once on real data) gets no closure.
+
+Real data (one ChatGPT Pro account, 2026-08-31 → H): 15 weekly windows become 12 (3 twins joined); every early-ended
+window now ends exactly at the next window's start; two weeks measure 95 and 99 points instead of 11 and 36.
+
+## Averages count every measured window
+
+A pool's average ($ per 1%) is the sum of the matched API value over the sum of measured meter points of its
+windows. CPAMP's v3 rule left out a window the provider ended early ("superseded") and one whose cycle completion is
+uncertain because its reset overlaps another window (the window after an early reset). Pacer counts both
+(`cpamp.usageRates`, used by the usage page; the extracted CPAMP code and the original workspace keep CPAMP's rule):
+each window's rate comes from its own readings and the requests between them, so an early end does not make it less
+valid. Still left out: windows without a rate (fewer than two usable readings, a request without a price), windows the
+user leaves out, and an interval of the same account already counted (duplicates keep the largest measured one).
+
+Real data, all profiles: only Codex and Antigravity change; Claude's averages are identical.
+
+| pool | CPAMP's rule | Pacer |
+|---|---|---|
+| ChatGPT Pro 20x, Codex weekly | 1 of 15 windows, $27.30 per 1% | 8 of 12 windows (495 points), $11.04 per 1% |
+| ChatGPT Pro 20x, Spark weekly / 5h | 1 / 2 windows | 2 / 3 windows |
+| Gemini Pro, Gemini weekly / 5h | 3 / 38 windows | 8 / 53 windows (rates $1.11 / $0.19, nearly unchanged) |
+
+The Codex weeks measure between $1.95 and $27.30 per 1%, so the average moved a lot; the four weekly windows still
+without a rate each hold a request without a price (`gpt-image-2`, `gpt-image-1.5`, `codex-auto-review`; 8 requests
+in total). A price for those models in Model Settings makes them count too. The Windows list says "Ended early" under
+a window the provider ended before its reset.
 
 ## Usage-only providers
 

@@ -156,6 +156,7 @@ pre,code,kbd,samp{background:var(--field)}
 #usage-windows-dialog table,#usage-inspect-dialog table{margin:10px 0}
 tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 .usage-window-note{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px}
+.usage-window-early{font-size:11px;color:var(--muted);margin-top:2px}
 .usage-cost-split{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);margin:8px 0}
 .usage-key-shares{margin:8px 0;font-size:12px}
 .usage-models-total td{font-weight:600}
@@ -704,6 +705,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     return cut(f) + ' → ' + cut(t) + ' UTC';
   }
 
+  // The provider ended the window before its scheduled reset (Codex often
+  // does); it counts like any other window.
+  const endedEarly = w => !!(w && w.end_ms && w.reset_ms && w.status !== 'current' && w.end_ms < w.reset_ms - 60000);
+  const windowSpan = w => compareSpan(w.start_ms, w.end_ms) + (endedEarly(w) ? ' · ended early' : '');
+
   const kindTitle = kind => kind === 'monthly' ? 'Month' : kind === 'weekly' ? '7-day' : kind === '5h' ? '5-hour' : (kind || '');
   const kindRank = kind => ({ monthly: 0, weekly: 1, '5h': 2 })[kind] ?? 3;
   const poolTitle = pool => (pool.label ? pool.label + ' · ' : '') + kindTitle(pool.kind);
@@ -882,7 +888,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       appendRateDisplay(col, activeWindow.rate || {});
       if (activeWindow.verified) col.append(verifiedBadge(activeWindow.verified));
       if (activeWindow.start_ms && activeWindow.end_ms) {
-        usageStat(col, compareSpan(activeWindow.start_ms, activeWindow.end_ms));
+        usageStat(col, windowSpan(activeWindow));
       }
       if (activeWindow.selected) {
         const sel = activeWindow.selected;
@@ -1096,7 +1102,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const data = await api(root + '/usage/inspect', 'POST', query);
       const titleParts = [data.profile_name || profile.name, poolTitle(pool)];
       if (data.mode === 'window' && data.window) {
-        titleParts.push(compareSpan(data.window.start_ms, data.window.end_ms));
+        titleParts.push(windowSpan(data.window));
       } else {
         titleParts.push(`average of ${data.windows} window${data.windows === 1 ? '' : 's'} (${data.excluded} excluded)`);
       }
@@ -1267,6 +1273,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
         const tdDate = document.createElement('td');
         tdDate.textContent = compareSpan(w.start_ms, w.end_ms);
+        if (endedEarly(w)) {
+          const early = document.createElement('div');
+          early.className = 'usage-window-early';
+          early.textContent = 'Ended early · reset was due ' + new Date(w.reset_ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+          tdDate.append(early);
+        }
         if (w.note) {
           const noteDiv = document.createElement('div');
           noteDiv.className = 'usage-window-note';

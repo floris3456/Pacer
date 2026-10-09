@@ -582,6 +582,12 @@ func assembleFactsWorkspace(ctx context.Context, q *QuotaFacts, f ProfileWorkspa
 			card.Windows = append(card.Windows, qw)
 		}
 	}
+	// The Pacer view counts windows the provider ended early (usageRates); the
+	// original workspace keeps CPAMP's rule.
+	rates := aggregateProfileRates
+	if o.WholeWindows {
+		rates = usageRates
+	}
 	for i := range r.Profiles {
 		counted := r.Profiles[i].Windows
 		if o.WholeWindows && o.Exclude != nil {
@@ -592,11 +598,11 @@ func assembleFactsWorkspace(ctx context.Context, q *QuotaFacts, f ProfileWorkspa
 				}
 			}
 		}
-		r.Profiles[i].Rates = aggregateProfileRates(counted, r.PriceBook)
+		r.Profiles[i].Rates = rates(counted, r.PriceBook)
 		sortWorkspaceWindows(r.Profiles[i].Windows)
 		sortWorkspaceWindows(r.Profiles[i].Current)
 	}
-	r.Unassigned.Rates = aggregateProfileRates(r.Unassigned.Windows, r.PriceBook)
+	r.Unassigned.Rates = rates(r.Unassigned.Windows, r.PriceBook)
 	sortWorkspaceWindows(r.Unassigned.Windows)
 	sortWorkspaceWindows(r.Unassigned.Current)
 	sortWorkspaceWindows(r.Windows)
