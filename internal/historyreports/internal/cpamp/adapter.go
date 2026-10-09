@@ -29,7 +29,17 @@ type Service struct {
 	reportKey     string
 	reportCache   Report
 	bounds        ProfileFilter
+	facts         atomic.Pointer[QuotaFacts]
 }
+
+// UseQuotaFacts lets Workspace rebuild eligible reports from prepared facts.
+func (s *Service) UseQuotaFacts(q *QuotaFacts) { s.facts.Store(q) }
+
+// WorkspaceOriginal always runs the original builder (oracle for tests).
+func (s *Service) WorkspaceOriginal(ctx context.Context, f ProfileWorkspaceFilter) (ProfileWorkspaceReport, error) {
+	return s.buildProfileWorkspace(ctx, f, false)
+}
+
 type cachedReport struct {
 	payload        []byte
 	used           uint64
@@ -139,7 +149,13 @@ func (s *Service) Workspace(ctx context.Context, f ProfileWorkspaceFilter) (Prof
 		r.Cache = &WorkspaceCacheStatus{Refreshing: false}
 		r.NextTransition = entry.nextTransition
 	} else {
-		r, e = s.buildProfileWorkspace(ctx, f, false)
+		fast := false
+		if q := s.facts.Load(); q != nil {
+			r, fast, e = s.FactsWorkspace(ctx, q, f, FactsOptions{})
+		}
+		if !fast && e == nil {
+			r, e = s.buildProfileWorkspace(ctx, f, false)
+		}
 		if e != nil {
 			return r, e
 		}

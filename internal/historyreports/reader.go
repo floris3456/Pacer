@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
@@ -79,6 +80,7 @@ type prepared struct {
 	TokenEvidence, Forecasts, Verifications int64
 	PollIntervalSeconds                     int64
 	HistoricalReads                         bool
+	QuotaFacts                              bool `json:",omitempty"`
 }
 
 // PrepareOptions freezes the source runtime setting that affects credential
@@ -94,6 +96,54 @@ type Reader struct {
 	historicalCache map[string]historicalEntry
 	historicalClock uint64
 	historicalBytes int
+	factsMu         sync.Mutex
+	facts           *cpamp.QuotaFacts
+}
+
+// quotaFacts decodes the prepared facts on first use (not in Open) and hands
+// them to the workspace builder. Older artifacts have none: ErrNotPrepared.
+func (r *Reader) quotaFacts(ctx context.Context) (*cpamp.QuotaFacts, error) {
+	if !r.meta.QuotaFacts {
+		return nil, ErrNotPrepared
+	}
+	r.factsMu.Lock()
+	defer r.factsMu.Unlock()
+	if r.facts != nil {
+		return r.facts, nil
+	}
+	var raw []byte
+	if e := r.db.QueryRowContext(ctx, `SELECT payload FROM pacer_quota_facts WHERE id=1`).Scan(&raw); e != nil {
+		return nil, domainError(ctx, e)
+	}
+	q := &cpamp.QuotaFacts{}
+	if json.Unmarshal(raw, q) != nil || q.Version != cpamp.QuotaFactsVersion {
+		return nil, ErrSource
+	}
+	r.facts = q
+	r.service.UseQuotaFacts(q)
+	return q, nil
+}
+
+// useFacts enables the fast workspace when facts exist; it never fails a report.
+func (r *Reader) useFacts(ctx context.Context) {
+	if r.meta.QuotaFacts {
+		_, _ = r.quotaFacts(ctx)
+	}
+}
+
+// prepareQuotaFacts records the default pin's filter-independent workspace
+// inputs during offline preparation.
+func prepareQuotaFacts(ctx context.Context, db *sql.DB, s *cpamp.Service, m prepared) error {
+	q, e := s.BuildQuotaFacts(ctx, m.Pin)
+	if e != nil {
+		return e
+	}
+	raw, e := json.Marshal(q)
+	if e != nil {
+		return e
+	}
+	_, e = db.ExecContext(ctx, `CREATE TABLE pacer_quota_facts(id INTEGER PRIMARY KEY CHECK(id=1),payload BLOB NOT NULL);INSERT INTO pacer_quota_facts VALUES(1,?)`, raw)
+	return e
 }
 
 // Prepare is explicit offline work. dir is trusted task-local configuration,
@@ -169,6 +219,10 @@ func Prepare(ctx context.Context, archive *history.Store, dir string, options ..
 		return nil, domainError(ctx, e)
 	}
 	m.HistoricalReads = true
+	if e = prepareQuotaFacts(ctx, db, s, m); e != nil {
+		return nil, domainError(ctx, e)
+	}
+	m.QuotaFacts = true
 	raw, _ := json.Marshal(m)
 	if _, e = db.ExecContext(ctx, `CREATE TABLE pacer_report_preparation(id INTEGER PRIMARY KEY CHECK(id=1),payload BLOB NOT NULL);INSERT INTO pacer_report_preparation VALUES(1,?)`, raw); e != nil {
 		return nil, ErrSource
@@ -401,6 +455,7 @@ func (r *Reader) Report(ctx context.Context, q Query) (Workspace, error) {
 	if e != nil {
 		return Workspace{}, e
 	}
+	r.useFacts(ctx)
 	out, e := r.service.Workspace(ctx, f)
 	return out, domainError(ctx, e)
 }

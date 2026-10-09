@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -224,6 +226,24 @@ func TestForward100001BootstrapResumeAndLiveness(t *testing.T) {
 	}
 	if report.Totals.UniqueAttempts == nil || *report.Totals.UniqueAttempts != 100001 || report.Totals.SourceRecords != 100001 || report.Totals.ValuedCount != 100001 || report.Totals.SelectionValue == nil || report.Totals.SelectionValue.Low != 100001*int64(725e7)+40000 {
 		t.Fatalf("not an exact 100001 result: %+v", report.Totals)
+	}
+	if probe := os.Getenv("PACER_FORWARD_FILTER_PROBE"); probe != "" {
+		for _, f := range []ForwardFilter{{Domain: "combined", Model: report.Pin.Filter.Model + "no-such-model"}, {Domain: "combined", KeyHash: strings.Repeat("a", 64)}, {Domain: "combined", Profile: "unassigned"}} {
+			fp, e := s.PinForward(ctx, pin.Generation, f)
+			if e != nil {
+				t.Fatal(e)
+			}
+			start := time.Now()
+			if _, e = s.ForwardReport(ctx, fp); e != nil {
+				t.Fatal(e)
+			}
+			t.Logf("filtered forward report %+v: %s", f, time.Since(start))
+		}
+		start := time.Now()
+		if _, e := s.ForwardReport(ctx, pin); e != nil {
+			t.Fatal(e)
+		}
+		t.Logf("default forward report: %s", time.Since(start))
 	}
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)

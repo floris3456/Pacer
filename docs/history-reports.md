@@ -124,6 +124,41 @@ a hard CPU deadline. A separate 16-entry/**32 MiB** serialized-result memory cac
 shares repeated historical reads safely. Forecast proof arrays can still scale
 with retained ledger rows, although the public forecast page returns at most 100.
 
+### Quota facts and instant Compare (2026-10-09)
+
+Measured on the real 5-week backup (166,050 events, 278,399 observations, 15
+accounts, 5 profiles, 389 windows): one Workspace built by the original algorithm
+took 4–9 s on an M-series laptop, and every filter change paid it again (reading
+and re-pricing every event, re-deriving every window). The legacy profile view took
+~22 s.
+
+`Prepare` therefore also stores **quota facts** (`pacer_quota_facts`, metadata flag
+`QuotaFacts`): the default pin's filter-independent workspace inputs, recorded by
+running the original functions once (`cpamp.BuildQuotaFacts`). They are additive
+event buckets (account × UTC day × model × key hash × profile set → totals) and,
+per derived window, its unfiltered result, per-profile normalization and per
+key/model/profile-set selection totals. On the real backup: 411 buckets, 389
+windows, 4.0 MB JSON, 5 s to build, 15 ms to decode.
+
+- **Exact path.** `Report`/`ListWindows` without date bounds at the prepared pin are
+  rebuilt from facts (`FactsWorkspace`) and are byte-identical to the original
+  builder: 440 synthetic filters (every profile, key, lineage hash, model and
+  account, plus 4-way crosses) in `TestQuotaFactsWorkspaceParity`, and the real
+  backup in the env-gated `TestRealQuotaFactsParity`. Date-bounded reports, other
+  pins and artifacts without facts keep the original builder unchanged.
+- **Compare view.** `Compare(ctx, CompareQuery{Key, From, Through})` and
+  `CompareWindows` (routes `POST history/compare`, `history/compare-windows`) read
+  only the in-memory facts (no SQLite, so they also bypass the two report slots).
+  Every profile is returned, each pool's newest measured window (the original
+  Compare's default pick) and the measured history average. Two deliberate
+  differences from the original builder: dates are whole UTC days and an
+  overlapping window counts **whole** (its rate is not clipped to the dates); and
+  `$ per 1%` stays account-wide under a key filter (the key changes recorded
+  requests/value and its share of each window). `TestCompareMatchesOriginalWorkspace`
+  pins everything else to the original output.
+- Older artifacts return `ErrNotPrepared` (HTTP 409) for Compare; re-run offline
+  `prepare-reports`.
+
 ## Parent API contract
 
 Parent owns authorization, HTTP limits, `internal/pacer` handlers and UI. All
