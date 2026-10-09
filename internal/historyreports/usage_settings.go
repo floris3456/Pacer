@@ -111,20 +111,17 @@ func (s *ForwardStore) SetAccountLink(ctx context.Context, expected int64, accou
 
 // ---- Model prices ----
 
-// ModelPrices is Pacer's price list: the last models.dev sync (only the
-// providers Pacer can serve) and prices set by hand. Prices are USD per
-// million tokens, as CPAMP's price book.
+// ModelPrices is Pacer's price list: prices set by hand (append-only
+// revisions in the forward store) and the last models.dev sync. Prices are
+// USD per million tokens, as CPAMP's price book.
 type ModelPrices struct {
-	Revision int64 `json:"revision"`
-	// Catalog is the models.dev subset of the last successful sync.
-	Catalog      ModelsDevCatalog             `json:"catalog"`
-	SyncedAtMS   int64                        `json:"synced_at_ms,omitempty"`
-	SyncError    string                       `json:"sync_error,omitempty"`
-	SyncTriedMS  int64                        `json:"sync_tried_at_ms,omitempty"`
-	SyncETag     string                       `json:"sync_etag,omitempty"`
-	Manual       map[string]ForwardModelPrice `json:"manual"`
-	ManualAtMS   map[string]int64             `json:"manual_at_ms,omitempty"`
-	CatalogBytes int                          `json:"catalog_bytes,omitempty"`
+	Revision   int64                        `json:"revision"`
+	Manual     map[string]ForwardModelPrice `json:"manual"`
+	ManualAtMS map[string]int64             `json:"manual_at_ms,omitempty"`
+	// Catalog is the last models.dev sync, kept in the record file (it is
+	// fetched again when lost); the caller fills it in.
+	Catalog    ModelsDevCatalog `json:"-"`
+	SyncedAtMS int64            `json:"-"`
 }
 
 func (s *ForwardStore) ModelPrices(ctx context.Context) (ModelPrices, error) {
@@ -443,4 +440,12 @@ func (s *ForwardStore) EditProfilesKnown(ctx context.Context, expected int64, ed
 		}
 	}
 	return s.editProfiles(ctx, expected, edit, true)
+}
+
+// Hash is the sha256 hex digest used for references.
+func Hash(s string) string { return hash(s) }
+
+// ExactProfileMemberships are a profile's effective intervals per account.
+func ExactProfileMemberships(c ForwardProfileConfig, p ForwardProfile) []ForwardMembership {
+	return cpamp.ExactMemberships(c, p)
 }

@@ -247,6 +247,12 @@ func first(v map[string]json.RawMessage, names ...string) json.RawMessage {
 // ignored. Explicit Claude null/dormant values stay distinct from missing data.
 func API(provider string, body []byte, at time.Time) ([]Window, error) {
 	provider = providerName(provider)
+	switch provider {
+	case "antigravity":
+		return antigravityAPI(body, at)
+	case "opencode-go":
+		return opencodeGoAPI(body, at)
+	}
 	if provider != "claude" && provider != "codex" {
 		return nil, nil
 	}
@@ -339,6 +345,97 @@ func API(provider string, body []byte, at time.Time) ([]Window, error) {
 				}
 				add(limitScope(name), rate)
 			}
+		}
+	}
+	sortWindows(out)
+	return out, nil
+}
+
+// MonthSeconds is the window length Pacer stores for monthly meters. The
+// provider's month is a calendar month; the usage record derives its start
+// from the reset, so the stored length only names the meter.
+const MonthSeconds = 30 * 86400
+
+// antigravityAPI parses Google's retrieveUserQuotaSummary answer: groups of
+// models (Gemini; Claude and GPT) with a 5-hour and a weekly bucket each.
+func antigravityAPI(body []byte, at time.Time) ([]Window, error) {
+	if at.IsZero() {
+		return nil, errors.New("observation: source time required")
+	}
+	var data struct {
+		Groups []struct {
+			DisplayName string            `json:"displayName"`
+			Buckets     []json.RawMessage `json:"buckets"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, err
+	}
+	if data.Groups == nil {
+		return nil, errors.New("observation: expected quota groups")
+	}
+	out := []Window{}
+	for _, g := range data.Groups {
+		name := strings.ToLower(g.DisplayName)
+		scope := ""
+		switch {
+		case strings.Contains(name, "gemini"):
+			scope = "gemini"
+		case strings.Contains(name, "claude") && strings.Contains(name, "gpt"):
+			scope = "claude_gpt"
+		default:
+			continue
+		}
+		for _, raw := range g.Buckets {
+			v := object(raw)
+			seconds := int64(0)
+			switch scalar(v["window"]) {
+			case "5h":
+				seconds = 18000
+			case "weekly":
+				seconds = 604800
+			default:
+				continue
+			}
+			remaining, err := strconv.ParseFloat(scalar(v["remainingFraction"]), 64)
+			if err != nil || math.IsNaN(remaining) || remaining < 0 || remaining > 1 {
+				continue
+			}
+			w := window("antigravity", scope, seconds, strconv.FormatFloat(1-remaining, 'g', -1, 64), scalar(v["resetTime"]), "", true, at, APISource)
+			if w.Valid() {
+				out = append(out, w)
+			}
+		}
+	}
+	sortWindows(out)
+	return out, nil
+}
+
+// opencodeGoAPI parses OpenCode Go's usage answer: rolling (5-hour), weekly
+// and monthly windows, each with the used percent and its reset.
+func opencodeGoAPI(body []byte, at time.Time) ([]Window, error) {
+	if at.IsZero() {
+		return nil, errors.New("observation: source time required")
+	}
+	var data struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, err
+	}
+	if data.Usage == nil {
+		return nil, errors.New("observation: expected usage windows")
+	}
+	out := []Window{}
+	for name, seconds := range map[string]int64{"rolling": 18000, "weekly": 604800, "monthly": MonthSeconds} {
+		v := object(data.Usage[name])
+		if v == nil {
+			continue
+		}
+		reset := scalar(first(v, "resetsAt", "resets_at"))
+		w := window("opencode-go", "all", seconds, scalar(first(v, "percent", "usedPercent", "used_percent")), reset, scalar(first(v, "resetInSec", "reset_in_sec")), false, at, APISource)
+		if w.Valid() {
+			out = append(out, w)
 		}
 	}
 	sortWindows(out)

@@ -19,8 +19,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/historyreports/internal/cpamp"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 )
 
 const recordSchemaVersion = "1"
@@ -30,8 +32,9 @@ CREATE TABLE IF NOT EXISTS record_meta(name TEXT PRIMARY KEY, value TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS record_events(
  id TEXT PRIMARY KEY, revision INTEGER NOT NULL, seq INTEGER NOT NULL UNIQUE,
  ref TEXT NOT NULL, native TEXT NOT NULL, credential TEXT NOT NULL, source TEXT NOT NULL,
- provider TEXT NOT NULL, started INTEGER NOT NULL, origin TEXT NOT NULL, body BLOB NOT NULL);
+ provider TEXT NOT NULL, started INTEGER NOT NULL, origin TEXT NOT NULL, model TEXT NOT NULL, body BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS record_events_ref ON record_events(ref, started);
+CREATE INDEX IF NOT EXISTS record_events_model ON record_events(model, provider);
 CREATE TABLE IF NOT EXISTS record_readings(
  id INTEGER PRIMARY KEY, ref TEXT NOT NULL, native TEXT NOT NULL, provider TEXT NOT NULL,
  kind TEXT NOT NULL, observed INTEGER NOT NULL, body BLOB NOT NULL);
@@ -166,7 +169,7 @@ func (s *RecordStore) PutEvents(ctx context.Context, events []RecordEvent) (Chan
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			seq++
-			if _, err = tx.ExecContext(ctx, `INSERT INTO record_events(id,revision,seq,ref,native,credential,source,provider,started,origin,body) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.Revision, seq, e.Ref, e.Native, e.Credential, e.Source, e.Provider, e.Started, e.Origin, body); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO record_events(id,revision,seq,ref,native,credential,source,provider,started,origin,model,body) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.Revision, seq, e.Ref, e.Native, e.Credential, e.Source, e.Provider, e.Started, e.Origin, e.Event.Model, body); err != nil {
 				return nil, err
 			}
 		case err != nil:
@@ -174,7 +177,7 @@ func (s *RecordStore) PutEvents(ctx context.Context, events []RecordEvent) (Chan
 		case e.Revision <= revision:
 			continue
 		default:
-			if _, err = tx.ExecContext(ctx, `UPDATE record_events SET revision=?,ref=?,native=?,credential=?,source=?,provider=?,started=?,origin=?,body=? WHERE id=?`, e.Revision, e.Ref, e.Native, e.Credential, e.Source, e.Provider, e.Started, e.Origin, body, e.ID); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE record_events SET revision=?,ref=?,native=?,credential=?,source=?,provider=?,started=?,origin=?,model=?,body=? WHERE id=?`, e.Revision, e.Ref, e.Native, e.Credential, e.Source, e.Provider, e.Started, e.Origin, e.Event.Model, body, e.ID); err != nil {
 				return nil, err
 			}
 			out.add(oldRef, oldStarted)
@@ -428,4 +431,68 @@ func (s *RecordStore) Stats(ctx context.Context) (RecordStoreStats, error) {
 // RecordEventFromForward is a forward ledger request as a record request.
 func RecordEventFromForward(e ForwardEvent) RecordEvent {
 	return RecordEvent{ID: e.ID, Revision: e.Revision, Ref: ForwardAccountRef(e.SourceID, e.Event.Provider, e.Event.Account), Native: e.Event.Account, Credential: e.Attribution.CredentialRef, Source: e.SourceID, Provider: e.Event.Provider, Started: e.StartedAt.UnixMilli(), Origin: "forward", Event: e.Event}
+}
+
+// UsageOnlyEvent is a final request of a provider Pacer records only for the
+// usage page, converted as forward requests are.
+func UsageOnlyEvent(r measurement.Record, received time.Time) RecordEvent {
+	f := convertForward(measurement.ReportFeedEntry{StoredRecord: measurement.StoredRecord{Record: r, ReceivedAt: received}})
+	e := RecordEventFromForward(f)
+	e.Origin = "usage"
+	if e.Revision <= 0 {
+		e.Revision = 1
+	}
+	return e
+}
+
+// Models lists every model of the record's requests with its provider.
+func (s *RecordStore) Models(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT model,provider FROM record_events`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var m, p string
+		if err = rows.Scan(&m, &p); err != nil {
+			return nil, err
+		}
+		if m != "" {
+			out[m] = p
+		}
+	}
+	return out, rows.Err()
+}
+
+// PriceSync is the last models.dev sync, kept in the record file.
+type PriceSync struct {
+	Catalog    ModelsDevCatalog `json:"catalog,omitempty"`
+	SyncedAtMS int64            `json:"synced_at_ms,omitempty"` // last successful fetch
+	CheckedMS  int64            `json:"checked_at_ms,omitempty"`
+	ETag       string           `json:"etag,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	Models     int              `json:"models"`
+}
+
+func (s *RecordStore) PriceSync(ctx context.Context) (PriceSync, error) {
+	var out PriceSync
+	raw, ok, err := s.Meta(ctx, "models_dev")
+	if err != nil || !ok {
+		return out, err
+	}
+	err = json.Unmarshal([]byte(raw), &out)
+	return out, err
+}
+
+func (s *RecordStore) SetPriceSync(ctx context.Context, v PriceSync) error {
+	v.Models = 0
+	for _, m := range v.Catalog {
+		v.Models += len(m)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return s.SetMeta(ctx, "models_dev", string(b))
 }

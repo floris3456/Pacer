@@ -1,6 +1,7 @@
 package observation
 
 import (
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -126,7 +127,7 @@ func TestAPIPartialNullDormantAndMalformed(t *testing.T) {
 	if _, err := API("codex", []byte(`{"broken"`), at); err == nil {
 		t.Fatal("malformed JSON accepted")
 	}
-	w, err = API("antigravity", []byte(`{"remainingFraction":1}`), at)
+	w, err = API("kimi", []byte(`{"remainingFraction":1}`), at)
 	if err != nil || len(w) != 0 {
 		t.Fatal("unverified provider parsed")
 	}
@@ -144,5 +145,43 @@ func TestClaudeModelAndOverageScopes(t *testing.T) {
 		if x.Scope != "opus" && x.Applies("claude-opus-4-6") {
 			t.Fatal("overage/fable leaked into ordinary model budget")
 		}
+	}
+}
+
+func TestAntigravityAndOpenCodeGoMeters(t *testing.T) {
+	at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	ag := []byte(`{"groups":[{"displayName":"Gemini Models","buckets":[{"remainingFraction":0.75,"window":"5h","resetTime":"2026-10-09T15:00:00Z"},{"remainingFraction":1,"window":"weekly","resetTime":"2026-10-15T00:00:00Z"}]},
+		{"displayName":"Claude and GPT models","buckets":[{"remainingFraction":0.2,"window":"5h","resetTime":"2026-10-09T13:00:00Z"}]},{"displayName":"Other","buckets":[{"remainingFraction":0.5,"window":"5h","resetTime":"2026-10-09T13:00:00Z"}]}]}`)
+	w, err := API("antigravity", ag, at)
+	if err != nil || len(w) != 3 {
+		t.Fatal(w, err)
+	}
+	got := map[string]float64{}
+	for _, x := range w {
+		got[x.Key()] = *x.Remaining
+		if x.Usage.Source != APISource || x.Reset.IsZero() {
+			t.Fatal(x)
+		}
+	}
+	if got["antigravity:gemini:18000"] != 75 || got["antigravity:gemini:604800"] != 100 || math.Abs(got["antigravity:claude_gpt:18000"]-20) > 1e-9 {
+		t.Fatal(got)
+	}
+	og := []byte(`{"usage":{"rolling":{"status":"ok","percent":12,"resetsAt":"2026-10-09T15:10:56.324Z"},"weekly":{"status":"ok","percent":42,"resetsAt":"2026-10-12T00:00:00Z"},"monthly":{"status":"ok","percent":61,"resetsAt":"2026-11-01T00:00:00Z"}}}`)
+	w, err = API("opencode-go", og, at)
+	if err != nil || len(w) != 3 {
+		t.Fatal(w, err)
+	}
+	got = map[string]float64{}
+	for _, x := range w {
+		got[x.Key()] = *x.Remaining
+	}
+	if got["opencode-go:all:18000"] != 88 || got["opencode-go:all:604800"] != 58 || got["opencode-go:all:2592000"] != 39 {
+		t.Fatal(got)
+	}
+	if Endpoint("antigravity") == "" || Endpoint("opencode-go") == "" {
+		t.Fatal("no observation endpoint")
+	}
+	if _, err = API("antigravity", []byte(`{}`), at); err == nil {
+		t.Fatal("accepted an answer without groups")
 	}
 }

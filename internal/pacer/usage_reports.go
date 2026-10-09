@@ -22,6 +22,12 @@ func usageRoutes() []map[string]string {
 		{"Method": "POST", "Path": "/plugins/pacer/usage/windows"},
 		{"Method": "POST", "Path": "/plugins/pacer/usage/inspect"},
 		{"Method": "PATCH", "Path": "/plugins/pacer/usage/exclusions"},
+		{"Method": "POST", "Path": "/plugins/pacer/usage/accounts"},
+		{"Method": "PATCH", "Path": "/plugins/pacer/usage/links"},
+		{"Method": "PATCH", "Path": "/plugins/pacer/usage/profile"},
+		{"Method": "POST", "Path": "/plugins/pacer/models/prices"},
+		{"Method": "PATCH", "Path": "/plugins/pacer/models/prices"},
+		{"Method": "POST", "Path": "/plugins/pacer/models/prices/refresh"},
 	}
 }
 
@@ -75,6 +81,15 @@ func (p *Plugin) usageExclusions(ctx context.Context) (historyreports.WindowExcl
 
 func (p *Plugin) usageAPI(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	op := strings.TrimPrefix(req.Path, usageRoot)
+	if op == "accounts" || op == "links" || op == "profile" {
+		trimmed := bytes.TrimSpace(req.Body)
+		if len(req.Body) > 64<<10 || len(req.Query) != 0 || len(trimmed) == 0 || trimmed[0] != '{' {
+			return reportError(historyreports.ErrInput)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return p.usageSettingsAPI(ctx, op, req)
+	}
 	read := req.Method == "POST" && (op == "profiles" || op == "windows" || op == "inspect")
 	edit := req.Method == "PATCH" && op == "exclusions"
 	if !read && !edit {

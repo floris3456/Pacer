@@ -102,7 +102,6 @@ type Reader struct {
 	factsWindowsFor *cpamp.QuotaFacts
 	liveMu          sync.Mutex
 	live            *cpamp.QuotaFacts
-	liveTails       map[string]liveTailEvidence
 }
 
 // quotaFacts decodes the prepared facts on first use (not in Open) and hands

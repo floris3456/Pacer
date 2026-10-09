@@ -320,3 +320,27 @@ func (s *Service) AccountKinds(ctx context.Context, q *QuotaFacts) (map[string][
 	}
 	return out, rows.Err()
 }
+
+// EventModels lists every model of the imported requests with its provider.
+func (s *Service) EventModels(ctx context.Context, q *QuotaFacts) (map[string]string, error) {
+	if err := s.acquireHistory(ctx); err != nil {
+		return nil, err
+	}
+	defer s.releaseHistory()
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT json_extract(a.payload,'$.model'),c.provider FROM analytics_events a JOIN analytics_accounts c ON c.id=a.account WHERE a.event_id<=?`, q.Filter.Through)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var m, p *string
+		if err = rows.Scan(&m, &p); err != nil {
+			return nil, err
+		}
+		if m != nil && *m != "" && p != nil {
+			out[*m] = *p
+		}
+	}
+	return out, rows.Err()
+}

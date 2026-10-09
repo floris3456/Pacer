@@ -116,6 +116,10 @@ type Plugin struct {
 	observer           *observation.Store
 	cfg                Config
 	creds              map[string]credential
+	usageCreds         map[string]credential // usage page only (see usage_accounts.go)
+	recordStore        *historyreports.RecordStore
+	record             *historyreports.Record
+	priceSync          priceSync
 	requests           map[string]attempt
 	decisionErrors     int64
 	workerOnce         sync.Once
@@ -309,6 +313,13 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 			return nil, errors.New("configured frozen report artifact is unavailable; prepare it offline first")
 		}
 		p.reports = r
+		// The usage record file is optional: without it the page shows the
+		// imported history only (see usage_live.go).
+		if store, err := historyreports.OpenRecordStore(context.Background(), usageRecordPath(cfg.StatePath)); err == nil {
+			p.recordStore, p.record = store, historyreports.NewRecord(r, store)
+		} else {
+			p.measurementErrors++
+		}
 	}
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.observer = observer
@@ -384,6 +395,10 @@ func (p *Plugin) Close() {
 	if p.reports != nil {
 		_ = p.reports.Close()
 		p.reports = nil
+	}
+	if p.recordStore != nil {
+		_ = p.recordStore.Close()
+		p.recordStore, p.record = nil, nil
 	}
 }
 
@@ -772,6 +787,9 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	if strings.HasPrefix(req.Path, usageRoot) {
 		return p.usageAPI(req)
+	}
+	if strings.HasPrefix(req.Path, modelsRoot) {
+		return p.modelsAPI(req)
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/keys" {
 		return p.editKeys(req)

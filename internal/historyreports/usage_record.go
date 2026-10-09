@@ -266,6 +266,9 @@ type Record struct {
 	ident         identity
 	wake          int64 // when a throttled segment is due
 	ambiguousSeen int
+	groups        map[string]*accountGroup
+	labels        map[string]string
+	links         []AccountLink
 }
 
 // identity maps atomic accounts to canonical ones for one build. A native
@@ -429,6 +432,7 @@ func (r *Record) Build(ctx context.Context, in RecordInput) (*cpamp.QuotaFacts, 
 	st.Ambiguous = r.ident.ambiguous
 	cconfig := canonicalConfig(config, r.ident.canon)
 	groups := r.group(frozen, in)
+	r.groups, r.labels, r.links = groups, in.Labels, in.Links
 	ids := make([]string, 0, len(groups))
 	for id := range groups {
 		ids = append(ids, id)
@@ -1113,5 +1117,90 @@ func remapCards(in []int, m map[int]int) []int {
 		out[i] = m[c]
 	}
 	sort.Ints(out)
+	return out
+}
+
+// AccountRef is the page's opaque reference for an account or login (imported
+// account IDs encode credential file names).
+func AccountRef(id string) string { return "acct:" + hash(id)[:24] }
+
+// UsageLogin is one login (credential) of an account.
+type UsageLogin struct {
+	ID      string `json:"-"`
+	Ref     string `json:"ref"`
+	Label   string `json:"label"`
+	Source  string `json:"source"` // imported or pacer
+	FirstMS int64  `json:"first_ms,omitempty"`
+	LastMS  int64  `json:"last_ms,omitempty"`
+	// SameAs is the login the user linked this one to.
+	SameAs string `json:"same_as,omitempty"`
+	// Certified: Pacer's cutover certified this login as the imported account.
+	Certified bool `json:"certified,omitempty"`
+}
+
+// UsageAccount is one account of the record: every login linked to it.
+type UsageAccount struct {
+	ID       string       `json:"-"`
+	Ref      string       `json:"ref"`
+	Provider string       `json:"provider"`
+	Label    string       `json:"label"`
+	Requests int64        `json:"requests"`
+	FirstMS  int64        `json:"first_ms,omitempty"`
+	LastMS   int64        `json:"last_ms,omitempty"`
+	Logins   []UsageLogin `json:"logins"`
+}
+
+// Accounts lists the record's accounts as of the last build.
+func (r *Record) Accounts() []UsageAccount {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []UsageAccount{}
+	if r.groups == nil || r.built == nil {
+		return out
+	}
+	creds := map[string]cpamp.ProfileCredential{}
+	for _, c := range r.built.Credentials {
+		creds[c.Account.ID] = c
+	}
+	known := map[string]cpamp.Account{}
+	for _, a := range r.known {
+		known[a.ID] = a
+	}
+	user := map[string]string{}
+	for _, l := range r.links {
+		user[l.Account] = l.SameAs
+	}
+	ids := make([]string, 0, len(r.groups))
+	for id := range r.groups {
+		if _, ok := creds[id]; ok {
+			ids = append(ids, id)
+		}
+	}
+	r.orderAccounts(ids)
+	for _, id := range ids {
+		g := r.groups[id]
+		c := creds[id]
+		a := UsageAccount{ID: id, Ref: AccountRef(id), Provider: g.provider, Label: g.label, Requests: c.Requests, FirstMS: c.First, LastMS: c.Last, Logins: []UsageLogin{}}
+		for _, m := range g.members {
+			l := UsageLogin{ID: m, Ref: AccountRef(m), Source: "pacer"}
+			if k, ok := known[m]; ok {
+				l.Label, l.Source = k.Label, "imported"
+				if sp, ok := r.spans[m]; ok {
+					l.FirstMS, l.LastMS = sp.First, sp.Last
+				}
+			} else if info := r.refs[m]; info != nil {
+				l.Label, l.FirstMS, l.LastMS = r.labels[info.Native], info.First, info.Last
+				_, l.Certified = r.ident.implicit[m]
+				if l.Label == "" {
+					l.Label = info.Provider + " login " + hash(m)[:8]
+				}
+			}
+			if to, ok := user[m]; ok {
+				l.SameAs = AccountRef(to)
+			}
+			a.Logins = append(a.Logins, l)
+		}
+		out = append(out, a)
+	}
 	return out
 }

@@ -3,6 +3,7 @@ package pacer
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,15 +18,13 @@ func TestUsageLiveFollowsPacersOwnRecord(t *testing.T) {
 	p := f.open(t, nil)
 	first := forwardWait(t, p, func(v ForwardRuntimeStatus) bool { return v.State == "ready" && !v.Active })
 	reader := reportFixtureFrom(t, "historical-golden/historical-fixture.sql.gz", 240, 65)
-	p.mu.Lock()
-	p.reports = reader
-	p.mu.Unlock()
+	store := attachRecord(t, p, reader, nil)
 	h := time.UnixMilli(reader.ImportedThrough(ctx)).UTC()
 	if !hookEpoch.After(h) {
 		t.Fatal("fixture: Pacer's requests must start after H")
 	}
-	// Nothing recorded since H yet: the page shows the imported record.
-	if err := p.refreshUsageLive(ctx); err != nil || p.usageLiveStatus().State != "waiting" {
+	// Nothing recorded since H yet: the record is the imported history.
+	if err := p.refreshUsageLive(ctx); err != nil || p.usageLiveStatus().State != "live" || p.usageLiveStatus().Record.Store.Events != 0 {
 		t.Fatal(err, p.usageLiveStatus())
 	}
 	c := p.creds[f.c.ID]
@@ -50,7 +49,7 @@ func TestUsageLiveFollowsPacersOwnRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := p.usageLiveStatus()
-	if status.State != "live" || status.Stats.Requests != 1 || status.Stats.Readings != 2 || status.Stats.NewAccounts != 1 || status.ImportedThroughMS != h.UnixMilli() {
+	if status.State != "live" || status.Record.Store.Events != 1 || status.Record.Store.Readings != 2 || status.ImportedThroughMS != h.UnixMilli() {
 		t.Fatalf("%+v", status)
 	}
 	got := usageCall(p, "POST", "profiles", `{}`)
@@ -60,7 +59,7 @@ func TestUsageLiveFollowsPacersOwnRecord(t *testing.T) {
 	}
 	// No new evidence and no transition: no rebuild. Later, staleness moves on.
 	built := status.BuiltAtMS
-	f.h.clock.Add(int64(time.Minute))
+	f.h.clock.Add(int64(30 * time.Second))
 	if err := p.refreshUsageLive(ctx); err != nil || p.usageLiveStatus().BuiltAtMS != built {
 		t.Fatal("rebuilt without a reason", err)
 	}
@@ -70,10 +69,8 @@ func TestUsageLiveFollowsPacersOwnRecord(t *testing.T) {
 	}
 	// A new artifact starts over; no artifact switches the record off.
 	other := reportFixtureFrom(t, "historical-golden/historical-fixture.sql.gz", 240, 65)
-	p.mu.Lock()
-	p.reports = other
-	p.mu.Unlock()
-	if err := p.refreshUsageLive(ctx); err != nil || p.usageLiveStatus().State != "live" || p.usageLiveStatus().Stats.Requests != 1 {
+	attachRecord(t, p, other, store)
+	if err := p.refreshUsageLive(ctx); err != nil || p.usageLiveStatus().State != "live" || p.usageLiveStatus().Record.Store.Events != 1 {
 		t.Fatal("new artifact", err, p.usageLiveStatus())
 	}
 	p.mu.Lock()
@@ -85,4 +82,22 @@ func TestUsageLiveFollowsPacersOwnRecord(t *testing.T) {
 	p.mu.Lock()
 	p.reports = other
 	p.mu.Unlock()
+}
+
+// attachRecord gives the plugin a reader and its usage record (a new record
+// file unless store is given), as configure does.
+func attachRecord(t *testing.T, p *Plugin, reader *historyreports.Reader, store *historyreports.RecordStore) *historyreports.RecordStore {
+	t.Helper()
+	if store == nil {
+		var err error
+		store, err = historyreports.OpenRecordStore(context.Background(), filepath.Join(t.TempDir(), "usage-record.sqlite"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { store.Close() })
+	}
+	p.mu.Lock()
+	p.reports, p.recordStore, p.record = reader, store, historyreports.NewRecord(reader, store)
+	p.mu.Unlock()
+	return store
 }

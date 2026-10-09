@@ -61,6 +61,10 @@ func Endpoint(provider string) string {
 		return "claude:usage"
 	case "codex":
 		return "codex:usage"
+	case "antigravity":
+		return "antigravity:quota"
+	case "opencode-go":
+		return "opencode-go:usage"
 	default:
 		return ""
 	}

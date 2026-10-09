@@ -42,6 +42,7 @@ func (p *Plugin) discover(force ...bool) {
 	if !p.acceptStartupCatalog(list.Catalog) {
 		return
 	}
+	p.discoverUsageOnly(list.Files)
 	found := map[string]credential{}
 	indices := map[string]bool{}
 	for _, file := range list.Files {

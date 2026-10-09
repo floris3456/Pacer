@@ -106,7 +106,7 @@ func TestForwardWiringRegistrationCapabilityAndLegacyPreservation(t *testing.T) 
 	if !bytes.Equal(hookRaw(t, full), legacyJSON) {
 		t.Fatal("legacy resources/routes changed")
 	}
-	usageCount := 0
+	usageCount, modelsCount := 0, 0
 	for _, r := range routes {
 		if strings.Contains(r["Path"], "/history/") {
 			t.Fatal("removed history route still registered", r)
@@ -114,12 +114,15 @@ func TestForwardWiringRegistrationCapabilityAndLegacyPreservation(t *testing.T) 
 		if strings.Contains(r["Path"], "/usage/") {
 			usageCount++
 		}
+		if strings.HasPrefix(r["Path"], "/plugins/pacer/models/") {
+			modelsCount++
+		}
 		if strings.Contains(r["Path"], "forward") && !strings.HasPrefix(r["Path"], forwardHTTPRoot) {
 			t.Fatal("forward legacy alias")
 		}
 	}
-	if usageCount != 4 {
-		t.Fatal("the four usage routes are missing")
+	if usageCount != 7 || modelsCount != 3 {
+		t.Fatal("the usage and model price routes are missing", usageCount, modelsCount)
 	}
 	r := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
 	var status forwardWiredStatus

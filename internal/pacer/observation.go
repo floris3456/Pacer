@@ -114,9 +114,14 @@ func (p *Plugin) reconcile() {
 	defer p.refreshMu.Unlock()
 	p.mu.Lock()
 	stopped := p.stopped
-	creds := make([]credential, 0, len(p.creds))
+	creds := make([]credential, 0, len(p.creds)+len(p.usageCreds))
 	for _, c := range p.creds {
 		creds = append(creds, c)
+	}
+	for _, c := range p.usageCreds {
+		if observation.Endpoint(c.Provider) != "" {
+			creds = append(creds, c)
+		}
 	}
 	p.mu.Unlock()
 	if stopped {
@@ -153,27 +158,18 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 		return
 	}
 	var auth struct {
-		JSON struct {
-			AccessToken string `json:"access_token"`
-			AccountID   string `json:"account_id"`
-		} `json:"json"`
+		JSON usageAuth `json:"json"`
 	}
-	if json.Unmarshal(raw, &auth) != nil || auth.JSON.AccessToken == "" {
+	if json.Unmarshal(raw, &auth) != nil {
 		status = 401
 		return
 	}
-	url := "https://api.anthropic.com/api/oauth/usage"
-	requestHeaders := http.Header{"Authorization": {"Bearer " + auth.JSON.AccessToken}, "Accept": {"application/json"}}
-	if c.Provider == "claude" {
-		requestHeaders.Set("anthropic-beta", "oauth-2025-04-20")
-	} else if c.Provider == "codex" {
-		url = "https://chatgpt.com/backend-api/wham/usage"
-		if auth.JSON.AccountID != "" {
-			requestHeaders.Set("ChatGPT-Account-Id", auth.JSON.AccountID)
-		}
-	} else {
+	method, url, requestHeaders, requestBody, ok := meterRequest(c.Provider, auth.JSON)
+	if !ok {
+		status = 401
 		return
 	}
+	routed := c.Provider == "claude" || c.Provider == "codex"
 	opRaw, err := p.Host("host.http.operation_open", map[string]any{})
 	if err != nil {
 		return
@@ -185,10 +181,17 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 		return
 	}
 	// Local host reads only, bracketing this one scheduled provider read.
-	sandwich := p.capacityBefore(c)
+	var sandwich *capacitySandwich
+	if routed {
+		sandwich = p.capacityBefore(c)
+	}
 	cancelled := make(chan struct{})
-	timer := time.AfterFunc(5*time.Second, func() { _, _ = p.Host("host.http.cancel", map[string]string{"operation_id": op.ID}); close(cancelled) })
-	raw, err = p.Host("host.http.do", map[string]any{"operation_id": op.ID, "method": "GET", "url": url, "headers": requestHeaders})
+	timer := time.AfterFunc(10*time.Second, func() { _, _ = p.Host("host.http.cancel", map[string]string{"operation_id": op.ID}); close(cancelled) })
+	call := map[string]any{"operation_id": op.ID, "method": method, "url": url, "headers": requestHeaders}
+	if requestBody != nil {
+		call["body"] = requestBody
+	}
+	raw, err = p.Host("host.http.do", call)
 	if !timer.Stop() {
 		<-cancelled
 	}
@@ -196,7 +199,9 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if err != nil {
 		return
 	}
-	p.capacityAfter(sandwich)
+	if routed {
+		p.capacityAfter(sandwich)
+	}
 	var response pluginapi.HTTPResponse
 	if json.Unmarshal(raw, &response) != nil {
 		return
@@ -210,5 +215,7 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 		return
 	}
 	p.storeObservations(c, windows)
-	p.capacitySample(sandwich, at, windows)
+	if routed {
+		p.capacitySample(sandwich, at, windows)
+	}
 }

@@ -1,15 +1,17 @@
 package pacer
 
-// The Usage Quota page's continuous record (docs/usage-unification.md): after
-// the import boundary H, Pacer's own requests (forward store) and meter
-// readings (observation store) continue every account with CPAMP's derivation.
-// One background loop follows both stores and rebuilds the live facts outside
-// the report slots; usage reads stay in memory.
+// The Usage Quota page's continuous record (docs/usage-record.md): after the
+// import boundary H, Pacer's own requests (forward store, and the usage-only
+// providers' requests) and meter readings (observation store) continue every
+// account with CPAMP's derivation. One background loop copies new evidence
+// into the record file and builds the record; closed windows are sealed on
+// disk, so a build derives only what changed. Usage reads stay in memory.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"sort"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,30 +21,76 @@ import (
 
 const (
 	usageLiveEvery   = 30 * time.Second
-	usageLiveRefresh = 5 * time.Minute // staleness marks move even without new evidence
+	usageLiveRefresh = time.Minute // staleness marks move even without new evidence
 	usageLivePage    = 5000
+	usageBuildBudget = 20 * time.Second
 )
 
 type usageLive struct {
-	mu sync.Mutex
-	s  usageLiveState // guarded by mu; replaced whole on a new artifact
+	mu   sync.Mutex
+	s    usageLiveState // guarded by mu; replaced whole on a new artifact
+	pmu  sync.Mutex
+	pend historyreports.Changes // evidence written by callbacks, guarded by pmu
+	kick chan struct{}
 }
 
 type usageLiveState struct {
-	reader        *historyreports.Reader
-	h             time.Time
-	events        map[string]historyreports.ForwardEvent // highest revision per event ID
-	through       int64
-	origins       historyreports.ForwardOrigins
-	readings      []historyreports.NativeReading
-	readingsAfter int64
-	dirty         bool
-	built         time.Time
-	next          int64
-	status        historyreports.LiveStatus
+	reader  *historyreports.Reader
+	h       time.Time
+	origins historyreports.ForwardOrigins
+	models  map[string]string // model -> provider, for the merged price book
+	built   time.Time
+	next    int64
+	status  historyreports.LiveStatus
+	inputs  string // settings the last build used
+}
+
+// changed notes evidence written outside the loop.
+func (u *usageLive) changed(c historyreports.Changes) {
+	if len(c) == 0 {
+		return
+	}
+	u.pmu.Lock()
+	if u.pend == nil {
+		u.pend = historyreports.Changes{}
+	}
+	u.pend.Merge(c)
+	u.pmu.Unlock()
+}
+
+func (u *usageLive) take() historyreports.Changes {
+	u.pmu.Lock()
+	defer u.pmu.Unlock()
+	c := u.pend
+	u.pend = nil
+	if c == nil {
+		c = historyreports.Changes{}
+	}
+	return c
+}
+
+// wake asks the loop to build now (after an edit).
+func (p *Plugin) wakeUsageLive() {
+	p.usageLive.pmu.Lock()
+	k := p.usageLive.kick
+	p.usageLive.pmu.Unlock()
+	if k != nil {
+		select {
+		case k <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func usageRecordPath(statePath string) string {
+	return filepath.Join(filepath.Dir(statePath), "usage-record.sqlite")
 }
 
 func (p *Plugin) startUsageLive() {
+	p.usageLive.pmu.Lock()
+	p.usageLive.kick = make(chan struct{}, 1)
+	kick := p.usageLive.kick
+	p.usageLive.pmu.Unlock()
 	p.workerWait.Add(1)
 	go func() {
 		defer p.workerWait.Done()
@@ -56,9 +104,11 @@ func (p *Plugin) startUsageLive() {
 			case <-p.workerDone:
 				return
 			case <-ticker.C:
+			case <-kick:
 			}
 		}
 	}()
+	p.startPriceSync()
 }
 
 func (p *Plugin) usageLiveStatus() *historyreports.LiveStatus {
@@ -80,17 +130,80 @@ func nativeReading(e observation.AccountHistoryEntry) (historyreports.NativeRead
 	return historyreports.NativeReading{ID: e.ID, Account: e.Account, Provider: w.Provider, Scope: w.Scope, Seconds: w.Seconds, Remaining: &remaining, Reset: w.Reset, At: w.Usage.At, Source: w.Usage.Source}, true
 }
 
-// refreshUsageLive follows both stores and rebuilds the live facts when
-// evidence arrived, a window opened or reset, or usageLiveRefresh passed.
+type recordCursor struct {
+	Store string `json:"store"`
+	After int64  `json:"after"`
+}
+
+func readCursor(ctx context.Context, s *historyreports.RecordStore, name, identity string) (int64, error) {
+	raw, ok, err := s.Meta(ctx, name)
+	if err != nil || !ok {
+		return 0, err
+	}
+	var c recordCursor
+	if json.Unmarshal([]byte(raw), &c) != nil || c.Store != identity {
+		return 0, nil // another store: copy it from the start (events are keyed by ID)
+	}
+	return c.After, nil
+}
+
+func writeCursor(ctx context.Context, s *historyreports.RecordStore, name, identity string, after int64) error {
+	b, _ := json.Marshal(recordCursor{Store: identity, After: after})
+	return s.SetMeta(ctx, name, string(b))
+}
+
+// usageSettings are the record's inputs kept in the forward store.
+type usageSettings struct {
+	profiles historyreports.ForwardProfileConfig
+	links    historyreports.AccountLinks
+	prices   historyreports.ModelPrices
+	sync     historyreports.PriceSync
+	ok       bool
+}
+
+func (p *Plugin) readUsageSettings(ctx context.Context) (usageSettings, error) {
+	out, err := p.readForwardSettings(ctx)
+	if err != nil {
+		return out, err
+	}
+	p.mu.Lock()
+	store := p.recordStore
+	p.mu.Unlock()
+	if store != nil {
+		if out.sync, err = store.PriceSync(ctx); err != nil {
+			return out, err
+		}
+		out.prices.Catalog, out.prices.SyncedAtMS = out.sync.Catalog, out.sync.SyncedAtMS
+	}
+	return out, nil
+}
+
+func (p *Plugin) readForwardSettings(ctx context.Context) (usageSettings, error) {
+	var out usageSettings
+	err := p.withForwardStore(ctx, func(c context.Context, s *historyreports.ForwardStore) error {
+		var e error
+		if out.profiles, e = s.LatestProfiles(c); e != nil {
+			return e
+		}
+		if out.links, e = s.AccountLinks(c); e != nil {
+			return e
+		}
+		out.prices, e = s.ModelPrices(c)
+		return e
+	})
+	if errors.Is(err, errUsageExclusionsUnavailable) {
+		return usageSettings{prices: historyreports.ModelPrices{Manual: map[string]historyreports.ForwardModelPrice{}}}, nil
+	}
+	out.ok = err == nil
+	return out, err
+}
+
+// refreshUsageLive copies new evidence into the record file and builds the
+// record when evidence arrived, a window opens or resets, a throttled segment
+// is due, or usageLiveRefresh passed.
 func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 	p.mu.Lock()
-	reader, observer, source := p.reports, p.observer, p.measurementSource
-	labels := map[string]string{}
-	for _, c := range p.creds {
-		if c.Account != "" && c.Alias != "" {
-			labels[c.Account] = c.Alias
-		}
-	}
+	reader, observer, source, store, record := p.reports, p.observer, p.measurementSource, p.recordStore, p.record
 	p.mu.Unlock()
 	p.usageLive.mu.Lock()
 	defer p.usageLive.mu.Unlock()
@@ -100,7 +213,7 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 		return nil
 	}
 	if u.reader != reader {
-		*u = usageLiveState{reader: reader, events: map[string]historyreports.ForwardEvent{}, dirty: true}
+		*u = usageLiveState{reader: reader}
 		u.h = time.UnixMilli(reader.ImportedThrough(ctx)).UTC()
 	}
 	if u.h.UnixMilli() <= 0 {
@@ -111,18 +224,40 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 		u.status.State, u.status.Error = "error", "Pacer's own record could not be read; the page shows the last good state."
 		return err
 	}
+	if store == nil || record == nil {
+		u.status = historyreports.LiveStatus{State: "error", ImportedThroughMS: u.h.UnixMilli(), Error: "Pacer's usage record file could not be opened; the page shows the imported history only."}
+		return nil
+	}
+	changes := p.usageLive.take()
+	keep := func() { p.usageLive.changed(changes) } // retried next time
+	// Requests from the forward ledger.
 	err := p.withForwardStore(ctx, func(c context.Context, s *historyreports.ForwardStore) error {
+		id := s.Identity()
+		through, err := readCursor(c, store, "forward_cursor", id)
+		if err != nil {
+			return err
+		}
 		for {
-			page, err := s.UsageNative(c, u.h, u.through, usageLivePage)
+			page, err := s.UsageNative(c, u.h, through, usageLivePage)
 			if err != nil {
 				return err
 			}
-			u.origins, u.through = page.Origins, page.Through
+			u.origins = page.Origins
+			events := make([]historyreports.RecordEvent, 0, len(page.Events))
 			for _, e := range page.Events {
-				if old, ok := u.events[e.ID]; !ok || e.Revision > old.Revision {
-					u.events[e.ID] = e
-					u.dirty = true
+				events = append(events, historyreports.RecordEventFromForward(e))
+				if u.models != nil && e.Event.Model != "" {
+					u.models[e.Event.Model] = e.Event.Provider
 				}
+			}
+			ch, err := store.PutEvents(c, events)
+			if err != nil {
+				return err
+			}
+			changes.Merge(ch)
+			through = page.Through
+			if err = writeCursor(c, store, "forward_cursor", id, through); err != nil {
+				return err
 			}
 			if !page.More {
 				return nil
@@ -130,48 +265,110 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 		}
 	})
 	if err != nil && !errors.Is(err, errUsageExclusionsUnavailable) {
+		keep()
 		return fail(err)
 	}
+	// Meter readings of every provider.
 	if observer != nil {
+		after, err := readCursor(ctx, store, "readings_cursor", source)
+		if err != nil {
+			keep()
+			return fail(err)
+		}
 		for {
-			page, err := observer.HistorySince(u.readingsAfter, usageLivePage)
+			page, err := observer.HistorySince(after, usageLivePage)
 			if err != nil {
+				keep()
 				return fail(err)
 			}
+			readings, refs := []historyreports.NativeReading{}, []string{}
 			for _, e := range page {
-				u.readingsAfter = e.ID
+				after = e.ID
 				if r, ok := nativeReading(e); ok && !r.At.Before(u.h) {
-					u.readings = append(u.readings, r)
-					u.dirty = true
+					readings = append(readings, r)
+					refs = append(refs, historyreports.ForwardAccountRef(source, r.Provider, r.Account))
 				}
+			}
+			ch, err := store.PutReadings(ctx, readings, refs)
+			if err != nil {
+				keep()
+				return fail(err)
+			}
+			changes.Merge(ch)
+			if err = writeCursor(ctx, store, "readings_cursor", source, after); err != nil {
+				keep()
+				return fail(err)
 			}
 			if len(page) < usageLivePage {
 				break
 			}
 		}
 	}
+	settings, err := p.readUsageSettings(ctx)
+	if err != nil {
+		keep()
+		return fail(err)
+	}
+	inputs := historyreports.Hash(string(mustJSON([]any{settings.profiles.Revision, settings.links.Revision, settings.prices.Revision, settings.sync.SyncedAtMS, settings.ok})))
 	now := p.now().UTC()
-	due := u.dirty || u.built.IsZero() || u.next != 0 && now.UnixMilli() >= u.next || now.Sub(u.built) >= usageLiveRefresh
+	due := len(changes) > 0 || u.built.IsZero() || inputs != u.inputs || u.next != 0 && now.UnixMilli() >= u.next || now.Sub(u.built) >= usageLiveRefresh
 	if !due {
 		return nil
 	}
-	if len(u.events) == 0 && len(u.readings) == 0 {
-		reader.UseLive(nil)
-		u.dirty, u.built, u.next = false, now, 0
-		u.status = historyreports.LiveStatus{State: "waiting", ImportedThroughMS: u.h.UnixMilli(), BuiltAtMS: now.UnixMilli()}
+	importedConfig, importedBook, err := reader.Imported(ctx)
+	if err != nil {
+		keep()
+		return fail(err)
+	}
+	if u.models == nil {
+		models, err := store.Models(ctx)
+		if err != nil {
+			keep()
+			return fail(err)
+		}
+		imported, err := reader.ImportedModels(ctx)
+		if err != nil {
+			keep()
+			return fail(err)
+		}
+		for m, provider := range imported {
+			if _, ok := models[m]; !ok {
+				models[m] = provider
+			}
+		}
+		u.models = models
+	}
+	config := historyreports.EffectiveProfiles(importedConfig, settings.profiles)
+	book := historyreports.MergedBook(importedBook, settings.prices, u.models)
+	if u.status.State == "" || u.status.State == "starting" {
+		u.status = historyreports.LiveStatus{State: "building", ImportedThroughMS: u.h.UnixMilli()}
+	}
+	facts, st, err := record.Build(ctx, historyreports.RecordInput{Now: now, Source: source, Origins: u.origins, Config: &config, Links: settings.links.Links, Book: &book, Labels: p.usageLabels(), Changes: changes, Budget: usageBuildBudget})
+	if errors.Is(err, historyreports.ErrRecordPending) {
+		// Derived segments are kept; the next run continues. The page keeps
+		// showing the last complete record.
+		if u.built.IsZero() {
+			u.status = historyreports.LiveStatus{State: "building", ImportedThroughMS: u.h.UnixMilli(), Record: st}
+		}
 		return nil
 	}
-	events := make([]historyreports.ForwardEvent, 0, len(u.events))
-	for _, e := range u.events {
-		events = append(events, e)
-	}
-	sort.Slice(events, func(i, j int) bool { return events[i].ID < events[j].ID })
-	facts, stats, err := reader.BuildLive(ctx, historyreports.LiveInput{Now: now, Native: historyreports.UsageNative{Events: events, Origins: u.origins}, Readings: u.readings, Source: source, Labels: labels})
 	if err != nil {
+		keep()
 		return fail(err)
 	}
 	reader.UseLive(facts)
-	u.dirty, u.built, u.next = false, now, facts.NextTransition
-	u.status = historyreports.LiveStatus{State: "live", ImportedThroughMS: u.h.UnixMilli(), BuiltAtMS: now.UnixMilli(), Stats: stats}
+	u.built, u.next, u.inputs = now, facts.NextTransition, inputs
+	if st.WakeMS != 0 && (u.next == 0 || st.WakeMS < u.next) {
+		u.next = st.WakeMS
+	}
+	u.status = historyreports.LiveStatus{State: "live", ImportedThroughMS: u.h.UnixMilli(), BuiltAtMS: now.UnixMilli(), Record: st}
+	if !settings.ok {
+		u.status.Error = "Profile edits, links and prices need Pacer's usage store; it is not configured."
+	}
 	return nil
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }

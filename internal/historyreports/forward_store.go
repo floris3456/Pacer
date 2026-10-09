@@ -358,3 +358,6 @@ func (s *ForwardStore) Status(ctx context.Context) (v ForwardStatus, err error) 
 	err = s.reader.QueryRowContext(ctx, `SELECT feed_id,through_seq,bootstrap_through,latest FROM forward_meta WHERE id=1`).Scan(&v.FeedID, &v.Through, &v.BootstrapThrough, &v.Latest)
 	return
 }
+
+// Identity names this ledger (its cursor key digest) without revealing the key.
+func (s *ForwardStore) Identity() string { return hash(string(s.cursorKey)) }

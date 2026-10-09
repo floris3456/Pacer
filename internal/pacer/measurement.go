@@ -131,6 +131,7 @@ func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error
 	var identity struct {
 		LifecycleRequestID string
 		AuthID             string
+		AuthIndex          string
 		Provider           string
 		SourceEvidence     json.RawMessage
 	}
@@ -144,7 +145,9 @@ func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error
 		if len(identity.SourceEvidence) > 0 && string(identity.SourceEvidence) != "null" {
 			return captured, errors.New("unsupported native source")
 		}
-		return captured, nil // Unrelated providers are outside Pacer's source contract.
+		// Outside Pacer's source contract; recorded for the usage page only.
+		p.recordUsageOnly(raw, identity.AuthID, identity.AuthIndex, identity.Provider)
+		return captured, nil
 	}
 	// Older hosts cannot correlate final callback to the immutable per-request
 	// inventory. No mutable-discovery fallback: its record would be misattributed.
@@ -233,6 +236,9 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 	if err = p.observer.Observe(c.Account, c.Provider, samples); err != nil {
 		p.metricError(err)
 		return
+	}
+	if usageOnlyProvider(c.Provider) {
+		return // usage page only: no measurement report, no routing evidence
 	}
 	after, err := p.observer.ReadWindows(c.Account)
 	if err != nil {
