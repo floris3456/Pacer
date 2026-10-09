@@ -1,7 +1,8 @@
 # Usage Quota: one continuous record (phase 2 design)
 
-Status 2026-10-09: **core implemented** (`usage_live.go`, `usage_native.go`, `forward_usage.go`,
-`internal/pacer/usage_live.go`); see "Implemented" and "Not yet" at the end. Phase 1 (`usage/*` routes, model
+Status 2026-10-09: **superseded by the usage record (v3), see `usage-record.md`**: sealed segments instead of
+rebuilding from H, profile edits, account links, prices, pool mapping and the verified mark. The rule below still
+holds. Original status: core implemented (`usage_native.go`, `forward_usage.go`). Phase 1 (`usage/*` routes, model
 mix, Inspect, exclusions, removal of the frozen-history and legacy views) reads
 only the prepared facts, which end at the import boundary H. After the
 production swap, cards would stop at H. Phase 2 continues every profile, window
@@ -98,15 +99,10 @@ reset is shown as "stale".
 - Real data (`TestRealLiveProbe`, a simulated week after H: 55,492 requests,
   107,940 readings, 12 accounts): rebuild 1.0 s, `usage/profiles` 1.2 ms after it.
 
-## Not yet
+## Not yet (all done in v3, `usage-record.md`)
 
-- **Growth.** Each rebuild re-derives every changed account from its tail plus
-  all native evidence since H and allocates ~2.4 GB (simulated week). Before
-  months of native data: seal closed windows (above) and rebuild only accounts
-  whose evidence changed.
-- **Profile edits** made in the forward store after H do not yet re-assign the
-  imported history (cards use the frozen configuration).
-- **Prices** for models absent from the frozen book stay "missing price"; the
-  forward book is not merged in yet.
-- **Scopes** other than Claude `all` are not mapped across H (see above).
-- **"Verified" mark** where Pacer's capacity check (C) also passes is not shown yet.
+- Growth: closed windows are sealed on disk; an update derives only open segments with new evidence.
+- Profile edits re-assign the imported history; re-logins can be linked.
+- Prices for models absent from the frozen book come from models.dev or your own price.
+- Pools are mapped across H for every provider (Fable, one Codex pool, Antigravity, OpenCode Go).
+- The "Verified" mark is shown where Pacer's capacity check passes.
