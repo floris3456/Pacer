@@ -21,6 +21,9 @@ type LiveInput struct {
 	Native   UsageNative
 	Readings []NativeReading
 	Source   string // Pacer's producer source ID (native account references)
+	// Labels names Pacer's accounts (native account ID -> display name) for
+	// accounts that are not linked to an imported account.
+	Labels map[string]string
 }
 
 // LiveStatus describes the continuous record for the page's technical details.
@@ -30,6 +33,13 @@ type LiveStatus struct {
 	BuiltAtMS         int64     `json:"built_at_ms,omitempty"`
 	Stats             LiveStats `json:"stats"`
 	Error             string    `json:"error,omitempty"`
+}
+
+func (in LiveInput) label(account string) string {
+	if l := in.Labels[account]; l != "" {
+		return l
+	}
+	return account
 }
 
 type LiveStats struct {
@@ -129,7 +139,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 		ev.Account = account
 		native[account] = append(native[account], ev)
 		provider[account] = ev.Provider
-		label[account] = e.Event.Account
+		label[account] = in.label(e.Event.Account)
 		stats.Requests++
 	}
 	for _, rd := range in.Readings {
@@ -149,7 +159,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 		}
 		readings[account] = append(readings[account], o)
 		provider[account] = rd.Provider
-		label[account] = rd.Account
+		label[account] = in.label(rd.Account)
 		stats.Readings++
 	}
 	ids := make([]string, 0, len(provider))

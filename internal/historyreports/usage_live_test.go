@@ -113,7 +113,7 @@ func TestBuildLiveContinuesAccountsAfterH(t *testing.T) {
 		liveReading(6, "na", 5*3600, time.UnixMilli(prepared["a|a-current"].Base.Reset), h.Add(time.Hour), 20),
 	}
 	now := h.Add(3 * time.Hour)
-	live, stats, err := r.BuildLive(ctx, LiveInput{Now: now, Native: UsageNative{Events: events, Origins: origins}, Readings: readings, Source: liveSource})
+	live, stats, err := r.BuildLive(ctx, LiveInput{Now: now, Native: UsageNative{Events: events, Origins: origins}, Readings: readings, Source: liveSource, Labels: map[string]string{"nx": "x@example.invalid"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestBuildLiveContinuesAccountsAfterH(t *testing.T) {
 	ref := ForwardAccountRef(liveSource, "claude", "nx")
 	newWindow := false
 	for _, w := range live.Windows {
-		if w.Account == ref && w.Base.Kind == "5h" && w.Latest && w.Base.AccountUsage.Requests == 2 && w.Readings == 2 && w.Base.Label == "nx" {
+		if w.Account == ref && w.Base.Kind == "5h" && w.Latest && w.Base.AccountUsage.Requests == 2 && w.Readings == 2 && w.Base.Label == "x@example.invalid" {
 			newWindow = true
 		}
 	}

@@ -85,6 +85,12 @@ func nativeReading(e observation.AccountHistoryEntry) (historyreports.NativeRead
 func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 	p.mu.Lock()
 	reader, observer, source := p.reports, p.observer, p.measurementSource
+	labels := map[string]string{}
+	for _, c := range p.creds {
+		if c.Account != "" && c.Alias != "" {
+			labels[c.Account] = c.Alias
+		}
+	}
 	p.mu.Unlock()
 	p.usageLive.mu.Lock()
 	defer p.usageLive.mu.Unlock()
@@ -160,7 +166,7 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 		events = append(events, e)
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].ID < events[j].ID })
-	facts, stats, err := reader.BuildLive(ctx, historyreports.LiveInput{Now: now, Native: historyreports.UsageNative{Events: events, Origins: u.origins}, Readings: u.readings, Source: source})
+	facts, stats, err := reader.BuildLive(ctx, historyreports.LiveInput{Now: now, Native: historyreports.UsageNative{Events: events, Origins: u.origins}, Readings: u.readings, Source: source, Labels: labels})
 	if err != nil {
 		return fail(err)
 	}
