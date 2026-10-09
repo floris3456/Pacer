@@ -628,3 +628,7 @@ func KeyHashes(selector string) []string {
 	}
 	return apiKeyHashes(selector)
 }
+
+// WindowID is CPAMP's window identity for an observation (account, kind,
+// scope, reset), used for native readings so windows keep one ID scheme.
+func WindowID(o Observation) string { return windowID(o) }
