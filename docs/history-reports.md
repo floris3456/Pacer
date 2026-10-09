@@ -143,8 +143,9 @@ windows, 4.0 MB JSON, 5 s to build, 15 ms to decode.
 - **Exact path.** `Report`/`ListWindows` without date bounds at the prepared pin are
   rebuilt from facts (`FactsWorkspace`) and are byte-identical to the original
   builder: 440 synthetic filters (every profile, key, lineage hash, model and
-  account, plus 4-way crosses) in `TestQuotaFactsWorkspaceParity`, and the real
-  backup in the env-gated `TestRealQuotaFactsParity`. Date-bounded reports, other
+  account, plus 4-way crosses) in `TestQuotaFactsWorkspaceParity`, and **716 of 716**
+  real-backup filters in the env-gated `TestRealQuotaFactsParity` (original 4.28 s
+  average, facts 0.12 s including the request page). Date-bounded reports, other
   pins and artifacts without facts keep the original builder unchanged.
 - **Compare view.** `Compare(ctx, CompareQuery{Key, From, Through})` and
   `CompareWindows` (routes `POST history/compare`, `history/compare-windows`) read
