@@ -1,15 +1,14 @@
 package pacer
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -30,38 +29,8 @@ var usageAuthClient = &http.Client{Timeout: 5 * time.Second, Transport: &http.Tr
 // Compatibility for older clients. Validate against CPA's own inference boundary,
 // not management credentials; this model-list request never runs inference.
 func authenticateUsage(endpoint, key string) (bool, error) {
-	for _, token := range []string{"", key} {
-		req, _ := http.NewRequest("GET", endpoint, nil)
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		res, err := usageAuthClient.Do(req)
-		if err != nil {
-			return false, errors.New("usage authentication unavailable")
-		}
-		body, readErr := io.ReadAll(io.LimitReader(res.Body, 2<<20))
-		res.Body.Close()
-		if readErr != nil {
-			return false, errors.New("usage authentication unavailable")
-		}
-		if token == "" {
-			if res.StatusCode != 401 && res.StatusCode != 403 {
-				return false, errors.New("model-list authentication must be enabled")
-			}
-			continue
-		}
-		if res.StatusCode == 401 || res.StatusCode == 403 {
-			return false, nil
-		}
-		var models struct {
-			Object string          `json:"object"`
-			Data   json.RawMessage `json:"data"`
-		}
-		if res.StatusCode != 200 || json.Unmarshal(body, &models) != nil || models.Object != "list" || len(models.Data) == 0 || models.Data[0] != '[' {
-			return false, errors.New("unexpected model-list response")
-		}
-	}
-	return true, nil
+	accepted, _, err := modelList(endpoint, key, false)
+	return accepted, err
 }
 
 func (p *Plugin) legacyWindows(account, model string, all bool) ([]map[string]any, error) {
@@ -98,7 +67,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			}
 			policy = map[string]any{"protocol": 1, "contract_revision": 2, "endpoint": "/v1/plugins/pacer/cache-policy", "ttls": []string{"5m", "1h"}, "provider_routes": routes, "transports": []string{"http"}, "formats": []string{"claude", "openai-response"}, "enforced": true}
 		}
-		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy, "auxiliary_ack": map[string]any{"version": 1, "kinds": []string{"compaction", "title", "generate"}}})
+		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy, "auxiliary_ack": map[string]any{"version": 1, "kinds": []string{"compaction", "title", "generate"}}, "client": clientDiscovery()})
 	}
 	token := strings.TrimPrefix(authorization, "Bearer ")
 	if token == authorization || len(token) == 0 || len(token) > 8192 {
@@ -109,6 +78,9 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		return resource(400, map[string]string{"error": "invalid_usage_scope"})
 	}
 	var binding tracker.Binding
+	if req.Query.Get("auth") == "api-key" && req.Query.Get("view") == "prices" {
+		return p.clientPrices(token)
+	}
 	if req.Query.Get("auth") == "api-key" {
 		if req.Query.Get("view") != "usage" || all != "true" {
 			return resource(400, map[string]string{"error": "usage_requires_all"})
@@ -141,9 +113,15 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		return resource(200, map[string]any{"protocol": 1, "mode": "off", "primary_used": binding.PrimaryUsed, "consumed": binding.Consumed, "cursor": 0, "generation": binding.Generation, "alias": binding.Alias, "intent": "", "available": true, "windows": windows, "events": []any{}})
 	}
 	p.mu.Lock()
-	creds := make([]credential, 0, len(p.creds))
+	creds := make([]credential, 0, len(p.creds)+len(p.usageCreds))
 	for _, c := range p.creds {
 		creds = append(creds, c)
+	}
+	// Usage-only providers (Antigravity, OpenCode Go) have meters too.
+	for _, c := range p.usageCreds {
+		if observation.Endpoint(c.Provider) != "" {
+			creds = append(creds, c)
+		}
 	}
 	p.mu.Unlock()
 	sort.Slice(creds, func(i, j int) bool { return creds[i].ID < creds[j].ID })

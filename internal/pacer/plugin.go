@@ -71,6 +71,11 @@ type attempt struct {
 	RoutingChoice              pluginapi.SchedulerPickResponse
 	RoutingProvider            string
 	Binding                    tracker.Binding
+	// Client is what this request's client declared (X-Pacer-Client); Served
+	// is the credential CPA picked, kept when the client asked for quota.
+	Client      clientCaps
+	Served      credential
+	ServedModel string
 }
 type Plugin struct {
 	forwardManagementMu    sync.Mutex
@@ -505,7 +510,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return refuse("quota_identity_missing", "Quota routing requires authenticated caller identity"), nil
 		}
 		p.mu.Lock()
-		p.requests[req.RequestID] = attempt{Claim: q, Caller: caller, Session: session(req.Headers, req.Metadata), Headers: req.Headers}
+		p.requests[req.RequestID] = attempt{Claim: q, Caller: caller, Session: session(req.Headers, req.Metadata), Headers: req.Headers, Client: clientDeclaration(req.Headers)}
 		p.mu.Unlock()
 		return pluginapi.RequestInterceptResponse{Headers: http.Header{requestHeader: {req.RequestID}}}, nil
 	case pluginabi.MethodSchedulerPick:
@@ -716,6 +721,18 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	if ok && !known && (managed || t.Claim != nil) {
 		return refuse("quota_state_unavailable", "Selected credential identity could not be verified")
 	}
+	if ok && t.Client.Quota && auth != "" {
+		// The reply carries this credential's quota (X-Pacer-Quota).
+		if served, found := p.servedCredential(auth); found {
+			t.Served, t.ServedModel = served, req.Model
+			p.mu.Lock()
+			if current, exists := p.requests[req.RequestID]; exists {
+				current.Served, current.ServedModel = served, req.Model
+				p.requests[req.RequestID] = current
+			}
+			p.mu.Unlock()
+		}
+	}
 	if ok && known {
 		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
 			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
@@ -737,7 +754,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			p.recordDecision(req.RequestID, t, c, "admitted")
 		}
 	}
-	clear := []string{controlHeader, requestHeader, "X-Quota-Binding", "X-Quota-Protocol"}
+	clear := []string{controlHeader, requestHeader, clientHeader, "X-Quota-Binding", "X-Quota-Protocol"}
 	for key := range req.Headers {
 		if strings.HasPrefix(strings.ToLower(key), "x-quota-") {
 			clear = append(clear, key)
@@ -748,8 +765,23 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 
 func (p *Plugin) ack(id string) http.Header {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	t := p.requests[id]
+	t, observer := p.requests[id], p.observer
+	p.mu.Unlock()
+	h := handoffAck(t)
+	if t.Client.Quota && t.Served.ID != "" && observer != nil {
+		if v, ok := p.quotaReplyValue(observer, t.Served, t.ServedModel); ok {
+			if h == nil {
+				h = http.Header{}
+			}
+			h.Set(quotaReplyHeader, v)
+		}
+	}
+	return h
+}
+
+// handoffAck acknowledges an X-Quota-Handoff claim: the binding, or the
+// helper request a first auxiliary made.
+func handoffAck(t attempt) http.Header {
 	if t.Claim == nil || t.Key == "" || t.Auth == "" {
 		return nil
 	}
@@ -771,7 +803,7 @@ func (p *Plugin) ack(id string) http.Header {
 // Upstream responses cannot supply coordinator acknowledgements. The host
 // removes these before applying the exact headers from this admitted attempt.
 func quotaAckHeaders() []string {
-	return []string{"X-Quota-Protocol", "X-Quota-Binding", "X-Quota-Auxiliary"}
+	return []string{"X-Quota-Protocol", "X-Quota-Binding", "X-Quota-Auxiliary", quotaReplyHeader}
 }
 
 func refuse(code, message string) pluginapi.RequestInterceptResponse {
