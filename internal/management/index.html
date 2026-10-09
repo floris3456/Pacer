@@ -112,6 +112,18 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-tech-section{margin:16px 0;padding-bottom:12px;border-bottom:1px solid var(--line)}
 .usage-tech-section:last-child{border-bottom:none}
 .usage-tech-section h4{margin:10px 0 6px;font-size:13px;font-weight:650}
+#usage-technical input,#usage-technical select,#usage-technical textarea{max-width:100%;min-width:0}
+#usage-technical .table-wrap{max-width:100%;background:var(--bg)}
+#usage-technical td{overflow-wrap:anywhere;min-width:120px}
+#usage-technical p,#usage-technical pre{overflow-wrap:anywhere}
+#usage-technical label{flex-wrap:wrap}
+#usage-technical .membership{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:10px 0}
+#usage-technical .membership label{flex:1 1 180px}
+#usage-technical .membership input{width:100%}
+#forward-evidence-dialog{max-width:1000px;max-height:90vh;overflow:auto}
+#forward-evidence-body{max-height:60vh;overflow:auto}
+#forward-coverage{border-color:var(--line);border-left-color:var(--muted);color:var(--text);background:var(--raised)}
+#usage-technical :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 #usage-inspect-dialog,#usage-windows-dialog{max-width:760px;width:95%;max-height:90vh;overflow:auto}
 #usage-windows-dialog table,#usage-inspect-dialog table{margin:10px 0}
 tr.usage-window-excluded td{color:var(--muted);opacity:.7}
@@ -126,6 +138,9 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 .usage-columns{grid-template-columns:1fr}
 .usage-toggle{width:100%}
 .usage-toggle button{flex:1 1 auto;min-width:0}
+#usage-technical .toolbar,#usage-technical form{align-items:stretch}
+#usage-technical .toolbar>label{width:100%}
+#usage-technical .toolbar>label>input,#usage-technical .toolbar>label>select{width:100%}
 }
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
