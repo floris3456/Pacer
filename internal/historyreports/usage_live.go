@@ -69,3 +69,29 @@ func (r *Reader) ImportedModels(ctx context.Context) (map[string]string, error) 
 	m, err := r.service.EventModels(ctx, frozen)
 	return m, domainError(ctx, err)
 }
+
+// UseVerifications sets the proven capacity intervals the page marks windows with.
+func (r *Reader) UseVerifications(v []Verification) {
+	r.liveMu.Lock()
+	r.verifications = v
+	r.liveMu.Unlock()
+}
+
+func (r *Reader) verified(w cpamp.QuotaUsageWindow) *CompareVerified {
+	r.liveMu.Lock()
+	defer r.liveMu.Unlock()
+	var out *CompareVerified
+	for _, v := range r.verifications {
+		if v.Account != w.Account || v.Kind != w.Kind || v.Scope != w.Scope || v.FromMS < w.Start || v.ToMS > w.Reset {
+			continue
+		}
+		if out == nil {
+			out = &CompareVerified{}
+		}
+		out.Intervals++
+		if v.ToMS > out.ToMS {
+			out.FromMS, out.ToMS, out.LowerUSDPerPercent = v.FromMS, v.ToMS, v.LowerUSDPerPercent
+		}
+	}
+	return out
+}

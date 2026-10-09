@@ -122,6 +122,7 @@ func modelShares(models map[string]cpamp.ProfileTotals, top int) []ModelShare {
 func (r *Reader) usageWindow(facts *cpamp.QuotaFacts, card int, keys []string, w cpamp.QuotaUsageWindow, excluded map[string]string) CompareWindow {
 	cw := compareWindow(w)
 	cw.Models = modelShares(r.windowsModels(facts, card, keys, []string{w.ID}), 3)
+	cw.Verified = r.verified(w)
 	if note, ok := excluded[w.ID]; ok {
 		cw.Excluded, cw.Note = true, note
 	}
@@ -303,7 +304,7 @@ func keySelectorHashes(id string) []string {
 // Inspect breaks down one profile pool, under the same filters as Compare, for
 // either one window (Window set) or the windows its average used.
 func (r *Reader) Inspect(ctx context.Context, q InspectQuery, ex Exclusions) (InspectView, error) {
-	if q.Kind != "weekly" && q.Kind != "5h" || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 || len(q.Window) > 128 {
+	if !validKind(q.Kind) || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 || len(q.Window) > 128 {
 		return InspectView{}, ErrInput
 	}
 	facts, w, e := r.compareWorkspace(ctx, q.CompareQuery, ex)

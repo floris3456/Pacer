@@ -34,7 +34,7 @@ type CompareQuery struct {
 type CompareWindowsQuery struct {
 	CompareQuery
 	Profile string `json:"profile"` // profile reference
-	Kind    string `json:"kind"`    // weekly or 5h
+	Kind    string `json:"kind"`    // monthly, weekly or 5h
 	Scope   string `json:"scope"`
 }
 
@@ -91,6 +91,18 @@ type CompareWindow struct {
 	Models   []ModelShare `json:"models"`
 	Excluded bool         `json:"excluded"`
 	Note     string       `json:"note,omitempty"`
+	// Verified: Pacer proved, inside this window, that every request on the
+	// account went through it (docs/capacity-lower-bound.md).
+	Verified *CompareVerified `json:"verified,omitempty"`
+}
+
+// CompareVerified summarizes the proven capacity intervals inside a window;
+// the newest one's lower bound is shown.
+type CompareVerified struct {
+	Intervals          int     `json:"intervals"`
+	FromMS             int64   `json:"from_ms"`
+	ToMS               int64   `json:"to_ms"`
+	LowerUSDPerPercent float64 `json:"lower_bound_usd_per_percent"`
 }
 
 type ModelShare struct {
@@ -101,6 +113,7 @@ type ModelShare struct {
 type CompareMeter struct {
 	Kind           string   `json:"kind"`
 	Scope          string   `json:"scope"`
+	Pool           string   `json:"pool,omitempty"` // pool name ("" for the main pool)
 	Label          string   `json:"label"`
 	UsedPercent    *float64 `json:"used_percent"`
 	ResetMS        int64    `json:"reset_ms"`
@@ -109,10 +122,15 @@ type CompareMeter struct {
 }
 
 type ComparePool struct {
-	Kind    string `json:"kind"`
-	Scope   string `json:"scope"`
-	Main    bool   `json:"main"`
-	Windows int    `json:"windows"`
+	Kind  string `json:"kind"`
+	Scope string `json:"scope"`
+	// Label names the pool ("" for the provider's main pool).
+	Label string `json:"label,omitempty"`
+	Main  bool   `json:"main"`
+	// Ended: the provider stopped reporting this limit while the card's other
+	// limits kept reporting (Codex Spark, for example).
+	Ended   bool `json:"ended"`
+	Windows int  `json:"windows"`
 	// Latest is the newest window with a measured rate (the original Compare's
 	// default); NewestUnmeasured is set when a newer window has no rate yet.
 	Latest           *CompareWindow `json:"latest"`
@@ -278,7 +296,13 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 		}
 		cp.Credentials = len(accounts)
 		for _, c := range p.Current {
-			cp.Current = append(cp.Current, CompareMeter{Kind: c.Kind, Scope: c.Scope, Label: c.Label, UsedPercent: c.Used, ResetMS: c.Reset, LastObservedMS: c.LastObserved, Stale: c.Stale})
+			cp.Current = append(cp.Current, CompareMeter{Kind: c.Kind, Scope: c.Scope, Pool: PoolLabel(c.Provider, c.Scope), Label: c.Label, UsedPercent: c.Used, ResetMS: c.Reset, LastObservedMS: c.LastObserved, Stale: c.Stale})
+		}
+		newest := int64(0) // the card's newest reading of any pool
+		poolNewest := map[string]int64{}
+		for _, win := range p.Windows {
+			newest = max(newest, win.LastObserved)
+			poolNewest[win.Kind+"|"+win.Scope] = max(poolNewest[win.Kind+"|"+win.Scope], win.LastObserved)
 		}
 		pools := map[string]*ComparePool{}
 		order := []string{}
@@ -286,7 +310,8 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 			key := win.Kind + "|" + win.Scope
 			pool := pools[key]
 			if pool == nil {
-				pool = &ComparePool{Kind: win.Kind, Scope: win.Scope, Main: mainScope(win.Scope), Average: CompareRate{Status: "unavailable", Reason: "No comparable intervals in this pool and selection.", Notes: []string{}}}
+				pool = &ComparePool{Kind: win.Kind, Scope: win.Scope, Label: PoolLabel(win.Provider, win.Scope), Main: mainScope(win.Scope), Average: CompareRate{Status: "unavailable", Reason: "No comparable intervals in this pool and selection.", Notes: []string{}}}
+				pool.Ended = q.Through == "" && newest-poolNewest[key] > 3*dayMS
 				pools[key] = pool
 				order = append(order, key)
 			}
@@ -312,13 +337,16 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 		}
 		sort.SliceStable(order, func(i, j int) bool {
 			a, b := pools[order[i]], pools[order[j]]
-			if a.Kind != b.Kind {
-				return a.Kind == "weekly"
+			if a.Ended != b.Ended {
+				return !a.Ended
 			}
 			if a.Main != b.Main {
 				return a.Main
 			}
-			return a.Scope < b.Scope
+			if a.Scope != b.Scope {
+				return a.Scope < b.Scope
+			}
+			return kindOrder(a.Kind) < kindOrder(b.Kind)
 		})
 		for _, key := range order {
 			pool := pools[key]
@@ -342,7 +370,7 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 // CompareWindows lists one profile pool's windows (newest first) for picking an
 // older window. It uses the same facts and selection as Compare.
 func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex Exclusions) (CompareWindowList, error) {
-	if q.Kind != "weekly" && q.Kind != "5h" || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 {
+	if !validKind(q.Kind) || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 {
 		return CompareWindowList{}, ErrInput
 	}
 	facts, w, e := r.compareWorkspace(ctx, q.CompareQuery, ex)

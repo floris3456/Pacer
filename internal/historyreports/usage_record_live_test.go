@@ -152,6 +152,33 @@ func TestRecordContinuesAccountsAfterH(t *testing.T) {
 	if card == nil || card.Name != "Not in a profile" || len(card.Pools) == 0 {
 		t.Fatal("no card for accounts in no profile")
 	}
+	// A proven capacity interval inside the window marks it verified.
+	r.UseVerifications(rec.Verifications(liveSource, []CapacityInterval{
+		{Native: "nx", Provider: "claude", Window: "all:18000", FromMS: h.Add(40 * time.Minute).UnixMilli(), ToMS: h.Add(140 * time.Minute).UnixMilli(), Status: "lower_bound", LowerUSDPerPercent: 0.5},
+		{Native: "nx", Provider: "claude", Window: "all:604800", FromMS: h.UnixMilli(), ToMS: h.Add(time.Hour).UnixMilli(), Status: "lower_bound", LowerUSDPerPercent: 9},
+	}))
+	marked, err := r.Compare(ctx, CompareQuery{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := 0
+	for _, p := range marked.Profiles {
+		if p.Reference != unassignedReference {
+			continue
+		}
+		for _, pool := range p.Pools {
+			if w := pool.Latest; w != nil && w.Verified != nil {
+				if pool.Kind != "5h" || w.Verified.LowerUSDPerPercent != 0.5 || w.Verified.Intervals != 1 {
+					t.Fatal("verified mark on the wrong window", pool.Kind, w.Verified)
+				}
+				verified++
+			}
+		}
+	}
+	if verified != 1 {
+		t.Fatal("verified windows", verified)
+	}
+	r.UseVerifications(nil)
 	r.UseLive(nil)
 	// Linking the unlinked login to the imported account merges them: one
 	// account, one window list.

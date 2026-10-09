@@ -1204,3 +1204,42 @@ func (r *Record) Accounts() []UsageAccount {
 	}
 	return out
 }
+
+// Verification is a proven capacity interval on a record account.
+type Verification struct {
+	Account            string
+	Kind, Scope        string
+	FromMS, ToMS       int64
+	LowerUSDPerPercent float64
+}
+
+// Verifications maps proven capacity intervals of native accounts to the
+// record's accounts and pools.
+func (r *Record) Verifications(source string, in []CapacityInterval) []Verification {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []Verification{}
+	if r.ident.canon == nil {
+		return out
+	}
+	for _, c := range in {
+		scope, secondsRaw, ok := strings.Cut(c.Window, ":")
+		if !ok {
+			continue
+		}
+		var seconds int64
+		if json.Unmarshal([]byte(secondsRaw), &seconds) != nil {
+			continue
+		}
+		kind := nativeKind(c.Provider, seconds)
+		if !validKind(kind) {
+			continue
+		}
+		ref := ForwardAccountRef(source, c.Provider, c.Native)
+		if _, ok := r.ident.implicit[ref]; !ok && len(r.ident.certs[ref]) > 0 {
+			continue // certified to several accounts: not attributable
+		}
+		out = append(out, Verification{Account: r.ident.canon(ref), Kind: kind, Scope: canonicalScope(c.Provider, scope), FromMS: c.FromMS, ToMS: c.ToMS, LowerUSDPerPercent: c.LowerUSDPerPercent})
+	}
+	return out
+}

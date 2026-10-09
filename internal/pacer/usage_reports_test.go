@@ -78,7 +78,7 @@ func TestUsageRoutesInputsAndRemovedHistorySurface(t *testing.T) {
 		{"POST", "profiles", `{"Key":""}`}, {"POST", "profiles", `{"key":"sk-secret-private"}`},
 		{"POST", "profiles", `{"from":"2026-13-01"}`}, {"POST", "profiles", `{"profile":"x"}`},
 		{"POST", "windows", `{}`}, {"POST", "inspect", `{"profile":"` + profile + `","kind":"weekly"}`},
-		{"POST", "inspect", `{"profile":"` + profile + `","kind":"monthly","scope":"all"}`},
+		{"POST", "inspect", `{"profile":"` + profile + `","kind":"daily","scope":"all"}`},
 		{"PATCH", "exclusions", `{"revision":0,"profile":"x","window":"y","excluded":true,"extra":1}`},
 	} {
 		if got := usageCall(p, c.method, c.op, c.raw); got.StatusCode != 400 || bytes.Contains(got.Body, []byte("private")) {

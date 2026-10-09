@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS record_readings(
  id INTEGER PRIMARY KEY, ref TEXT NOT NULL, native TEXT NOT NULL, provider TEXT NOT NULL,
  kind TEXT NOT NULL, observed INTEGER NOT NULL, body BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS record_readings_ref ON record_readings(ref, observed);
+CREATE TABLE IF NOT EXISTS record_verified(
+ native TEXT NOT NULL, provider TEXT NOT NULL, window TEXT NOT NULL, from_ms INTEGER NOT NULL, to_ms INTEGER NOT NULL,
+ status TEXT NOT NULL, lower REAL NOT NULL, PRIMARY KEY(native, window, from_ms, to_ms));
 CREATE TABLE IF NOT EXISTS record_segments(
  account TEXT NOT NULL, kind TEXT NOT NULL, segment INTEGER NOT NULL, key TEXT NOT NULL,
  body BLOB NOT NULL, PRIMARY KEY(account, kind, segment));
@@ -495,4 +498,52 @@ func (s *RecordStore) SetPriceSync(ctx context.Context, v PriceSync) error {
 		return err
 	}
 	return s.SetMeta(ctx, "models_dev", string(b))
+}
+
+// CapacityInterval is one judged capacity interval of a native account
+// (docs/capacity-lower-bound.md): Status "lower_bound" means Pacer proved that
+// every request in the interval went through it.
+type CapacityInterval struct {
+	Native, Provider, Window string // window key "scope:seconds"
+	FromMS, ToMS             int64
+	Status                   string
+	LowerUSDPerPercent       float64
+}
+
+// PutCapacity keeps the latest judgment of each interval: a later judgment can
+// revoke an earlier lower bound, and an interval judged once stays known after
+// it leaves the judge's recent history.
+func (s *RecordStore) PutCapacity(ctx context.Context, in []CapacityInterval) error {
+	if len(in) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, c := range in {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO record_verified(native,provider,window,from_ms,to_ms,status,lower) VALUES(?,?,?,?,?,?,?) ON CONFLICT(native,window,from_ms,to_ms) DO UPDATE SET status=excluded.status,lower=excluded.lower`, c.Native, c.Provider, c.Window, c.FromMS, c.ToMS, c.Status, c.LowerUSDPerPercent); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Capacity lists the proven intervals.
+func (s *RecordStore) Capacity(ctx context.Context) ([]CapacityInterval, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT native,provider,window,from_ms,to_ms,status,lower FROM record_verified WHERE status='lower_bound' ORDER BY from_ms`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CapacityInterval{}
+	for rows.Next() {
+		var c CapacityInterval
+		if err = rows.Scan(&c.Native, &c.Provider, &c.Window, &c.FromMS, &c.ToMS, &c.Status, &c.LowerUSDPerPercent); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

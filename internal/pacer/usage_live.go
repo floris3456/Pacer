@@ -357,6 +357,7 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 		return fail(err)
 	}
 	reader.UseLive(facts)
+	p.refreshVerified(ctx, store, record, reader, source)
 	u.built, u.next, u.inputs = now, facts.NextTransition, inputs
 	if st.WakeMS != 0 && (u.next == 0 || st.WakeMS < u.next) {
 		u.next = st.WakeMS
@@ -371,4 +372,38 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// refreshVerified keeps every judged capacity interval (a later judgment can
+// revoke one) and marks the record's windows with the proven ones.
+func (p *Plugin) refreshVerified(ctx context.Context, store *historyreports.RecordStore, record *historyreports.Record, reader *historyreports.Reader, source string) {
+	p.mu.Lock()
+	judged := []historyreports.CapacityInterval{}
+	for _, c := range p.creds {
+		state, ok := p.capacityViews[c.Account]
+		if !ok {
+			continue
+		}
+		for _, i := range state.intervals {
+			if i.From.IsZero() || i.To.IsZero() {
+				continue
+			}
+			lower := 0.0
+			if i.Value != nil {
+				lower = i.Value.LowerBoundUSDPerPercent
+			}
+			judged = append(judged, historyreports.CapacityInterval{Native: c.Account, Provider: c.Provider, Window: i.Window, FromMS: i.From.UnixMilli(), ToMS: i.To.UnixMilli(), Status: i.Status, LowerUSDPerPercent: lower})
+		}
+	}
+	p.mu.Unlock()
+	if err := store.PutCapacity(ctx, judged); err != nil {
+		p.metricError(err)
+		return
+	}
+	proven, err := store.Capacity(ctx)
+	if err != nil {
+		p.metricError(err)
+		return
+	}
+	reader.UseVerifications(record.Verifications(source, proven))
 }
