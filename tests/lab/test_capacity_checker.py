@@ -23,6 +23,7 @@ T0 = 4_000_000_000.0  # far beyond any real host clock, so a fake restart is alw
 LOWER_BOUND = {"lower_bound_usd_per_percent": 0.006, "cpa_value_usd": 0.018, "delta_percent": 2, "quantum_percent": 1, "records": 3}
 SPANNING = ["account_ref_changed", "carry_in_unproven", "incarnation_changed_between_samples", "inventory_incarnation_changed", "membership_unproven"]
 UNVERIFIED = ["account_ref_unknown", "membership_unproven", "no_account_tuples", "unknown_account_ref_tuple"]
+UNENROLLED = sorted(UNVERIFIED + ["carry_in_unproven", "source_not_enrolled"])
 REVERIFYING = ["account_ref_changed", "account_ref_unknown", "membership_unproven", "no_account_tuples", "unknown_account_ref_tuple"]
 PHASE1 = {
     "cap-a": ("lower_bound", [], LOWER_BOUND),
@@ -44,6 +45,10 @@ def interval(window, status, reasons, value, start=T0, end=T0 + 900):
             "interval_from": go_time(start), "interval_to": go_time(end), "value": value, "basis": check.BASIS}
 
 
+def dispatched(fake, account, after, before):
+    return any(e["path"] == check.MESSAGES and e["account"] == account and after < e["at"] < before for e in fake.log)
+
+
 def model(fake, account, s1, s2):
     """Pacer's judgment as the cases expect it, from the fake's own record.
     Like capacity.Project, membership and carry-in reasons are reported together."""
@@ -59,6 +64,8 @@ def model(fake, account, s1, s2):
             membership = REVERIFYING
     active = [e for e in fake.log if e["account"] == account and s1 < e["at"] < s2 and e["path"] in (check.MESSAGES, "/_test/usage")]
     carry = [] if active else ["carry_in_unproven", "physical_proof_mismatch"]
+    if restart and s1 > restart and not dispatched(fake, account, restart, s1):
+        carry = ["carry_in_unproven", "source_not_enrolled"]  # CPA enrols on the first dispatch per process
     if membership or carry:
         return "unknown", sorted(set(membership + carry)), None
     return ("lower_bound", [], LOWER_BOUND) if restart else fake.phase1[account]
@@ -536,7 +543,8 @@ class Phases(unittest.TestCase):
             self.assertLess(check.parse_time(across["s1"]), lab.restart_at)
             self.assertGreater(check.parse_time(across["s2"]), lab.restart_at)
             self.assertEqual(SPANNING, across["intervals"][check.SEVEN_DAY]["reasons"])
-            self.assertEqual(UNVERIFIED, case["intervals"][check.FIVE_HOUR]["reasons"])
+            self.assertEqual(UNENROLLED, case["intervals"][check.FIVE_HOUR]["reasons"])
+            self.assertFalse(case["source_enrolled_before_s1"])
         self.assertEqual("check-capacity.py phase3", receipt["next"])
         code, receipt, _ = run("phase3", lab, self.dir)
         self.assertEqual(0, code, json.dumps(receipt, indent=1)[:3000])
@@ -548,6 +556,39 @@ class Phases(unittest.TestCase):
                 self.assertLessEqual(set(REVERIFYING), set(case["into_s1"][check.SEVEN_DAY]["reasons"]))
         self.assertEqual(2, lab.generations["cap-c"])
         self.assertNoSecrets()
+
+    def phase2_after_restart(self, judge=model, dispatch_first=False):
+        lab = FakeLab(judge=judge)
+        self.assertEqual(0, run("phase1", lab, self.dir)[0])
+        lab.advance(300)
+        lab.restart()
+        if dispatch_first:  # e.g. a phase 2 rerun: the first run's requests enrolled every source
+            for account in ACCOUNTS:
+                lab.note(check.MESSAGES, account)
+        return run("phase2", lab, self.dir)
+
+    def test_phase2_expects_the_enrolment_reasons_exactly_when_nothing_was_dispatched_before_s1(self):
+        code, receipt, _ = self.phase2_after_restart(dispatch_first=True)
+        self.assertEqual(0, code, json.dumps(receipt, indent=1)[:3000])
+        for case in receipt["cases"].values():
+            self.assertTrue(case["source_enrolled_before_s1"])
+            self.assertEqual(UNVERIFIED, case["intervals"][check.SEVEN_DAY]["reasons"])
+        enrolment = {"carry_in_unproven", "source_not_enrolled"}
+
+        def keep(fake, account, s1, s2):  # still unenrolled after a dispatch: wrong
+            status, reasons, value = model(fake, account, s1, s2)
+            after = fake.restart_at and s1 > fake.restart_at
+            return status, sorted(set(reasons) | enrolment) if after else reasons, value
+
+        def drop(fake, account, s1, s2):  # enrolled with no dispatch since the restart: wrong
+            status, reasons, value = model(fake, account, s1, s2)
+            after = fake.restart_at and s1 > fake.restart_at
+            return status, [r for r in reasons if r not in enrolment] if after else reasons, value
+
+        for judge, dispatch_first in ((keep, True), (drop, False)):
+            code, receipt, _ = self.phase2_after_restart(judge, dispatch_first)
+            self.assertEqual(1, code)
+            self.assertTrue(all("expected exactly" in c["error"] for c in receipt["cases"].values()), receipt)
 
     def test_phase2_fails_if_cpa_reverified_a_login_after_the_restart(self):
         lab = FakeLab()

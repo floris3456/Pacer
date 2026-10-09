@@ -19,8 +19,11 @@ phase1  Verify every cap login in this CPA process (one request each: request-ti
         docker restart pacer-lab-cpa and, within 20 s, capacity-window.sh up.
 phase2  The interval across the restart is unknown (inventory_incarnation_changed,
         account_ref_changed). A clean interval after it stays unknown, because the
-        restart dropped every verification (unknown_account_ref_tuple). Start it
-        within ~45 min of the restart: readback keeps only ~1 h of intervals.
+        restart dropped every verification (unknown_account_ref_tuple). If nothing
+        was dispatched to the account between the restart and s1, its Claude source
+        is enrolled only by the in-interval request, so carry-in fails as well
+        (carry_in_unproven, source_not_enrolled). Start it within ~1.5 h of the
+        restart: readback keeps the last 8 intervals per account.
 phase3  A forced token refresh per account verifies it again (refresh profile); a
         clean interval after that is a lower bound again. cap-c is refreshed a second
         time inside that interval: a same-account rotation is no binding change.
@@ -667,12 +670,18 @@ def phase2(lab, out, receipt):
             infer_ok(lab, account)
             r["usage"] = change_usage(lab, account, 1)
 
-        _, t2, found, sent = interval_flow(lab, account, ready_at, r, act)
+        t1, _, found, sent = interval_flow(lab, account, ready_at, r, act)
         assert len(sent) == 1, "%d of 1 request reached %s" % (len(sent), account)
         relogin = entries(lab.attempts(fresh=True), account, PROFILE, started, status=None) + entries(lab.attempts(), account, TOKEN, started, status=None)
         assert not relogin, "premise: %s was profiled or refreshed after the restart" % account
+        # CPA enrols an account's Claude source on its first dispatch in this
+        # process. With none between the restart and s1, the in-interval request
+        # enrols it, so no proof can start at s1 and carry-in fails as well.
+        enrolled = bool(entries(lab.attempts(), account, MESSAGES, started, t1, status=None))
+        r["source_enrolled_before_s1"] = enrolled
+        reasons = ["account_ref_unknown", "membership_unproven", "no_account_tuples", "unknown_account_ref_tuple"]
         for w in WINDOWS:
-            expect_unknown(found[w], w, ["account_ref_unknown", "membership_unproven", "no_account_tuples", "unknown_account_ref_tuple"])
+            expect_unknown(found[w], w, reasons + ([] if enrolled else ["carry_in_unproven", "source_not_enrolled"]))
 
     cases = {a[-1]: (a, "across the restart: incarnation changed; after it: unverified, unknown_account_ref_tuple", case) for a in ACCOUNTS}
     receipt["cases"] = run_parallel(lab, ready_at, cases)
