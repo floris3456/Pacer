@@ -333,6 +333,9 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 			if pool.AverageModels == nil {
 				pool.AverageModels = []ModelShare{}
 			}
+			if ref == unassignedReference {
+				unassignedRates(pool)
+			}
 			cp.Pools = append(cp.Pools, *pool)
 		}
 		out.Profiles = append(out.Profiles, cp)

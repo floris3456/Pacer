@@ -212,6 +212,11 @@ func TestBuildLiveContinuesAccountsAfterH(t *testing.T) {
 		t.Fatal("no card for accounts in no profile")
 	}
 	pool := card.Pools[0]
+	for _, w := range []*CompareWindow{pool.Latest, pool.NewestUnmeasured} {
+		if w != nil && w.Rate.Status != "available" && w.Rate.Reason != unassignedReason {
+			t.Fatal("the unassigned card must say how to get a rate", w.Rate.Reason)
+		}
+	}
 	list, err := r.CompareWindows(ctx, CompareWindowsQuery{Profile: unassignedReference, Kind: pool.Kind, Scope: pool.Scope}, nil)
 	if err != nil || len(list.Windows) != pool.Windows {
 		t.Fatal("unassigned windows", err)

@@ -146,6 +146,25 @@ func usageCards(w Workspace) []usageCard {
 	return out
 }
 
+const unassignedReason = "Accounts in no profile have no $ per 1%. Add the account to a profile to measure it."
+
+// unassignedRates explains a missing rate on the "Not in a profile" card in
+// terms of what to do; measured numbers are never changed.
+func unassignedRates(pool *ComparePool) {
+	for _, r := range []*CompareRate{&pool.Average, rateOf(pool.Latest), rateOf(pool.NewestUnmeasured)} {
+		if r != nil && r.Status != "available" {
+			r.Reason = unassignedReason
+		}
+	}
+}
+
+func rateOf(w *CompareWindow) *CompareRate {
+	if w == nil {
+		return nil
+	}
+	return &w.Rate
+}
+
 // ---- Inspect ----
 
 type InspectQuery struct {

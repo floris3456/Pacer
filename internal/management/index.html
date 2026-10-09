@@ -86,7 +86,7 @@ h1,h2,h3,h4,h5,h6,legend,table,pre,code,kbd,samp{color:inherit}
 thead,th{background:var(--raised)}
 pre,code,kbd,samp{background:var(--field)}
 
-.usage-toggle{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
+.usage-toggle{display:inline-flex;flex-wrap:wrap;max-width:100%;border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
 .usage-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
 .usage-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .usage-toggle button+button{border-left:1px solid var(--line-strong)}
@@ -104,7 +104,7 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-rate-unavailable{color:var(--muted);font-weight:600}
 .usage-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .usage-model-mix{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.usage-col-actions{display:flex;gap:6px;margin-top:6px}
+.usage-col-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .usage-col-actions button{min-height:24px;padding:2px 8px;font-size:12px}
 .usage-other-limits{font-size:12px;margin:6px 0;border-top:1px solid var(--line);padding-top:4px}
 #usage-technical{margin:24px 0 16px;border-top:1px solid var(--line);padding-top:12px}
@@ -124,6 +124,8 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 #usage .toolbar>label{width:100%;flex-wrap:wrap}
 #usage .toolbar>label>input,#usage .toolbar>label>select{width:100%;min-width:0}
 .usage-columns{grid-template-columns:1fr}
+.usage-toggle{width:100%}
+.usage-toggle button{flex:1 1 auto;min-width:0}
 }
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
@@ -132,7 +134,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <div id="message" role="status" class="status" hidden></div>
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
-<section id="usage" hidden><h2>Usage Quota</h2><p class="muted">Provider balances are observations, not estimates from token counts. Refresh reads the shared cache; it does not bypass provider request limits.</p>
+<section id="usage" hidden><h2>Usage Quota</h2>
 <div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div></div>
 <div id="usage-status" role="status" class="status" hidden></div>
 <p id="usage-asof" class="muted"></p>
@@ -142,6 +144,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <details id="usage-technical"><summary>Technical details</summary>
 <div class="usage-tech-section"><h4>Data sources</h4>
 <p id="usage-record"></p>
+<p class="muted">Meter percentages are the provider's own readings, never estimated from token counts. Refreshing reads Pacer's stored readings; it never asks the provider.</p>
 <pre id="history"></pre>
 <div class="toolbar"><button id="forward-status-load" type="button">Refresh forward status</button></div><p id="forward-status" role="status" style="white-space:pre-line">Not loaded. Forward v8 reporting may be unavailable on this installation.</p>
 <details><summary>Exact status receipt · separate, non-atomic metadata</summary><pre id="forward-status-receipt"></pre></details>
