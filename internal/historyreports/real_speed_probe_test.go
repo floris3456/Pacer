@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime/pprof"
 	"strings"
@@ -167,6 +168,9 @@ func TestRealQuotaFactsParity(t *testing.T) {
 		}
 		limit = min(limit, fmtLimit)
 	}
+	if os.Getenv("PACER_REAL_PROGRESS") != "" {
+		fmt.Fprintf(os.Stderr, "filters %d, limit %d\n", len(filters), limit)
+	}
 	var slow, fast time.Duration
 	n := 0
 	for i := 0; i < limit; i++ {
@@ -193,6 +197,9 @@ func TestRealQuotaFactsParity(t *testing.T) {
 			t.Fatalf("case %d differs at byte %d of %d/%d", i, at, len(a), len(b))
 		}
 		n++
+		if os.Getenv("PACER_REAL_PROGRESS") != "" && n%25 == 0 {
+			fmt.Fprintf(os.Stderr, "progress %d/%d original %.0fs\n", n, limit, slow.Seconds())
+		}
 	}
 	t.Logf("%d of %d filters byte-identical; original %.1fs total (%.2fs avg), facts %.3fs total (%.4fs avg)", n, len(filters), slow.Seconds(), slow.Seconds()/float64(max(limit, 1)), fast.Seconds(), fast.Seconds()/float64(max(limit, 1)))
 }
