@@ -22,14 +22,11 @@ registration/state) before inference tests or delegating an exclusive client win
 The isolated CPAMP server uses a separate pure-Go SQLite implementation and may
 still be built with CGO disabled; these are different artifact requirements.
 
-`check-history.py` compares the native historical management routes with the
-checked-in original CPAMP oracles (53 domain results; 67 byte-exact exports and
-37 encoded-row-exact legacy CSVs). It requires `PACER_HISTORY_READY=1`, an explicit
-`PACER_EVIDENCE` directory, the extended synthetic 240-event/65-observation artifact,
-and a serialized parent acceptance window. It also checks authorization, absent
-public aliases, pin/cursor/input refusals and unchanged fake-provider call counts.
-Do not run it while a client/browser worker owns the lab. `test_history_checker.py`
-tests only the offline comparison logic and never contacts the lab.
+The Usage Quota page (`/usage/profiles|windows|inspect`, `PATCH /usage/exclusions`)
+is checked by the manager repository's browser runner with `PACER_FOCUS=usage`
+and `PACER_USAGE_READY=1`. It needs the prepared usage history (quota facts v2)
+and the forward store; its exclusion step restores the window it excludes. The
+former frozen-history and legacy CPAMP routes are removed and must answer 404.
 
 `check-coverage.py` requires `PACER_COVERAGE_READY=1`, `PACER_EVIDENCE`, and a parent
 window on the corrected scoped-hook candidate. It waits at most 45 seconds for the

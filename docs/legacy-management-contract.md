@@ -1,4 +1,7 @@
-# Frozen legacy management contract
+# Frozen legacy management contract (removed)
+
+> **Removed 2026-10-09.** These routes are no longer registered or served; the
+> Usage Quota page replaced them (see `pacer-installation.md`). Kept as a record.
 
 This additive contract is for the native CPA management surface and the CPAMP
 credential-free iframe bridge. Base: parent `129121f`; domain library:

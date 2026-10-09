@@ -95,18 +95,14 @@ The output directory must already exist. The command creates an owned child dire
 and prints its read-only artifact path and default pin. Set `report_path` to that path
 at the next confirmed-idle reload. Normal plugin startup only opens preparation metadata;
 it never imports/materializes history. Keep the original archive and CPAMP backup.
-Frozen report HTTP calls are capped at two concurrent calculations, 64 KiB input and
-8 MiB output; broad exports may require narrower filters. Calculation deadlines are
-cooperative, not hard process-preemption. A missing artifact never yields invented totals.
-
-The native management paths are `GET /plugins/pacer/history/profiles` and
-`POST /plugins/pacer/history/{report,windows,evidence,export}` under the existing
-CPA-authenticated management namespace. There is no public-resource alias or preparation
-endpoint. Requests contain `query` (the documented historyreports Query), with bounded
-window/evidence/export options. Export responses wrap exact JSON/CSV writer bytes as
-`{filename,media_type,content}` for the same credential-free iframe bridge; downloaded
-files preserve those bytes. Saved `query.pin` and `query.evidence_pin` never advance H.
-See [the extraction contract](history-reports.md) for tested parity and unported views.
+The Usage Quota page reads the prepared quota facts in memory (no report slots):
+`POST /plugins/pacer/usage/{profiles,windows,inspect}` and `PATCH
+/plugins/pacer/usage/exclusions` under the CPA-authenticated management namespace.
+Exclusions (windows left out of a profile's average) are append-only revisions in
+the forward store; without a forward store they are empty and read-only. Facts
+older than `pacer-quota-facts-v2` answer 409: re-run offline `prepare-reports`.
+The former `history/*` frozen-report and `history/legacy/*` CPAMP routes are
+removed. A missing artifact never yields invented totals.
 
 ## Build and evidence
 

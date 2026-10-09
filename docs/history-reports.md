@@ -147,8 +147,9 @@ windows, 4.0 MB JSON, 5 s to build, 15 ms to decode.
   real-backup filters in the env-gated `TestRealQuotaFactsParity` (original 4.28 s
   average, facts 0.12 s including the request page). Date-bounded reports, other
   pins and artifacts without facts keep the original builder unchanged.
-- **Compare view.** `Compare(ctx, CompareQuery{Key, From, Through})` and
-  `CompareWindows` (routes `POST history/compare`, `history/compare-windows`) read
+- **Compare view.** `Compare(ctx, CompareQuery{Key, From, Through}, exclusions)`,
+  `CompareWindows` and `Inspect` (routes `POST usage/profiles`, `usage/windows`,
+  `usage/inspect`; see `usage.go`) read
   only the in-memory facts (no SQLite, so they also bypass the two report slots).
   Every profile is returned, each pool's newest measured window (the original
   Compare's default pick) and the measured history average. Two deliberate
@@ -157,8 +158,16 @@ windows, 4.0 MB JSON, 5 s to build, 15 ms to decode.
   `$ per 1%` stays account-wide under a key filter (the key changes recorded
   requests/value and its share of each window). `TestCompareMatchesOriginalWorkspace`
   pins everything else to the original output.
-- Older artifacts return `ErrNotPrepared` (HTTP 409) for Compare; re-run offline
-  `prepare-reports`.
+- **Usage additions (facts v2).** Each window carries its meter-reading count.
+  Each card window and average has a model mix (share of API-equivalent value,
+  top 3 plus Other; tokens when nothing is valued). `Inspect` breaks one window
+  or the average's windows down per model (input, cache write/read, output,
+  cache hit %, cost split by token type), per API key, and states what 1% bought
+  at the account's mix (rate midpoint × account usage ÷ account value). User
+  exclusions (`forward_exclusions.go`) leave a window listed but out of its
+  profile's average (`FactsOptions.Exclude`, whole-window views only).
+- Older artifacts (facts v1 or none) return `ErrNotPrepared` (HTTP 409); re-run
+  offline `prepare-reports`.
 
 ## Parent API contract
 
