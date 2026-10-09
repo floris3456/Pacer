@@ -120,8 +120,8 @@ pre,code,kbd,samp{background:var(--field)}
 .compare-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
 .compare-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .compare-toggle button+button{border-left:1px solid var(--line-strong)}
-.compare-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin:12px 0}
-.compare-card{border:1px solid var(--line);background:var(--bg);padding:12px;display:flex;flex-direction:column;gap:8px}
+.compare-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}
+.compare-card{border:1px solid var(--line);background:var(--bg);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .compare-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px}
 .compare-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
 .compare-profile-name{font-weight:600;font-size:14px}
@@ -139,7 +139,10 @@ pre,code,kbd,samp{background:var(--field)}
 #compare-footer{margin-top:10px;font-size:12px}
 #compare-footer p{margin:4px 0}
 @media(max-width:680px){
-#compare-panel{padding:12px}
+#compare-panel{padding:10px}
+#compare-panel .toolbar{align-items:stretch}
+#compare-panel .toolbar>label{width:100%;flex-wrap:wrap}
+#compare-panel .toolbar>label>input,#compare-panel .toolbar>label>select{width:100%;min-width:0}
 .compare-columns{grid-template-columns:1fr}
 }
 </style></head><body>
@@ -666,6 +669,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   let compareGeneration = 0;
   let compareDateTimer = null;
   const compareSelectedWindows = new Map();
+  const compareInflight = new Map(); // one shared request per filter, however many callers ask
 
   const pct1 = n => (Math.round(Number(n) * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
   function formatUSDPerPercent(range) {
@@ -727,6 +731,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     compareGeneration++;
     clearTimeout(compareDateTimer);
     compareCache.clear();
+    compareInflight.clear();
     compareSelectedWindows.clear();
     currentCompareData = null;
     compareMode = 'latest';
@@ -763,10 +768,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     if (fromVal) query.from = fromVal;
     if (throughVal) query.through = throughVal;
 
+    let pending = compareInflight.get(cacheKey);
+    if (!pending) {
+      pending = api(root + '/history/compare', 'POST', query);
+      compareInflight.set(cacheKey, pending);
+      pending.then(() => {}, () => {}).then(() => { if (compareInflight.get(cacheKey) === pending) compareInflight.delete(cacheKey); });
+    }
     try {
-      const data = await api(root + '/history/compare', 'POST', query);
-      if (!connected || ticket.generation !== generation || ticket.count !== compareGeneration) return;
+      const data = await pending;
+      if (!connected || ticket.generation !== generation) return;
       compareCache.set(cacheKey, data);
+      if (ticket.count !== compareGeneration) return;
       currentCompareData = data;
       updateCompareAPIKeys(data.api_keys);
       renderCompare();

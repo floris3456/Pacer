@@ -349,6 +349,23 @@ const ui = sandbox.ui;
   await slowPromise;
   assert.equal(ui.state().currentCompareData.query.key || '', '', 'Stale response was ignored');
 
+  // 6b. Concurrent loads of one filter (tab refresh + key change) share one request
+  hold = '/history/compare';
+  held = false;
+  el('compare-key').value = 'shared-filter';
+  const first = ui.loadCompare();
+  for (let i = 0; i < 20 && !held; i++) await Promise.resolve();
+  assert(held, 'Shared request should be held');
+  const callsShared = calls.length;
+  const second = ui.loadCompare();
+  hold = '';
+  release();
+  await Promise.all([first, second]);
+  assert.equal(calls.length, callsShared, 'A second load of an in-flight filter must not request again');
+  assert.equal(ui.state().currentCompareData.query.key, 'shared-filter');
+  el('compare-key').value = '';
+  await el('compare-key').onchange();
+
   // 7. Older-windows list renders
   const olderBtns = grid.children[0].querySelectorAll('button').filter(b => b.textContent === 'Older windows');
   assert(olderBtns.length > 0, 'Card must have Older windows button');
