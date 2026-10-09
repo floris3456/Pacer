@@ -90,4 +90,38 @@ func TestRealLiveProbe(t *testing.T) {
 		}
 		t.Logf("build %d: %d ms (accounts %d, live windows %d, ambiguous %d, skipped readings %d), alloc %.0f MB, compare %.1f ms, profiles %d", i, stats.ElapsedMS, stats.Accounts, stats.Windows, stats.Ambiguous, stats.ReadingsSkipped, float64(after.TotalAlloc-before.TotalAlloc)/1e6, float64(time.Since(started).Microseconds())/1000, len(view.Profiles))
 	}
+	// Inspect and Windows on the live record: every pool's latest window and
+	// average; per-model figures must add up to the totals.
+	view, _ := r.Compare(ctx, CompareQuery{}, nil)
+	inspected, slowest := 0, time.Duration(0)
+	for _, p := range view.Profiles {
+		for _, pool := range p.Pools {
+			queries := []InspectQuery{{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope}}
+			if pool.Latest != nil {
+				queries = append(queries, InspectQuery{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope, Window: pool.Latest.ID})
+			}
+			for _, q := range queries {
+				started := time.Now()
+				v, err := r.Inspect(ctx, q, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				slowest = max(slowest, time.Since(started))
+				requests, share := int64(0), 0.0
+				for _, m := range v.Models {
+					requests += m.Requests
+					share += m.SharePercent
+				}
+				// Shares add up to 100%, or are all 0 when nothing has value or tokens.
+				if requests != v.Totals.Requests || share != 0 && (share < 99.999 || share > 100.001) {
+					t.Fatalf("models do not add up: %d/%d requests, %.4f%%", requests, v.Totals.Requests, share)
+				}
+				inspected++
+			}
+			if _, err := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope}, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Logf("inspect: %d inspections, slowest %.1f ms; every model breakdown adds up", inspected, float64(slowest.Microseconds())/1000)
 }

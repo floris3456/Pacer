@@ -219,6 +219,21 @@ func TestModelSharesFoldIntoOther(t *testing.T) {
 	if math.Abs(total-100) > 1e-9 {
 		t.Fatal(total)
 	}
+	// The full list keeps a model without a share (unpriced, failed-only) so
+	// Inspect rows add up to the totals; the card mix leaves it out.
+	withZero := map[string]cpamp.ProfileTotals{"priced": {Valued: true, Requests: 3, Value: cpamp.APIValue{Low: 10, High: 10}}, "unpriced": {Requests: 2}}
+	if full := modelShares(withZero, 0); len(full) != 2 || full[1].Model != "unpriced" || full[1].SharePercent != 0 {
+		t.Fatal(full)
+	}
+	if card := modelShares(withZero, 3); len(card) != 1 {
+		t.Fatal(card)
+	}
+	if none := modelShares(map[string]cpamp.ProfileTotals{"failed": {Requests: 1, Failed: 1}}, 0); len(none) != 1 || none[0].SharePercent != 0 {
+		t.Fatal("a model with nothing to share must still be listed", none)
+	}
+	if none := modelShares(map[string]cpamp.ProfileTotals{"failed": {Requests: 1, Failed: 1}}, 3); len(none) != 0 {
+		t.Fatal(none)
+	}
 	// Without values the mix falls back to tokens.
 	if got = modelShares(map[string]cpamp.ProfileTotals{"x": {Tokens: cpamp.Tokens{Total: 3}}, "y": {Tokens: cpamp.Tokens{Total: 1}}}, 3); len(got) != 2 || got[0].SharePercent != 75 {
 		t.Fatal(got)

@@ -91,10 +91,15 @@ func modelShares(models map[string]cpamp.ProfileTotals, top int) []ModelShare {
 		}
 	}
 	if total <= 0 {
-		return out
+		if top != 0 {
+			return out
+		}
+		total = 1 // nothing to share: the full list still names every model, at 0%
 	}
 	for name, t := range models {
-		if w := weight(t); w > 0 {
+		// The full list (top 0, Inspect) keeps models with no share, such as
+		// unpriced or failed-only ones, so its rows add up to the totals.
+		if w := weight(t); w > 0 || top == 0 {
 			out = append(out, ModelShare{Model: name, SharePercent: w * 100 / total})
 		}
 	}
