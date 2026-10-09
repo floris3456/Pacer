@@ -269,7 +269,7 @@ func AccountFactsFor(frame *QuotaFacts, a Account, events []Event, obs []Observa
 		}
 	}
 	for _, w := range derived {
-		if w.Kind != "5h" && w.Kind != "weekly" {
+		if !FactKind(w.Kind) {
 			continue
 		}
 		for _, at := range []int64{w.Start, w.Reset} {

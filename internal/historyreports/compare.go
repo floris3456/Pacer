@@ -232,10 +232,6 @@ func compareWindow(w cpamp.QuotaUsageWindow) CompareWindow {
 	return CompareWindow{ID: w.ID, Label: w.Label, Kind: w.Kind, Scope: w.Scope, StartMS: w.Start, ResetMS: w.Reset, EndMS: w.AttributionEnd, Status: w.Status, UsedPercent: w.Used, Rate: compareRate(w.Normalization), Selected: compareTotals(w.Selected), AccountValue: compareTotals(w.AccountUsage), TokenSharePercent: w.TokenShare}
 }
 
-func mainScope(scope string) bool {
-	return scope == "all" || scope == "codex-main" || scope == "gemini"
-}
-
 func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclusions) (*cpamp.QuotaFacts, Workspace, error) {
 	facts, e := r.usageFacts(ctx)
 	if e != nil {
