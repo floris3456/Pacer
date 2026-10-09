@@ -63,8 +63,10 @@ padding) of:
 
 Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a provider.
 
-- `?view=usage&auth=api-key&all=true`: every account with a meter (Claude, Codex, Antigravity, OpenCode Go), with IDs,
-  aliases and windows (the older usage format). This is a shared-pool view, not per-tenant.
+- `?view=usage&auth=api-key&all=true&v=1`: every account with a meter (Claude, Codex, Antigravity, OpenCode Go), with
+  IDs, aliases and windows in the `X-Pacer-Quota` format (all states, including stale and not-yet-reset windows).
+  Without `v=1` the windows use the older format, which leaves out windows without a fresh balance and reset. This is
+  a shared-pool view, not per-tenant.
 - `?view=prices&auth=api-key`: Pacer's price for every model the key can use, as on Model Settings (manual, else the
   imported book, else models.dev), so a client's cost display matches Pacer's usage page:
 

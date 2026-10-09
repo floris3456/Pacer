@@ -130,9 +130,21 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		if all != "true" && c.Provider != binding.Provider {
 			continue
 		}
-		windows, err := p.legacyWindows(c.Account, binding.Model, all == "true")
-		if err != nil {
-			return resource(503, map[string]string{"error": "quota_state_unavailable"})
+		var windows any
+		if req.Query.Get("v") == "1" {
+			// Clients of the declaration protocol: every window with its
+			// state (stale, awaiting confirmation ...), as in X-Pacer-Quota.
+			raw, err := p.observer.ReadWindows(c.Account)
+			if err != nil {
+				return resource(503, map[string]string{"error": "quota_state_unavailable"})
+			}
+			windows = clientWindows(raw, binding.Model, p.now())
+		} else {
+			legacy, err := p.legacyWindows(c.Account, binding.Model, all == "true")
+			if err != nil {
+				return resource(503, map[string]string{"error": "quota_state_unavailable"})
+			}
+			windows = legacy
 		}
 		shared := []string{}
 		for _, other := range creds {

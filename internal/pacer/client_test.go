@@ -174,6 +174,34 @@ func TestQuotaReplyForUsageOnlyProvider(t *testing.T) {
 	}) {
 		t.Fatal(r.StatusCode, string(r.Body))
 	}
+	// v=1: the client format, including windows the older format hides (no
+	// reset yet, stale).
+	weekly := 100.0
+	if err := p.observer.Observe(ag.Account, "antigravity", []observation.Window{{Provider: "antigravity", Scope: "gemini", Seconds: 604800, Remaining: &weekly, Usage: observation.Field{At: at, Source: "api", Quality: "measured"}}}); err != nil {
+		t.Fatal(err)
+	}
+	r = p.events(pluginapi.ManagementRequest{Method: "GET", Path: "/v0/resource/plugins/pacer/events", Headers: http.Header{"Authorization": {"Bearer " + key}}, Query: url.Values{"auth": {"api-key"}, "view": {"usage"}, "all": {"true"}, "v": {"1"}}})
+	var v1 struct {
+		Credentials []struct {
+			ID      string        `json:"id"`
+			Windows []quotaWindow `json:"windows"`
+		} `json:"credentials"`
+	}
+	if r.StatusCode != 200 || json.Unmarshal(r.Body, &v1) != nil {
+		t.Fatal(r.StatusCode, string(r.Body))
+	}
+	listed := false
+	for _, c := range v1.Credentials {
+		if c.ID == ag.ID {
+			listed = true
+			if len(c.Windows) != 2 || c.Windows[1].State != "partial" || c.Windows[1].ResetMS != 0 || *c.Windows[1].Left != 100 {
+				t.Fatalf("client usage view: %+v", c.Windows)
+			}
+		}
+	}
+	if !listed {
+		t.Fatal("antigravity login missing from the client usage view", string(r.Body))
+	}
 }
 
 // fakeModelList is CPA's /v1/models on loopback: it refuses requests without
