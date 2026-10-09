@@ -273,9 +273,9 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 		"$ per 1% is measured on the account's shared quota meter, so it is the same for every API key; the key changes the recorded value and its share.",
 	}
 	keys := cpamp.KeyHashes(q.Key)
-	for card, p := range w.Profiles {
-		ref := "profile:" + hash(p.ID)
-		cp := CompareProfile{Reference: "profile:" + hash(p.ID), Name: p.Name, Provider: p.Provider, Archived: p.Archived, FirstMS: p.First, LastMS: p.Last, Lifetime: compareTotals(p.Lifetime), Selected: compareTotals(p.Selected), Current: []CompareMeter{}, Pools: []ComparePool{}}
+	for _, c := range usageCards(w) {
+		card, p, ref := c.index, c.usage, c.reference
+		cp := CompareProfile{Reference: ref, Name: p.Name, Provider: p.Provider, Archived: p.Archived, FirstMS: p.First, LastMS: p.Last, Lifetime: compareTotals(p.Lifetime), Selected: compareTotals(p.Selected), Current: []CompareMeter{}, Pools: []ComparePool{}}
 		accounts := map[string]bool{}
 		for _, m := range p.Periods {
 			accounts[m.Account] = true
@@ -351,8 +351,9 @@ func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex E
 		return CompareWindowList{}, e
 	}
 	keys := cpamp.KeyHashes(q.Key)
-	for card, p := range w.Profiles {
-		if "profile:"+hash(p.ID) != q.Profile {
+	for _, c := range usageCards(w) {
+		card, p := c.index, c.usage
+		if c.reference != q.Profile {
 			continue
 		}
 		out := CompareWindowList{Version: CompareVersion, Query: q.CompareQuery, Profile: q.Profile, Kind: q.Kind, Scope: q.Scope, Windows: []CompareWindow{}}

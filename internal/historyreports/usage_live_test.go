@@ -200,6 +200,26 @@ func TestBuildLiveContinuesAccountsAfterH(t *testing.T) {
 	if requests(after) != requests(before)+10 {
 		t.Fatal("card does not show Pacer's requests", requests(before), requests(after))
 	}
+	// Accounts in no profile get one read-only card, so Pacer's unlinked
+	// accounts are visible: Windows and Inspect work, exclusions do not.
+	var card *CompareProfile
+	for i := range after.Profiles {
+		if after.Profiles[i].Reference == unassignedReference {
+			card = &after.Profiles[i]
+		}
+	}
+	if card == nil || card.Name != "Not in a profile" || len(card.Pools) == 0 || len(after.Profiles) != len(before.Profiles)+1 {
+		t.Fatal("no card for accounts in no profile")
+	}
+	pool := card.Pools[0]
+	list, err := r.CompareWindows(ctx, CompareWindowsQuery{Profile: unassignedReference, Kind: pool.Kind, Scope: pool.Scope}, nil)
+	if err != nil || len(list.Windows) != pool.Windows {
+		t.Fatal("unassigned windows", err)
+	}
+	inspect, err := r.Inspect(ctx, InspectQuery{Profile: unassignedReference, Kind: pool.Kind, Scope: pool.Scope, Window: list.Windows[0].ID}, nil)
+	if err != nil || inspect.Totals.Requests != 2 || inspect.ProfileName != "Not in a profile" {
+		t.Fatal("unassigned inspect", inspect.Totals.Requests, err)
+	}
 	r.UseLive(nil)
 	if again, _ := r.Compare(ctx, CompareQuery{}, nil); again.FrozenAtMS != h.UnixMilli() {
 		t.Fatal("UseLive(nil) must return to the prepared facts")

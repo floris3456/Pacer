@@ -224,3 +224,10 @@ func TestModelSharesFoldIntoOther(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestUnassignedCannotBeExcluded(t *testing.T) {
+	s, _ := forwardLedger(t)
+	if _, err := s.SetWindowExclusion(context.Background(), 0, unassignedReference, "a-week", true, "", time.Now()); !errors.Is(err, ErrInput) {
+		t.Fatal("the unassigned card has no average to exclude from", err)
+	}
+}

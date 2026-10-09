@@ -1037,7 +1037,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         cb.type = 'checkbox';
         cb.className = 'usage-window-count-checkbox';
         cb.checked = !w.excluded;
-        if (!currentUsageData?.exclusions_editable) {
+        if (profile.reference === 'unassigned') {
+          cb.disabled = true;
+          cb.title = 'Accounts in no profile have no average to exclude from';
+        } else if (!currentUsageData?.exclusions_editable) {
           cb.disabled = true;
           cb.title = "Needs Pacer's usage store";
         } else {

@@ -123,6 +123,29 @@ func (r *Reader) usageWindow(facts *cpamp.QuotaFacts, card int, keys []string, w
 	return cw
 }
 
+// usageCard is one card on the usage page: a profile, or the accounts that are
+// in no profile ("unassigned", only when it has usage). index is the facts
+// card index (profiles in config order, then unassigned).
+type usageCard struct {
+	index     int
+	reference string
+	usage     cpamp.SavedProfileUsage
+}
+
+const unassignedReference = "unassigned"
+
+func usageCards(w Workspace) []usageCard {
+	out := make([]usageCard, 0, len(w.Profiles)+1)
+	for i, p := range w.Profiles {
+		out = append(out, usageCard{index: i, reference: "profile:" + hash(p.ID), usage: p})
+	}
+	if u := w.Unassigned; len(u.Windows) > 0 || u.Lifetime.Requests > 0 {
+		u.Name = "Not in a profile"
+		out = append(out, usageCard{index: len(w.Profiles), reference: unassignedReference, usage: u})
+	}
+	return out
+}
+
 // ---- Inspect ----
 
 type InspectQuery struct {
@@ -265,8 +288,8 @@ func (r *Reader) Inspect(ctx context.Context, q InspectQuery, ex Exclusions) (In
 	}
 	keys := cpamp.KeyHashes(q.Key)
 	index := r.factsIndex(facts)
-	for card, p := range w.Profiles {
-		ref := "profile:" + hash(p.ID)
+	for _, c := range usageCards(w) {
+		card, p, ref := c.index, c.usage, c.reference
 		if ref != q.Profile {
 			continue
 		}
