@@ -98,6 +98,8 @@ type Reader struct {
 	historicalBytes int
 	factsMu         sync.Mutex
 	facts           *cpamp.QuotaFacts
+	factsWindows    map[string]*cpamp.FactWindow
+	factsWindowsFor *cpamp.QuotaFacts
 }
 
 // quotaFacts decodes the prepared facts on first use (not in Open) and hands
@@ -116,8 +118,11 @@ func (r *Reader) quotaFacts(ctx context.Context) (*cpamp.QuotaFacts, error) {
 		return nil, domainError(ctx, e)
 	}
 	q := &cpamp.QuotaFacts{}
-	if json.Unmarshal(raw, q) != nil || q.Version != cpamp.QuotaFactsVersion {
+	if json.Unmarshal(raw, q) != nil {
 		return nil, ErrSource
+	}
+	if q.Version != cpamp.QuotaFactsVersion {
+		return nil, ErrNotPrepared // an older facts version: prepare the artifact again
 	}
 	r.facts = q
 	r.service.UseQuotaFacts(q)

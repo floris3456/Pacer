@@ -86,8 +86,8 @@ func TestRealSpeedProbe(t *testing.T) {
 		timeIt("workspace last 7 days", func() (any, error) { return r.Report(ctx, Query{From: from}) })
 	}
 	if want("compare") {
-		timeIt("compare first (loads facts)", func() (any, error) { return r.Compare(ctx, CompareQuery{}) })
-		v := timeIt("compare default", func() (any, error) { return r.Compare(ctx, CompareQuery{}) })
+		timeIt("compare first (loads facts)", func() (any, error) { return r.Compare(ctx, CompareQuery{}, nil) })
+		v := timeIt("compare default", func() (any, error) { return r.Compare(ctx, CompareQuery{}, nil) })
 		if v != nil {
 			view := v.(CompareView)
 			for i, k := range view.APIKeys {
@@ -95,18 +95,18 @@ func TestRealSpeedProbe(t *testing.T) {
 					break
 				}
 				id := k.ID
-				timeIt("compare key", func() (any, error) { return r.Compare(ctx, CompareQuery{Key: id}) })
+				timeIt("compare key", func() (any, error) { return r.Compare(ctx, CompareQuery{Key: id}, nil) })
 			}
 			day := time.UnixMilli(r.meta.Boundary.HMS).UTC()
 			from := day.AddDate(0, 0, -14).Format("2006-01-02")
 			through := day.Format("2006-01-02")
-			timeIt("compare last 14 days", func() (any, error) { return r.Compare(ctx, CompareQuery{From: from, Through: through}) })
+			timeIt("compare last 14 days", func() (any, error) { return r.Compare(ctx, CompareQuery{From: from, Through: through}, nil) })
 			for _, p := range view.Profiles {
 				if len(p.Pools) == 0 {
 					continue
 				}
 				q := CompareWindowsQuery{Profile: p.Reference, Kind: p.Pools[0].Kind, Scope: p.Pools[0].Scope}
-				timeIt("compare windows one pool", func() (any, error) { return r.CompareWindows(ctx, q) })
+				timeIt("compare windows one pool", func() (any, error) { return r.CompareWindows(ctx, q, nil) })
 				if p.Pools[0].Latest != nil {
 					ref, id := p.Reference, p.Pools[0].Latest.ID
 					timeIt("evidence latest window", func() (any, error) { return r.Evidence(ctx, Query{ProfileReference: ref}, id) })

@@ -31,7 +31,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := c.reader(t)
 			unfiltered := compareOriginal(t, r, "", 0, 0)
-			view, e := r.Compare(ctx, CompareQuery{})
+			view, e := r.Compare(ctx, CompareQuery{}, nil)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -66,7 +66,12 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 					}
 					if want != nil {
 						measured++
-						if !reflect.DeepEqual(*pool.Latest, compareWindow(*want)) {
+						got := *pool.Latest
+						if got.Models == nil || got.Excluded {
+							t.Fatalf("profile %d pool %s/%s latest lacks its model mix", i, pool.Kind, pool.Scope)
+						}
+						got.Models = nil
+						if !reflect.DeepEqual(got, compareWindow(*want)) {
 							t.Fatalf("profile %d pool %s/%s latest differs", i, pool.Kind, pool.Scope)
 						}
 					}
@@ -88,7 +93,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 
 			// A key keeps account-wide rates and filters recorded totals exactly.
 			for _, k := range view.APIKeys {
-				keyed, e := r.Compare(ctx, CompareQuery{Key: k.ID})
+				keyed, e := r.Compare(ctx, CompareQuery{Key: k.ID}, nil)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -116,7 +121,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 			for _, span := range []int64{1, 3, 10} {
 				from := time.UnixMilli(day - span*86400000).UTC().Format("2006-01-02")
 				through := time.UnixMilli(day - 86400000).UTC().Format("2006-01-02")
-				dated, e := r.Compare(ctx, CompareQuery{From: from, Through: through})
+				dated, e := r.Compare(ctx, CompareQuery{From: from, Through: through}, nil)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -142,11 +147,11 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 	ctx := context.Background()
 	r := historicalFixture(t)
 	for _, q := range []CompareQuery{{Key: "not-a-key"}, {From: "2026-1-01"}, {From: "2026-10-02", Through: "2026-10-01"}, {Through: "1999-12-31"}} {
-		if _, e := r.Compare(ctx, q); !errors.Is(e, ErrInput) {
+		if _, e := r.Compare(ctx, q, nil); !errors.Is(e, ErrInput) {
 			t.Fatalf("%+v accepted: %v", q, e)
 		}
 	}
-	view, e := r.Compare(ctx, CompareQuery{})
+	view, e := r.Compare(ctx, CompareQuery{}, nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -157,7 +162,7 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 	listed := 0
 	for _, p := range view.Profiles {
 		for _, pool := range p.Pools {
-			list, e := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope})
+			list, e := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope}, nil)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -175,23 +180,23 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 	if listed == 0 {
 		t.Fatal("no windows listed")
 	}
-	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: "profile:" + hash("missing"), Kind: "weekly", Scope: "all"}); !errors.Is(e, ErrInput) {
+	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: "profile:" + hash("missing"), Kind: "weekly", Scope: "all"}, nil); !errors.Is(e, ErrInput) {
 		t.Fatal(e)
 	}
-	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: view.Profiles[0].Reference, Kind: "monthly", Scope: "all"}); !errors.Is(e, ErrInput) {
+	if _, e = r.CompareWindows(ctx, CompareWindowsQuery{Profile: view.Profiles[0].Reference, Kind: "monthly", Scope: "all"}, nil); !errors.Is(e, ErrInput) {
 		t.Fatal(e)
 	}
 	// Compare never needs the database once facts are loaded.
 	if e = r.db.Close(); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = r.Compare(ctx, CompareQuery{Key: cpamp.UnknownAPIKey}); e != nil {
+	if _, e = r.Compare(ctx, CompareQuery{Key: cpamp.UnknownAPIKey}, nil); e != nil {
 		t.Fatalf("compare touched the database: %v", e)
 	}
 	// Artifacts prepared before quota facts report the missing preparation.
 	old := historicalFixture(t)
 	old.meta.QuotaFacts = false
-	if _, e = old.Compare(ctx, CompareQuery{}); !errors.Is(e, ErrNotPrepared) {
+	if _, e = old.Compare(ctx, CompareQuery{}, nil); !errors.Is(e, ErrNotPrepared) {
 		t.Fatal(e)
 	}
 }

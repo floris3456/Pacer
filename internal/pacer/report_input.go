@@ -8,39 +8,8 @@ import (
 	"strings"
 )
 
-// Saved pins are authoritative input, not best-effort options. Unlike ordinary
-// encoding/json decoding, this refuses duplicates, case aliases and scalar nulls.
-func decodeReport(raw []byte, op string, out *reportRequest) error {
-	if err := decodeStrictReport(raw, out); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	allowed := map[string]bool{"query": true}
-	switch op {
-	case "windows":
-		for _, key := range []string{"kind", "state", "limit", "cursor"} {
-			allowed[key] = true
-		}
-	case "evidence":
-		allowed["window_id"] = true
-	case "export":
-		for _, key := range []string{"window_id", "kind", "format", "csv", "profile_references"} {
-			allowed[key] = true
-		}
-	}
-	for key := range fields {
-		if !allowed[key] {
-			return io.ErrUnexpectedEOF
-		}
-	}
-	return nil
-}
-
-// Each legacy operation supplies its own request type so even an empty field
-// belonging to a different operation is rejected by the same strict scanner.
+// Strict typed decoding: refuses duplicates, case aliases, unknown fields and
+// scalar nulls, so an empty field from another operation is rejected too.
 func decodeStrictReport(raw []byte, out any) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()

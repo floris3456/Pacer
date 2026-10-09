@@ -466,7 +466,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		return result, err
 	case pluginabi.MethodManagementRegister:
-		result := map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}, {"Method": "GET", "Path": "/plugins/pacer/dry-run-report"}}, reportRoutes()...)}
+		result := map[string]any{"resources": []map[string]string{{"Path": "/index.html", "Menu": "Pacer", "Description": "Quota-aware routing and usage"}, {"Path": "/events", "Description": "Compatible capability-authenticated usage"}}, "routes": append([]map[string]string{{"Method": "GET", "Path": "/plugins/pacer/state"}, {"Method": "PATCH", "Path": "/plugins/pacer/routing"}, {"Method": "GET", "Path": "/plugins/pacer/observations"}, {"Method": "POST", "Path": "/plugins/pacer/observations/reconcile"}, {"Method": "GET", "Path": "/plugins/pacer/keys"}, {"Method": "PATCH", "Path": "/plugins/pacer/keys"}, {"Method": "GET", "Path": "/plugins/pacer/dry-run-report"}}, usageRoutes()...)}
 		result["routes"] = append(result["routes"].([]map[string]string), p.registerForwardManagement(raw)...)
 		return result, nil
 	case pluginabi.MethodManagementHandle:
@@ -769,8 +769,8 @@ func resource(status int, body any) pluginapi.ManagementResponse {
 }
 
 func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	if strings.HasPrefix(req.Path, historyRoot) {
-		return p.reportsAPI(req)
+	if strings.HasPrefix(req.Path, usageRoot) {
+		return p.usageAPI(req)
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/keys" {
 		return p.editKeys(req)

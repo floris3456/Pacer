@@ -106,17 +106,20 @@ func TestForwardWiringRegistrationCapabilityAndLegacyPreservation(t *testing.T) 
 	if !bytes.Equal(hookRaw(t, full), legacyJSON) {
 		t.Fatal("legacy resources/routes changed")
 	}
-	legacyCount := 0
+	usageCount := 0
 	for _, r := range routes {
-		if strings.Contains(r["Path"], "/history/legacy/") {
-			legacyCount++
+		if strings.Contains(r["Path"], "/history/") {
+			t.Fatal("removed history route still registered", r)
+		}
+		if strings.Contains(r["Path"], "/usage/") {
+			usageCount++
 		}
 		if strings.Contains(r["Path"], "forward") && !strings.HasPrefix(r["Path"], forwardHTTPRoot) {
 			t.Fatal("forward legacy alias")
 		}
 	}
-	if legacyCount != 9 {
-		t.Fatal("original nine legacy routes missing")
+	if usageCount != 4 {
+		t.Fatal("the four usage routes are missing")
 	}
 	r := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
 	var status forwardWiredStatus
@@ -420,37 +423,13 @@ func TestForwardWiringSharedHistoricalPublisherAdmission(t *testing.T) {
 	}
 	// One available slot succeeds: a store lease must not acquire a second slot.
 	forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
-	historyEntered, historyRelease, historyDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	defer func() {
-		select {
-		case <-historyRelease:
-		default:
-			close(historyRelease)
-		}
-	}()
-	go func() {
-		p.withReportReader(func(context.Context, *historyreports.Reader) pluginapi.ManagementResponse {
-			close(historyEntered)
-			<-historyRelease
-			return resource(200, map[string]string{"state": "fixture"})
-		})
-		close(historyDone)
-	}()
-	select {
-	case <-historyEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("historical reader did not enter")
-	}
+	// Another report computation (e.g. the dry-run report) holds the second slot.
+	p.reportSlots <- struct{}{}
 	r := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 503)
 	if string(r.Body) != `{"error":"busy"}` || len(p.reportSlots) != 2 {
 		t.Fatal("busy acquired/stole slot", string(r.Body))
 	}
-	legacy, err := p.Handle(pluginabi.MethodManagementHandle, hookRaw(t, pluginapi.ManagementRequest{Method: "GET", Path: legacyHistoryRoot + "status"}))
-	if err != nil || legacy.(pluginapi.ManagementResponse).StatusCode != 429 {
-		t.Fatal("historical third computation admitted", err)
-	}
-	close(historyRelease)
-	<-historyDone
+	<-p.reportSlots
 	forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
 	close(sealRelease)
 	forwardWait(t, p, func(v ForwardRuntimeStatus) bool { return v.State == "ready" && !v.Active })

@@ -176,9 +176,9 @@ func TestForwardHTTPAdvertisementSDKProvenanceAndNoImplicitRegistration(t *testi
 		}
 		seen[key] = true
 	}
-	for _, route := range reportRoutes() {
+	for _, route := range usageRoutes() {
 		if strings.Contains(route["Path"], "/v8/") || strings.Contains(route["Path"], "forward") {
-			t.Fatal("legacy registration acquired new route", route)
+			t.Fatal("usage registration acquired a forward route", route)
 		}
 	}
 	for _, value := range []pluginapi.ManagementRegistrationRequest{{}, reg} {

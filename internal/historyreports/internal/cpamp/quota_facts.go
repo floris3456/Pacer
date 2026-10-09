@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const QuotaFactsVersion = "pacer-quota-facts-v1"
+const QuotaFactsVersion = "pacer-quota-facts-v2"
 
 // Reasons normalizeProfileWindow returns before it reads observations, events,
 // filters or periods. A key/model filter cannot change these results.
@@ -85,8 +85,11 @@ type FactWindow struct {
 	KeyAttribution QuotaAttribution `json:"key_attribution"`
 	Latest         bool             `json:"latest"`
 	TokensTotal    int64            `json:"tokens_total"`
-	Selections     []FactSelection  `json:"selections"`
-	Cards          []FactCard       `json:"cards"`
+	// Readings is the number of provider meter readings in the window (v2).
+	Readings      int64           `json:"readings"`
+	FirstObserved int64           `json:"first_observed_ms"`
+	Selections    []FactSelection `json:"selections"`
+	Cards         []FactCard      `json:"cards"`
 }
 
 func cardKey(cards []int) string {
@@ -292,7 +295,7 @@ func (s *Service) BuildQuotaFacts(ctx context.Context, f ProfileWorkspaceFilter)
 				}
 				sel.Totals.add(e)
 			}
-			fw := FactWindow{Account: a.ID, Base: base, KeyAttribution: attributeKeyQuota(w, obs, windowEvents, UnknownAPIKey, false), Latest: latest[w.Kind+"|"+w.Scope] == w.ID, TokensTotal: w.Tokens.Total, Selections: []FactSelection{}, Cards: []FactCard{}}
+			fw := FactWindow{Account: a.ID, Base: base, KeyAttribution: attributeKeyQuota(w, obs, windowEvents, UnknownAPIKey, false), Latest: latest[w.Kind+"|"+w.Scope] == w.ID, TokensTotal: w.Tokens.Total, Readings: w.Observations, FirstObserved: w.FirstObserved, Selections: []FactSelection{}, Cards: []FactCard{}}
 			for _, key := range selectionOrder {
 				fw.Selections = append(fw.Selections, *selections[key])
 			}
@@ -334,6 +337,9 @@ func filteredNormalization(n *ProfileNormalization) *ProfileNormalization {
 type FactsOptions struct {
 	WholeWindows bool
 	SkipRequests bool
+	// Exclude removes a profile's window from its average (rates) only; the
+	// window stays listed. Used only with WholeWindows (a Pacer view).
+	Exclude func(profileID, windowID string) bool
 }
 
 const dayMS = int64(86400000)
@@ -398,7 +404,7 @@ func (s *Service) FactsWorkspace(ctx context.Context, q *QuotaFacts, f ProfileWo
 // FactsView assembles the prepared pin's workspace from facts alone, without a
 // database read. f must be the facts pin with only Profile, Account, Model,
 // APIKey and UTC-midnight From/To changed. Requests are not paged.
-func FactsView(ctx context.Context, q *QuotaFacts, profile, account, model, apiKey string, from, to int64) (ProfileWorkspaceReport, error) {
+func FactsView(ctx context.Context, q *QuotaFacts, profile, account, model, apiKey string, from, to int64, exclude func(profileID, windowID string) bool) (ProfileWorkspaceReport, error) {
 	if q == nil || q.Version != QuotaFactsVersion || q.OrderSensitive {
 		return ProfileWorkspaceReport{}, errors.New("quota facts unavailable")
 	}
@@ -407,7 +413,7 @@ func FactsView(ctx context.Context, q *QuotaFacts, profile, account, model, apiK
 	}
 	f := q.Filter
 	f.Profile, f.Account, f.Model, f.APIKey, f.From, f.To, f.Page = profile, account, model, apiKey, from, to, 0
-	return assembleFactsWorkspace(ctx, q, f, q.Config, q.PriceBook, FactsOptions{WholeWindows: true, SkipRequests: true})
+	return assembleFactsWorkspace(ctx, q, f, q.Config, q.PriceBook, FactsOptions{WholeWindows: true, SkipRequests: true, Exclude: exclude})
 }
 
 func assembleFactsWorkspace(ctx context.Context, q *QuotaFacts, f ProfileWorkspaceFilter, config ProfileConfig, book ComparisonPriceBook, o FactsOptions) (ProfileWorkspaceReport, error) {
@@ -540,7 +546,16 @@ func assembleFactsWorkspace(ctx context.Context, q *QuotaFacts, f ProfileWorkspa
 		}
 	}
 	for i := range r.Profiles {
-		r.Profiles[i].Rates = aggregateProfileRates(r.Profiles[i].Windows, r.PriceBook)
+		counted := r.Profiles[i].Windows
+		if o.WholeWindows && o.Exclude != nil {
+			counted = []QuotaUsageWindow{}
+			for _, w := range r.Profiles[i].Windows {
+				if !o.Exclude(r.Profiles[i].ID, w.ID) {
+					counted = append(counted, w)
+				}
+			}
+		}
+		r.Profiles[i].Rates = aggregateProfileRates(counted, r.PriceBook)
 		sortWorkspaceWindows(r.Profiles[i].Windows)
 		sortWorkspaceWindows(r.Profiles[i].Current)
 	}
@@ -575,4 +590,16 @@ func (t *ProfileTotals) addTotals(b ProfileTotals) {
 	t.Failed += b.Failed
 	t.Unpriced += b.Unpriced
 	t.CostNano += b.CostNano
+}
+
+// AddTotals adds another total exactly as ProfileTotals.add adds events.
+func (t *ProfileTotals) AddTotals(b ProfileTotals) { t.addTotals(b) }
+
+// KeyHashes expands a key selector ("", "unattributed", a hash or a "keys:"
+// lineage) into the raw hashes it matches; nil means every key.
+func KeyHashes(selector string) []string {
+	if selector == "" {
+		return nil
+	}
+	return apiKeyHashes(selector)
 }

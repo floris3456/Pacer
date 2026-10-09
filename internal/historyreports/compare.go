@@ -87,6 +87,15 @@ type CompareWindow struct {
 	Selected          CompareTotals `json:"selected"`
 	AccountValue      CompareTotals `json:"account_value"`
 	TokenSharePercent *float64      `json:"token_share_percent"`
+	// Models is the profile's model mix in this window (share of value), top 3 + other.
+	Models   []ModelShare `json:"models"`
+	Excluded bool         `json:"excluded"`
+	Note     string       `json:"note,omitempty"`
+}
+
+type ModelShare struct {
+	Model        string  `json:"model"`
+	SharePercent float64 `json:"share_percent"`
 }
 
 type CompareMeter struct {
@@ -109,6 +118,10 @@ type ComparePool struct {
 	Latest           *CompareWindow `json:"latest"`
 	NewestUnmeasured *CompareWindow `json:"newest_unmeasured,omitempty"`
 	Average          CompareRate    `json:"average"`
+	// AverageModels is the model mix over the windows the average used.
+	AverageModels []ModelShare `json:"average_models"`
+	// Excluded counts this pool's windows in range that the user excluded.
+	Excluded int `json:"excluded"`
 }
 
 type CompareProfile struct {
@@ -141,6 +154,9 @@ type CompareView struct {
 	APIKeys     []cpamp.APIKey   `json:"api_keys"`
 	Profiles    []CompareProfile `json:"profiles"`
 	Notes       []string         `json:"notes"`
+	// Set by the caller from the exclusion store.
+	ExclusionsRevision int64 `json:"exclusions_revision"`
+	ExclusionsEditable bool  `json:"exclusions_editable"`
 }
 
 type CompareWindowList struct {
@@ -216,7 +232,7 @@ func mainScope(scope string) bool {
 	return scope == "all" || scope == "codex-main" || scope == "gemini"
 }
 
-func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery) (*cpamp.QuotaFacts, Workspace, error) {
+func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclusions) (*cpamp.QuotaFacts, Workspace, error) {
 	facts, e := r.quotaFacts(ctx)
 	if e != nil {
 		return nil, Workspace{}, e
@@ -228,7 +244,9 @@ func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery) (*cpamp.Q
 	if e != nil {
 		return nil, Workspace{}, e
 	}
-	w, e := cpamp.FactsView(ctx, facts, "", "", "", q.Key, from, to)
+	w, e := cpamp.FactsView(ctx, facts, "", "", "", q.Key, from, to, func(profileID, windowID string) bool {
+		return ex.has("profile:"+hash(profileID), windowID)
+	})
 	if e != nil {
 		return nil, Workspace{}, domainError(ctx, e)
 	}
@@ -236,8 +254,8 @@ func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery) (*cpamp.Q
 }
 
 // Compare returns all profiles with their newest measured windows and averages.
-func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, error) {
-	facts, w, e := r.compareWorkspace(ctx, q)
+func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (CompareView, error) {
+	facts, w, e := r.compareWorkspace(ctx, q, ex)
 	if e != nil {
 		return CompareView{}, e
 	}
@@ -247,10 +265,12 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, erro
 		out.PriceBook.Historical = h.Wording
 	}
 	out.Notes = []string{
-		"Frozen history up to the checkpoint. A window that overlaps the selected dates counts whole.",
-		"$ per 1% describes the account's shared quota meter: it stays account-wide under a key filter. The key changes only recorded requests and value.",
+		"A window that overlaps the selected dates counts whole.",
+		"$ per 1% is measured on the account's shared quota meter, so it is the same for every API key; the key changes the recorded value and its share.",
 	}
-	for _, p := range w.Profiles {
+	keys := cpamp.KeyHashes(q.Key)
+	for card, p := range w.Profiles {
+		ref := "profile:" + hash(p.ID)
 		cp := CompareProfile{Reference: "profile:" + hash(p.ID), Name: p.Name, Provider: p.Provider, Archived: p.Archived, FirstMS: p.First, LastMS: p.Last, Lifetime: compareTotals(p.Lifetime), Selected: compareTotals(p.Selected), Current: []CompareMeter{}, Pools: []ComparePool{}}
 		accounts := map[string]bool{}
 		for _, m := range p.Periods {
@@ -271,11 +291,15 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, erro
 				order = append(order, key)
 			}
 			pool.Windows++
+			excluded := ex.has(ref, win.ID)
+			if excluded {
+				pool.Excluded++
+			}
 			if pool.Latest == nil && win.Normalization != nil && win.Normalization.Status == "available" {
-				cw := compareWindow(win)
+				cw := r.usageWindow(facts, card, keys, win, ex[ref])
 				pool.Latest = &cw
 			} else if pool.Latest == nil && pool.NewestUnmeasured == nil {
-				cw := compareWindow(win)
+				cw := r.usageWindow(facts, card, keys, win, ex[ref])
 				pool.NewestUnmeasured = &cw
 			}
 		}
@@ -283,6 +307,7 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, erro
 			if pool := pools[g.Kind+"|"+g.Scope]; pool != nil {
 				n := g.Normalization
 				pool.Average = compareRate(&n)
+				pool.AverageModels = modelShares(r.windowsModels(facts, card, keys, n.WindowIDs), 3)
 			}
 		}
 		sort.SliceStable(order, func(i, j int) bool {
@@ -301,6 +326,9 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, erro
 				// No window in range has a rate: show the newest one with its reason.
 				pool.Latest, pool.NewestUnmeasured = pool.NewestUnmeasured, nil
 			}
+			if pool.AverageModels == nil {
+				pool.AverageModels = []ModelShare{}
+			}
 			cp.Pools = append(cp.Pools, *pool)
 		}
 		out.Profiles = append(out.Profiles, cp)
@@ -310,22 +338,23 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery) (CompareView, erro
 
 // CompareWindows lists one profile pool's windows (newest first) for picking an
 // older window. It uses the same facts and selection as Compare.
-func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery) (CompareWindowList, error) {
+func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex Exclusions) (CompareWindowList, error) {
 	if q.Kind != "weekly" && q.Kind != "5h" || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 {
 		return CompareWindowList{}, ErrInput
 	}
-	_, w, e := r.compareWorkspace(ctx, q.CompareQuery)
+	facts, w, e := r.compareWorkspace(ctx, q.CompareQuery, ex)
 	if e != nil {
 		return CompareWindowList{}, e
 	}
-	for _, p := range w.Profiles {
+	keys := cpamp.KeyHashes(q.Key)
+	for card, p := range w.Profiles {
 		if "profile:"+hash(p.ID) != q.Profile {
 			continue
 		}
 		out := CompareWindowList{Version: CompareVersion, Query: q.CompareQuery, Profile: q.Profile, Kind: q.Kind, Scope: q.Scope, Windows: []CompareWindow{}}
 		for _, win := range p.Windows {
 			if win.Kind == q.Kind && win.Scope == q.Scope {
-				out.Windows = append(out.Windows, compareWindow(win))
+				out.Windows = append(out.Windows, r.usageWindow(facts, card, keys, win, ex[q.Profile]))
 			}
 		}
 		return out, nil
