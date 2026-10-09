@@ -95,11 +95,16 @@ func TestCompareUISyntaxAndStateContracts(t *testing.T) {
 		"COMPARE_WINDOWS_DATA="+windowsFile,
 		"PROFILE_REF="+profileRef,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("Node compare UI contracts: %v\n%s", err, out)
-	} else {
-		t.Log(string(out))
 	}
+	// A never-settling promise ends Node with exit 0 and no output; require the
+	// harness's last line so a hang cannot pass silently.
+	if !strings.Contains(string(out), "PASS: compare UI syntax and contracts verified.") {
+		t.Fatalf("Node compare UI harness did not finish (a promise never settled):\n%s", out)
+	}
+	t.Log(string(out))
 }
 
 const compareUIHarness = `
@@ -348,6 +353,23 @@ const ui = sandbox.ui;
   release();
   await slowPromise;
   assert.equal(ui.state().currentCompareData.query.key || '', '', 'Stale response was ignored');
+
+  // 6b. Concurrent loads of one filter (tab refresh + key change) share one request
+  hold = '/history/compare';
+  held = false;
+  el('compare-key').value = 'shared-filter';
+  const first = ui.loadCompare();
+  for (let i = 0; i < 20 && !held; i++) await Promise.resolve();
+  assert(held, 'Shared request should be held');
+  const callsShared = calls.length;
+  const second = ui.loadCompare();
+  hold = '';
+  release();
+  await Promise.all([first, second]);
+  assert.equal(calls.length, callsShared, 'A second load of an in-flight filter must not request again');
+  assert.equal(ui.state().currentCompareData.query.key, 'shared-filter');
+  el('compare-key').value = '';
+  await el('compare-key').onchange();
 
   // 7. Older-windows list renders
   const olderBtns = grid.children[0].querySelectorAll('button').filter(b => b.textContent === 'Older windows');

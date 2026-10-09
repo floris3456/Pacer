@@ -39,11 +39,15 @@ func TestLegacyUISyntaxAndStateContracts(t *testing.T) {
 	}
 	cmd := exec.CommandContext(ctx, node, "-e", legacyUIHarness)
 	cmd.Stdin = strings.NewReader(string(html))
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("Node source contracts: %v\n%s", err, out)
-	} else {
-		t.Log(string(out))
 	}
+	// A never-settling promise ends Node with exit 0 and no output.
+	if !strings.Contains(string(out), "PASS: native inline syntax") {
+		t.Fatalf("Node legacy UI harness did not finish (a promise never settled):\n%s", out)
+	}
+	t.Log(string(out))
 }
 
 const legacyUIHarness = `
