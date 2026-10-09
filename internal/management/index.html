@@ -97,7 +97,29 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-profile-name{font-weight:600;font-size:14px}
 .usage-meta{color:var(--muted);font-size:12px}
 .usage-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.usage-columns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px}
+.usage-pool{display:flex;flex-direction:column;gap:6px}
+.usage-pool-title{font-size:12px;font-weight:650;color:var(--text);margin-top:4px}
+.usage-verified{border-color:#5f8f6a;color:#bfe3c6;cursor:help}
+.usage-card-actions{display:flex;gap:6px;flex-wrap:wrap}
+.usage-card-actions button{min-height:24px;padding:2px 8px;font-size:12px}
+.usage-exclude-editor td{background:var(--raised)}
+.usage-exclude-editor form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0}
+.usage-exclude-editor input{flex:1 1 220px;min-width:0}
+#usage-manage-dialog,#price-dialog{max-width:820px;width:95%;max-height:90vh;overflow:auto}
+.manage-account{border-bottom:1px solid var(--line);padding:8px 0;display:flex;flex-direction:column;gap:6px}
+.manage-account-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
+.manage-account-name{font-weight:600}
+.manage-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.manage-row select,.manage-row input{min-width:0;max-width:100%}
+.manage-logins{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid var(--line)}
+.manage-section{margin:14px 0}
+.models-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+.models-tabs button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
+.model-harness{font-size:12px;color:var(--muted)}
+.price-cell{font-variant-numeric:tabular-nums;white-space:normal}
+.pill.price-missing{border-color:var(--err);color:var(--err-text)}
+#catalogue td{overflow-wrap:anywhere}
 .usage-col{display:flex;flex-direction:column;gap:4px;min-width:0}
 .usage-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
 .usage-rate-big{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3;color:var(--text)}
@@ -136,7 +158,6 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 #usage .toolbar{align-items:stretch}
 #usage .toolbar>label{width:100%;flex-wrap:wrap}
 #usage .toolbar>label>input,#usage .toolbar>label>select{width:100%;min-width:0}
-.usage-columns{grid-template-columns:1fr}
 .usage-toggle{width:100%}
 .usage-toggle button{flex:1 1 auto;min-width:0}
 #usage-technical .toolbar,#usage-technical form{align-items:stretch}
@@ -151,7 +172,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
-<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div></div>
+<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
 <div id="usage-status" role="status" class="status" hidden></div>
 <p id="usage-asof" class="muted"></p>
 <div id="usage-grid" class="usage-grid"></div>
@@ -168,15 +189,15 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 </div>
 <div class="usage-tech-section" id="forward" aria-labelledby="forward-title"><h4 id="forward-title">Request log</h4>
 <form id="forward-form" class="toolbar">
-<label>Native profile <select id="forward-profile"><option value="">All native recorded usage</option><option value="unassigned">Unassigned native usage</option></select></label>
-<label>From UTC (inclusive) <input id="forward-from" type="date"></label><label>Before UTC (exclusive) <input id="forward-to" type="date"></label>
-<label>Model <input id="forward-model" maxlength="256" placeholder="Exact captured model"></label><label>Account reference <input id="forward-account" maxlength="1024" placeholder="native-account:…"></label>
-<label>Provider <input id="forward-provider" maxlength="256" placeholder="Exact provider"></label><label>Key fingerprint <input id="forward-key-hash" maxlength="64" placeholder="Optional SHA-256; never a key"></label>
-<button id="forward-load">Load new pinned report</button></form>
-<p class="muted">Blank start includes retained native origins; blank end uses the saved report horizon T. Dates select request starts in [from, min(to, T)), at UTC midnight. Cumulative revisions do not prove physical consumption within that interval. Accounts use native references, not legacy profile/key certificates.</p>
-<p id="forward-loaded" role="status">No forward pin loaded.</p><p id="forward-summary"></p><p id="forward-reasons"></p>
-<div class="toolbar"><button id="forward-first" type="button" disabled>First request page</button><button id="forward-next" type="button" disabled>Next 50 requests</button><span id="forward-page"></span></div>
-<div class="table-wrap"><table><caption>Recorded requests · immutable selection</caption><thead><tr><th>Started UTC / record</th><th>Source / account / model</th><th>API-equivalent value</th><th>Actual writes</th><th>Selected / effective policy</th><th>Quality / coverage</th><th>Evidence</th></tr></thead><tbody id="forward-requests"></tbody></table></div>
+<label>Profile <select id="forward-profile"><option value="">All requests Pacer recorded</option><option value="unassigned">Requests in no profile</option></select></label>
+<label>From (UTC day) <input id="forward-from" type="date"></label><label>Until (UTC day, not included) <input id="forward-to" type="date"></label>
+<label>Model <input id="forward-model" maxlength="256" placeholder="Exact model name"></label><label>Account <input id="forward-account" maxlength="1024" placeholder="native-account:…"></label>
+<label>Provider <input id="forward-provider" maxlength="256" placeholder="Exact provider"></label><label>Key fingerprint <input id="forward-key-hash" maxlength="64" placeholder="SHA-256 of a key, never the key"></label>
+<button id="forward-load">Load</button></form>
+<p class="muted">The requests Pacer recorded itself (Claude and Codex), as one fixed report: what you load stays the same until you load again. A request counts on the UTC day it started. Without dates the report runs from the first record to the report's end time. Accounts are Pacer's own account references.</p>
+<p id="forward-loaded" role="status">No report loaded.</p><p id="forward-summary"></p><p id="forward-reasons"></p>
+<div class="toolbar"><button id="forward-first" type="button" disabled>First page</button><button id="forward-next" type="button" disabled>Next 50</button><span id="forward-page"></span></div>
+<div class="table-wrap"><table><caption>Recorded requests</caption><thead><tr><th>Started (UTC) · request</th><th>Source / account / model</th><th>Value at API prices</th><th>Cache writes</th><th>Cache policy</th><th>Notes</th><th>Evidence</th></tr></thead><tbody id="forward-requests"></tbody></table></div>
 </div>
 <div class="usage-tech-section"><h4>Profiles &amp; accounts</h4>
 <details id="forward-profile-editor"><summary>Advanced · dated native profiles</summary>
@@ -201,13 +222,18 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 </div>
 </details>
 </section>
-<section id="models" hidden><h2>Model Settings</h2><p class="muted">CPA owns these settings. Changes apply to its catalogue, not a second Pacer model store.</p><label>Filter <input id="filter" type="search" placeholder="Model or provider"></label><div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>State</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
+<section id="models" hidden><h2>Model Settings</h2><p class="muted">Every model CPA can serve, per provider: whether it is on, the name clients use, the limits and options agent harnesses receive, and the price the usage record values it with. Model settings are saved in CPA; prices in Pacer.</p>
+<div class="toolbar"><label>Filter <input id="filter" type="search" placeholder="Model name"></label><button type="button" id="prices-refresh">Refresh prices from models.dev</button><span id="prices-status" class="muted" role="status"></span></div>
+<div id="models-tabs" class="models-tabs" role="group" aria-label="Providers"></div>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>On</th><th>Agent harness receives</th><th>Price · USD per 1M tokens</th><th></th></tr></thead><tbody id="catalogue"></tbody></table></div></section>
 <section id="keys" hidden><h2>Keys &amp; Groups</h2><p class="muted">Friendly names and key-replacement lineage do not change permissions or routing. Frozen dated provider-account profiles belong to Usage Quota, separately from these display groups; their pinned reports never change when labels are edited.</p><div id="key-status" class="status"></div><div class="toolbar"><button id="add-key" disabled>Add key label</button><button id="add-group" disabled>New display group</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Key reference</th><th>Replacement lineage</th><th></th></tr></thead><tbody id="key-rows"></tbody></table></div><h3>Display groups</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th>Keys</th><th></th></tr></thead><tbody id="group-rows"></tbody></table></div></section>
 </section></main>
-<dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
+<dialog id="model-dialog"><form id="model-form" style="display:block"><h2 id="model-title">Edit model</h2><label>Enabled <input type="checkbox" id="model-enabled"></label><label>Alias <input id="model-alias" maxlength="256"></label><label id="keep-label">Also keep upstream name <input type="checkbox" id="model-keep"></label><label>Display name <input id="model-display" maxlength="256"></label><label>Context window <input id="model-context" type="number" min="1" step="1"></label><label id="output-label">Max reply tokens <input id="model-output" type="number" min="1" step="1"></label><label>Thinking levels <input id="model-thinking" placeholder="Default levels" maxlength="256"></label><p id="thinking-help" class="muted"></p><details id="model-harness-details"><summary>What agent harnesses receive now</summary><pre id="model-harness"></pre></details><p class="muted">Blank fields restore CPA’s defaults. Settings unsupported by this provider are not submitted.</p><div id="model-error" role="alert"></div><div class="toolbar"><button>Save</button><button type="button" id="model-reset">Reset name and settings</button><button type="button" id="model-cancel">Cancel</button></div></form></dialog>
 <dialog id="metadata-dialog"><form id="metadata-form" style="display:block"><h2 id="metadata-title">Edit label</h2><label id="metadata-name-label">Display name <input id="metadata-name" maxlength="120"></label><label id="metadata-hash-label">Key SHA-256 fingerprint <input id="metadata-hash" pattern="[a-f0-9]{64}" maxlength="64"></label><p class="muted">Never enter a key or token. Labels and lineage do not create, rotate or authorize a CPA credential.</p><fieldset id="metadata-members"><legend>Group members</legend><div id="member-options"></div></fieldset><div id="metadata-error" role="alert"></div><div class="toolbar"><button>Save metadata</button><button type="button" id="metadata-delete">Delete display group</button><button type="button" id="metadata-cancel">Cancel</button></div></form></dialog>
 <dialog id="usage-inspect-dialog"><div class="toolbar" style="justify-content:space-between;margin:0 0 10px"><h2 id="usage-inspect-title" style="margin:0">Inspect</h2><button type="button" id="usage-inspect-close">Close</button></div><div id="usage-inspect-summary" class="status"></div><p id="usage-inspect-per-percent" class="muted"></p><div id="usage-inspect-meter"></div><h3>Models</h3><div class="table-wrap"><table><thead><tr><th>Model</th><th>Share</th><th>Input</th><th>Cache write</th><th>Cache read</th><th>Output</th><th>Cache hit</th></tr></thead><tbody id="usage-inspect-models"></tbody></table></div><h3>Cost breakdown</h3><div id="usage-inspect-costs"></div><div id="usage-inspect-keys-wrap" hidden><h3>API key shares</h3><div id="usage-inspect-keys"></div></div><p id="usage-inspect-lifetimes" class="muted"></p></dialog>
 <dialog id="usage-windows-dialog"><div class="toolbar" style="justify-content:space-between;margin:0 0 10px"><h2 id="usage-windows-title" style="margin:0">Windows</h2><button type="button" id="usage-windows-close">Close</button></div><div id="usage-windows-status" role="status" class="status" hidden></div><div class="table-wrap"><table><thead><tr><th>Dates</th><th>Rate</th><th>Δ</th><th>Top model</th><th>Count in average</th><th></th><th></th></tr></thead><tbody id="usage-windows-rows"></tbody></table></div></dialog>
+<dialog id="usage-manage-dialog"><div class="toolbar" style="justify-content:space-between;margin:0 0 10px"><h2 id="usage-manage-title" style="margin:0">Accounts &amp; profiles</h2><button type="button" id="usage-manage-close">Close</button></div><div id="usage-manage-status" role="status" class="status" hidden></div><div id="usage-manage-body"></div></dialog>
+<dialog id="price-dialog"><form id="price-form" style="display:block"><h2 id="price-title">Price</h2><p id="price-current" class="muted"></p><fieldset><legend>Your price · USD per million tokens</legend><div class="toolbar"><label>Input <input id="price-input" type="number" min="0" step="any" required></label><label>Output <input id="price-output" type="number" min="0" step="any" required></label><label>Cache read <input id="price-cache-read" type="number" min="0" step="any" placeholder="none"></label><label>Cache write <input id="price-cache-write" type="number" min="0" step="any" placeholder="none"></label></div></fieldset><p class="muted">Your price replaces the imported and models.dev prices for this model in the usage record, including past requests. Clearing it returns to the imported price, else models.dev.</p><div id="price-error" role="alert"></div><div class="toolbar"><button>Save price</button><button type="button" id="price-clear">Clear my price</button><button type="button" id="price-cancel">Cancel</button></div></form></dialog>
 <dialog id="forward-evidence-dialog"><h2>Forward recorded evidence</h2><p>Sanitized retained facts for the loaded pin. Unknown coverage and unresolved write evidence remain unknown.</p><button id="forward-evidence-close" type="button">Close evidence</button><pre id="forward-evidence-body"></pre></dialog>
 <script>
 (() => {
@@ -219,14 +245,15 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
-  for(const op of ['profiles','windows','inspect'])allowed.add('POST '+root+'/usage/'+op);
-  allowed.add('PATCH '+root+'/usage/exclusions');
+  for(const op of ['profiles','windows','inspect','accounts'])allowed.add('POST '+root+'/usage/'+op);
+  for(const op of ['exclusions','links','profile'])allowed.add('PATCH '+root+'/usage/'+op);
+  allowed.add('POST '+root+'/models/prices');allowed.add('PATCH '+root+'/models/prices');allowed.add('POST '+root+'/models/prices/refresh');
   allowed.add('GET '+forwardRoot+'/status');allowed.add('PATCH '+forwardRoot+'/profiles');for(const op of ['pin','report','requests','evidence','export-json','export-csv'])allowed.add('POST '+forwardRoot+'/'+op);
   function bridgeCall(path,method,body){
     if(pending.size>=8)return Promise.reject(Error('Too many pending requests'));
     return new Promise((resolve,reject)=>{
       const id='p'+Date.now().toString(36)+'_'+(++sequence);
-      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/usage/')||path.startsWith(forwardRoot+'/')?35000:15000);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Management request timed out. Refresh to confirm its result.'))},path.startsWith(root+'/usage/')||path.startsWith(root+'/models/')||path.startsWith(forwardRoot+'/')?50000:15000);
       pending.set(id,{resolve,reject,timer});
       window.parent.postMessage({type:'pacer:request',version:1,id,method,path,...(body===undefined?{}:{body})},location.origin);
     });
@@ -269,9 +296,159 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('output-label').hidden=!model.supports?.['max-output-tokens'];
     el('model-thinking').value=(model.setting?.['thinking-levels']||[]).join(', ');
     el('thinking-help').textContent='Comma-separated levels: '+thinkingLevels.join(', ');
+    el('model-harness').textContent=JSON.stringify({id:model.id,display_name:model.display_name||undefined,kind:model.kind,context_length:model.context_length,input_length:model.input_length,max_completion_tokens:model.max_completion_tokens,reasoning:model.reasoning,input_modalities:model.input_modalities,output_modalities:model.output_modalities,service_tiers:model.service_tiers},null,2);
     el('model-error').textContent='';el('model-dialog').showModal();
   }
-  function showModels(){el('catalogue').replaceChildren();const filter=el('filter').value.toLowerCase();for(const model of models){if(!(model.upstream+' '+model.channel+' '+model.id).toLowerCase().includes(filter))continue;const tr=row('catalogue',[model.id||model.upstream,model.channel,model.enabled?'Enabled':('Disabled'+(model.disabled_by?.scope?' · '+model.disabled_by.scope:''))]);tr.dataset.model=model.upstream;const td=document.createElement('td'),button=document.createElement('button');button.textContent='Edit';button.onclick=()=>editModel(model);td.append(button);tr.append(td)}}
+  // ---- Model Settings ----
+  // Settings live in CPA (one PATCH per model); prices in Pacer. The price a
+  // model shows is the one the usage record values its requests with.
+  let modelChannel = '', modelChannels = [], prices = null, priceIndex = new Map(), pricesError = '', priceEditing = null;
+  const priceKey = (provider, model) => provider + '\u0000' + model;
+  const channelProvider = ch => String(ch || '').startsWith('compat:') ? ch.slice(7) : ch;
+  const channelLabel = ch => modelChannels.find(c => c.id === ch)?.label || providerName(ch) || ch;
+  const perMillion = n => '$' + Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const tokenCount = n => n >= 1e6 && n % 1e5 === 0 ? (n / 1e6) + 'M' : n >= 1000 && n % 1000 === 0 ? (n / 1000) + 'k' : String(n);
+  function priceText(p) {
+    if (!p) return '';
+    const parts = ['in ' + perMillion(p.input), 'out ' + perMillion(p.output)];
+    if (p.cache_read != null) parts.push('cache read ' + perMillion(p.cache_read));
+    if (p.cache_write != null) parts.push('cache write ' + perMillion(p.cache_write));
+    let text = parts.join(' · ');
+    if (p.context_tiers?.length) text += ' · above ' + tokenCount(p.context_tiers[0].above_tokens) + ' tokens: in ' + perMillion(p.context_tiers[0].price.input) + ', out ' + perMillion(p.context_tiers[0].price.output);
+    if (p.fast) text += ' · fast mode: in ' + perMillion(p.fast.input) + ', out ' + perMillion(p.fast.output);
+    return text;
+  }
+  const sourceNames = { imported: 'imported', 'models.dev': 'models.dev', manual: 'your price' };
+  function harnessLines(model) {
+    const lines = [];
+    if (model.context_length) lines.push('context ' + tokenCount(model.context_length) + (model.input_length ? ' (prompt up to ' + tokenCount(model.input_length) + ')' : ''));
+    if (model.max_completion_tokens) lines.push('max reply ' + tokenCount(model.max_completion_tokens));
+    const r = model.reasoning;
+    if (r) lines.push(r.mode === 'levels' ? 'thinking ' + (r.levels || []).join('/') : r.mode === 'none' ? 'no thinking control' : 'thinking passed through');
+    if (model.input_modalities?.length) lines.push((model.input_modalities || []).join('+') + ' → ' + (model.output_modalities || ['text']).join('+'));
+    if (model.service_tiers?.length) lines.push('service tiers ' + model.service_tiers.join(', '));
+    if (model.kind && model.kind !== 'chat') lines.push(model.kind);
+    return lines;
+  }
+  async function loadPrices() {
+    const list = models.map(m => ({ provider: channelProvider(m.channel), model: m.upstream }));
+    try {
+      // Bounded requests (the manager bridge caps request size).
+      let merged = null;
+      for (let i = 0; i < list.length || merged === null; i += 300) {
+        const part = await api(root + '/models/prices', 'POST', { models: list.slice(i, i + 300) });
+        merged = merged ? { ...part, models: [...merged.models, ...part.models] } : part;
+      }
+      prices = merged;
+      pricesError = '';
+      priceIndex = new Map((prices.models || []).map(r => [priceKey(r.provider, r.model), r]));
+    } catch (error) { prices = null; priceIndex = new Map(); pricesError = error.message; }
+    showPriceStatus();
+    showModels();
+  }
+  function showPriceStatus() {
+    const s = el('prices-status'), sync = prices?.sync || {};
+    el('prices-refresh').disabled = !prices;
+    if (pricesError) { s.textContent = 'Prices unavailable: ' + pricesError; return; }
+    if (!prices) { s.textContent = ''; return; }
+    s.textContent = sync.synced_at_ms ? 'models.dev prices of ' + date(sync.synced_at_ms / 1000) + ' (' + (sync.models || 0) + ' models; checked daily)' + (sync.error ? ' · last check failed: ' + sync.error : '') : 'models.dev not fetched yet' + (sync.error ? ': ' + sync.error : ' (it is fetched daily)');
+  }
+  function renderModelTabs() {
+    const tabs = el('models-tabs');
+    tabs.replaceChildren();
+    const used = [...new Set(models.map(m => m.channel))];
+    if (!used.includes(modelChannel)) modelChannel = used[0] || '';
+    for (const ch of used) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const count = models.filter(m => m.channel === ch).length, on = models.filter(m => m.channel === ch && m.enabled).length;
+      b.textContent = channelLabel(ch) + ' (' + on + '/' + count + ')';
+      b.setAttribute('aria-pressed', String(ch === modelChannel));
+      b.onclick = () => { modelChannel = ch; renderModelTabs(); showModels(); };
+      tabs.append(b);
+    }
+  }
+  function showModels(){
+    el('catalogue').replaceChildren();
+    const filter = el('filter').value.toLowerCase();
+    for (const model of models) {
+      if (modelChannel && model.channel !== modelChannel && !filter) continue;
+      if (!(model.upstream + ' ' + model.channel + ' ' + model.id + ' ' + (model.display_name || '')).toLowerCase().includes(filter)) continue;
+      const tr = document.createElement('tr');
+      tr.dataset.model = model.upstream;
+      const name = document.createElement('td');
+      name.append(span(model.id || model.upstream, 'manage-account-name'));
+      if (model.id && model.id !== model.upstream) name.append(document.createElement('br'), span('provider name ' + model.upstream, 'model-harness'));
+      if (model.display_name) name.append(document.createElement('br'), span(model.display_name, 'model-harness'));
+      if (filter && modelChannel !== model.channel) name.append(document.createElement('br'), span(channelLabel(model.channel), 'model-harness'));
+      const state = document.createElement('td');
+      state.textContent = model.enabled ? 'On' : 'Off' + (model.disabled_by?.scope ? ' · ' + model.disabled_by.scope : '');
+      state.dataset.state = model.enabled ? 'active' : 'unknown';
+      const harness = document.createElement('td');
+      harness.className = 'model-harness';
+      harness.textContent = model.enabled ? (harnessLines(model).join(' · ') || 'CPA defaults') : 'Not sent (off)';
+      const price = document.createElement('td');
+      price.className = 'price-cell';
+      const row = priceIndex.get(priceKey(channelProvider(model.channel), model.upstream));
+      if (row?.price) {
+        price.append(document.createTextNode(priceText(row.price) + ' '), span(sourceNames[row.source] || row.source, 'pill'));
+        if (row.catalog_price) price.append(document.createElement('br'), span('models.dev now: ' + priceText(row.catalog_price), 'model-harness'));
+      } else if (prices) {
+        price.append(span('No price', 'pill price-missing'));
+        price.title = 'Requests on this model have no value in the usage record until it has a price.';
+      }
+      const actions = document.createElement('td');
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = 'Edit';
+      edit.onclick = () => editModel(model);
+      const priceBtn = document.createElement('button');
+      priceBtn.type = 'button';
+      priceBtn.textContent = 'Price';
+      priceBtn.disabled = !prices?.editable;
+      priceBtn.title = prices?.editable ? 'Set your own price' : "Prices need Pacer's usage store";
+      priceBtn.onclick = () => editPrice(model, row);
+      actions.append(edit, priceBtn);
+      tr.append(name, state, harness, price, actions);
+      el('catalogue').append(tr);
+    }
+    if (!el('catalogue').children.length) emptyRow('catalogue', 5);
+  }
+  function editPrice(model, row) {
+    priceEditing = { model, row };
+    el('price-title').textContent = 'Price · ' + (model.id || model.upstream);
+    el('price-current').textContent = row?.price ? 'Used now: ' + priceText(row.price) + ' (' + (sourceNames[row.source] || row.source) + ').' : 'No price yet: its requests have no value in the usage record.';
+    const p = row?.source === 'manual' ? row.price : row?.price || row?.catalog_price || null;
+    el('price-input').value = p ? p.input : '';
+    el('price-output').value = p ? p.output : '';
+    el('price-cache-read').value = p?.cache_read ?? '';
+    el('price-cache-write').value = p?.cache_write ?? '';
+    el('price-clear').hidden = row?.source !== 'manual';
+    el('price-error').textContent = '';
+    el('price-dialog').showModal();
+  }
+  async function savePrice(clear = false) {
+    const buttons = el('price-form').querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+    try {
+      const body = { revision: prices.revision, model: priceEditing.model.upstream };
+      if (clear) body.clear = true;
+      else {
+        const num = id => { const v = el(id).value.trim(); if (v === '') return null; const n = Number(v); if (!Number.isFinite(n) || n < 0) throw Error('Prices are amounts of at least 0'); return n; };
+        body.input = num('price-input'); body.output = num('price-output');
+        if (body.input === null || body.output === null) throw Error('Input and output prices are needed');
+        const cr = num('price-cache-read'), cw = num('price-cache-write');
+        if (cr !== null) body.cache_read = cr;
+        if (cw !== null) body.cache_write = cw;
+      }
+      await api(root + '/models/prices', 'PATCH', body);
+      el('price-dialog').close();
+      usageCache.clear();
+      await loadPrices();
+      message(clear ? 'Your price is cleared; the imported or models.dev price applies again.' : 'Price saved. The usage record revalues this model, past requests included.');
+    } catch (error) { el('price-error').textContent = error.message; }
+    finally { buttons.forEach(b => b.disabled = false); }
+  }
   function metadataButtons(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.disabled=!metadata.editable;td.append(button)}tr.append(td)}
   function showMetadata(){
     el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent=metadata.coverage||'';
@@ -320,7 +497,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function forwardMS(value){const ns=forwardUTC(value);if(ns%1000000n!==0n)throw Error('Membership dates require exact millisecond precision');return String(ns/1000000n)}
   function forwardMoney(value){if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0)return 'Unknown';const n=BigInt(value),fraction=String(n%1000000000n).padStart(9,'0').replace(/0+$/,'').padEnd(2,'0');return '$'+String(n/1000000000n)+'.'+fraction}
   function forwardValue(value){if(!value)return 'Unknown';const low=forwardMoney(value.low_nano_usd),high=forwardMoney(value.high_nano_usd);return low===high?low:low+' – '+high}
-  function forwardReasons(value){return Object.entries(value||{}).map(([reason,count])=>reason.replaceAll('_',' ')+' ('+forwardCount(count)+')').join(' · ')||'No additional recorded reasons'}
+  function forwardReasons(value){return Object.entries(value||{}).map(([reason,count])=>reason.replaceAll('_',' ')+' ('+forwardCount(count)+')').join(' · ')||'none'}
   function forwardSafe(value,depth=0){
     if(depth>40)throw Error('Unsupported forward response depth');
     if(typeof value==='number'&&(!Number.isFinite(value)||Number.isInteger(value)&&!Number.isSafeInteger(value)))throw Error('Unsupported numeric precision in forward response; no rounded value is displayed');
@@ -348,7 +525,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function clearForwardPin(){
     forwardLoaded=null;forwardPageCursor='';forwardNextCursor='';forwardCSVNext='';forwardPageNumber=0;
     for(const id of ['forward-summary','forward-reasons','forward-pin','forward-provenance','forward-requests','forward-page','forward-download-status','forward-csv-cursor','forward-evidence-body'])el(id).replaceChildren();
-    el('forward-loaded').textContent='No forward pin loaded.';el('forward-evidence-dialog').close();
+    el('forward-loaded').textContent='No report loaded.';el('forward-evidence-dialog').close();
   }
   function clearForward(){forwardInvalidate();clearForwardPin();forwardProfiles=null;el('forward-form').reset();el('forward-profile-read').reset();el('forward-profile-form').reset();el('forward-profile-rows').replaceChildren();el('forward-memberships').replaceChildren();el('forward-profile-metadata').textContent='';el('forward-profile-cas').textContent='No profile table revision loaded.';el('forward-profile-status').textContent='Read an exact profile revision before editing.';el('forward-status').textContent='Disconnected.';el('forward-status-receipt').textContent='';while(el('forward-profile').options.length>2)el('forward-profile').remove(2);forwardControls()}
   function forwardError(error){return ({404:'Forward v8 reporting is unsupported or the saved reference is unavailable. No fallback was requested.',401:'Management authorization required.',403:'Management authorization required.',409:'Pin/cursor or profile revision conflict. Keep the saved pin; read the intended revision before retrying.',413:'Forward input or output is too large. No partial download was created.',503:'Forward reporting is unavailable, busy or pending publication. Refresh status manually.'})[error.status]||(error.name==='AbortError'?'Forward request cancelled.':error.message||'Forward request failed');}
@@ -400,11 +577,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function forwardShowReport(data,pin){
     forwardSamePin(data.pin,pin);const m=data.manifest,t=data.totals;if(!m||m.version!==forwardVersion||!forwardDecimal(m.profile_revision)||!t)throw Error('Unsupported forward report schema');forwardUTC(m.report_at);
     forwardLoaded={pin:JSON.parse(JSON.stringify(pin)),report:data};
-    el('forward-loaded').textContent='Pinned '+pin.generation+' · report T '+forwardDate(m.report_at)+' · native selection. Editable filters do not change this report.';
+    el('forward-loaded').textContent='Report loaded: requests up to '+forwardDate(m.report_at)+' (report '+pin.generation.slice(0,12)+'). Changed filters apply when you load again.';
     const unvalued=Number.isSafeInteger(t.canonical_rows)&&Number.isSafeInteger(t.valued_count)&&t.canonical_rows>=t.valued_count?String(BigInt(t.canonical_rows)-BigInt(t.valued_count)):'Unknown';
     const tokens=t.valued_subset?.tokens||{};
-    el('forward-summary').textContent='Recorded '+forwardCount(t.canonical_rows)+' · unique attempts '+forwardCount(t.unique_attempts)+' · valued '+forwardCount(t.valued_count)+' · unvalued '+unvalued+' · selected API-equivalent '+forwardValue(t.selection_value)+' · valued subset '+forwardValue(t.valued_subset)+'. Valued subset writes only: actual 5m '+forwardCount(tokens.cache_write_5m)+' · actual 1h '+forwardCount(tokens.cache_write_1h)+' · unresolved '+forwardCount(tokens.cache_write_unknown)+' · historical assumed 5m '+forwardCount(tokens.cache_write_assumed_5m??0)+'. Captured provider cost remains a separate fact.';
-    el('forward-reasons').textContent=forwardReasons(t.reason_counts)+' · Coverage: '+forwardReasons(t.coverage_reason_counts);
+    el('forward-summary').textContent=forwardCount(t.canonical_rows)+' requests ('+forwardCount(t.unique_attempts)+' unique attempts) · '+forwardCount(t.valued_count)+' valued, '+unvalued+' unvalued. Value of the whole selection: '+forwardValue(t.selection_value)+' (Unknown while any request has no value). Value of the valued requests: '+forwardValue(t.valued_subset)+'. Their cache writes: 5-minute '+forwardCount(tokens.cache_write_5m)+' · 1-hour '+forwardCount(tokens.cache_write_1h)+' · unknown '+forwardCount(tokens.cache_write_unknown)+' · counted as 5-minute by the import rule '+forwardCount(tokens.cache_write_assumed_5m??0)+'. The cost the provider charged is a separate fact.';
+    el('forward-reasons').textContent='Why requests have no value: '+forwardReasons(t.reason_counts)+' · Coverage notes: '+forwardReasons(t.coverage_reason_counts);
     el('forward-pin').textContent=JSON.stringify(pin,null,2);el('forward-provenance').textContent=JSON.stringify(m,null,2);
     el('forward-profile-revision').value=m.profile_revision;
   }
@@ -412,17 +589,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     forwardInvalidate();clearForwardPin();forwardControls();
     return forwardTask(async ticket=>{const filter=forwardFilterInput();const pin=forwardPinCheck(await forwardCall('pin',{filter},ticket));if(JSON.stringify(forwardCanonical(pin.filter))!==JSON.stringify(forwardCanonical(filter)))throw Error('Pin changed the requested selection');const report=await forwardCall('report',{pin},ticket);forwardShowReport(report,pin);await forwardPage('',ticket,1);await forwardReadProfiles(report.manifest.profile_revision,ticket)},'forward-loaded');
   }
-  function forwardWrites(origin){const u=origin.normalized_source_usage;if(!u)return 'Unknown · no native split';const known=[u.cache_create_5m,u.cache_create_1h];const unknown=Number.isSafeInteger(u.cache_create)&&u.cache_create>=0&&known.every(v=>v===undefined||Number.isSafeInteger(v)&&v>=0)?BigInt(u.cache_create)-BigInt(known[0]??0)-BigInt(known[1]??0):null;return 'Actual 5m '+forwardCount(known[0])+' · 1h '+forwardCount(known[1])+' · unresolved '+(unknown!==null&&unknown>=0n?String(unknown):'Unknown')}
+  function forwardWrites(origin){const u=origin.normalized_source_usage;if(!u)return 'Unknown (no split recorded)';const known=[u.cache_create_5m,u.cache_create_1h];const unknown=Number.isSafeInteger(u.cache_create)&&u.cache_create>=0&&known.every(v=>v===undefined||Number.isSafeInteger(v)&&v>=0)?BigInt(u.cache_create)-BigInt(known[0]??0)-BigInt(known[1]??0):null;return '5-minute '+forwardCount(known[0])+' · 1-hour '+forwardCount(known[1])+' · unknown '+(unknown!==null&&unknown>=0n?String(unknown):'Unknown')}
   async function forwardPage(cursor,ticket,page){
     const pin=forwardLoaded.pin,data=await forwardCall('requests',{pin,limit:forwardLimit,cursor},ticket);forwardSamePin(data.pin,pin);
     if(!Array.isArray(data.rows)||data.rows.length>forwardLimit||!forwardText(data.next_cursor||''))throw Error('Invalid request page');
     for(const item of data.rows){forwardSamePin(item.pin,pin);if(!forwardText(item.id,2048)||!Array.isArray(item.origins)||item.origins.length>2)throw Error('Invalid request evidence');for(const origin of item.origins)if(!forwardDecimal(origin.revision)||!forwardDecimal(origin.sequence))throw Error('Invalid quoted record revision')}
     el('forward-requests').replaceChildren();for(const item of data.rows){
       const origins=item.origins,first=origins[0]||{},policy=first.policy||{};
-      const tr=row('forward-requests',[forwardDate(first.started_at)+' · '+item.id+' · revision '+(first.revision||'Unknown'),origins.map(o=>(o.source_id||'Unknown')+' / '+item.account+' / '+(o.attribution?.model||'Unknown')).join(' ; '),forwardValue(item.value),origins.map(forwardWrites).join(' ; '),'Selected '+(policy.selected_ttl||'Unknown')+' · effective '+(policy.effective_ttl||'Unknown')+' · historical attempt receipt; current chat marker unavailable',[...(item.issues||[]),...(item.coverage_reasons||[])].map(v=>String(v).replaceAll('_',' ')).join(' · ')||'Recorded evidence; capacity unknown']);
+      const tr=row('forward-requests',[forwardDate(first.started_at)+' · '+item.id+' · revision '+(first.revision||'Unknown'),origins.map(o=>(o.source_id||'Unknown')+' / '+item.account+' / '+(o.attribution?.model||'Unknown')).join(' ; '),forwardValue(item.value),origins.map(forwardWrites).join(' ; '),'Chosen '+(policy.selected_ttl||'Unknown')+' · applied '+(policy.effective_ttl||'Unknown')+' (as recorded for this request)',[...(item.issues||[]),...(item.coverage_reasons||[])].map(v=>String(v).replaceAll('_',' ')).join(' · ')||'—']);
       const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.textContent='Evidence';button.dataset.forwardEvidence=item.id;button.onclick=()=>forwardTask(async t=>{const data=await forwardCall('evidence',{pin:forwardLoaded.pin,id:item.id},t);forwardSamePin(data.pin,forwardLoaded.pin);if(data.id!==item.id)throw Error('Evidence identity changed');el('forward-evidence-body').textContent=JSON.stringify(data,null,2);el('forward-evidence-dialog').showModal()});td.append(button);tr.append(td);
     }
-    forwardPageCursor=cursor;forwardNextCursor=data.next_cursor||'';forwardPageNumber=page;el('forward-page').textContent='Page '+page+' · '+data.rows.length+' rows · fixed limit 50';
+    forwardPageCursor=cursor;forwardNextCursor=data.next_cursor||'';forwardPageNumber=page;el('forward-page').textContent='Page '+page+' · '+data.rows.length+' requests';
   }
   function forwardDecodeDownload(data,format){
     if(!data||data.filename!=='pacer-forward.'+format||data.media_type!==(format==='json'?'application/json':'text/csv')||data.encoding!=='base64'||typeof data.content!=='string'||data.content.length>8*1024*1024||data.content.length%4!==0||/[^A-Za-z0-9+/=]/.test(data.content)||!forwardText(data.next_cursor||''))throw Error('Invalid forward download envelope');
@@ -522,11 +699,27 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     return cut(f) + ' → ' + cut(t) + ' UTC';
   }
 
-  function findMainPool(pools, kind) {
-    if (!pools) return null;
-    const match = pools.filter(p => p.kind === kind);
-    if (!match.length) return null;
-    return match.find(p => p.main) || match[0];
+  const kindTitle = kind => kind === 'monthly' ? 'Month' : kind === 'weekly' ? '7-day' : kind === '5h' ? '5-hour' : (kind || '');
+  const kindRank = kind => ({ monthly: 0, weekly: 1, '5h': 2 })[kind] ?? 3;
+  const poolTitle = pool => (pool.label ? pool.label + ' · ' : '') + kindTitle(pool.kind);
+  const providerNames = { claude: 'Anthropic', codex: 'Codex', antigravity: 'Gemini (Antigravity)', 'opencode-go': 'OpenCode Go' };
+  const providerName = p => providerNames[p] || p || '';
+  const day = ms => ms ? new Date(ms).toISOString().slice(0, 10) : '';
+  const dollars = n => '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+  // "Verified": Pacer proved, inside this window, that every request on the
+  // account went through it, so its own numbers give a floor for $ per 1%.
+  function verifiedText(v) {
+    return 'Pacer checked this itself: between ' + date(v.from_ms / 1000) + ' and ' + date(v.to_ms / 1000) + ' every request on this account went through Pacer, so 1% cost at least ' + dollars(v.lower_bound_usd_per_percent) + '.' + (v.intervals > 1 ? ' ' + v.intervals + ' checks in this window; the newest is shown.' : '');
+  }
+  function verifiedBadge(v) {
+    const b = document.createElement('span');
+    b.className = 'pill usage-verified';
+    b.textContent = '✓ Verified';
+    b.title = verifiedText(v);
+    b.tabIndex = 0;
+    b.setAttribute('aria-label', 'Verified. ' + b.title);
+    return b;
   }
 
   function showUsageError(msg) {
@@ -658,7 +851,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       .join(' · ');
   }
 
-  function renderUsageCol(profile, pool, kind, colTitle) {
+  function renderUsageCol(profile, pool, colTitle) {
     const col = document.createElement('div');
     col.className = 'usage-col';
 
@@ -666,11 +859,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     colH.className = 'usage-col-header';
     colH.textContent = colTitle;
     col.append(colH);
-
-    if (!pool) {
-      usageStat(col, 'No recorded window');
-      return col;
-    }
 
     const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
     const activeWindow = usageSelectedWindows.get(overrideKey) || pool.latest;
@@ -680,40 +868,33 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       appendRateDisplay(col, rate);
       const samples = rate.samples || 0;
       const excluded = pool.excluded || 0;
-      usageStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'} · ${excluded} excluded`);
+      usageStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'}` + (excluded ? ` · ${excluded} left out` : ''));
       const mix = formatModelMix(pool.average_models);
       if (mix) usageStat(col, mix, 'usage-model-mix');
+    } else if (!activeWindow) {
+      usageStat(col, 'No recorded window');
     } else {
-      if (!activeWindow) {
-        usageStat(col, 'No recorded window');
-      } else {
-        appendRateDisplay(col, activeWindow.rate || {});
-        if (activeWindow.start_ms && activeWindow.end_ms) {
-          usageStat(col, compareSpan(activeWindow.start_ms, activeWindow.end_ms));
+      appendRateDisplay(col, activeWindow.rate || {});
+      if (activeWindow.verified) col.append(verifiedBadge(activeWindow.verified));
+      if (activeWindow.start_ms && activeWindow.end_ms) {
+        usageStat(col, compareSpan(activeWindow.start_ms, activeWindow.end_ms));
+      }
+      if (activeWindow.selected) {
+        const sel = activeWindow.selected;
+        let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
+        if (currentUsageData?.key_filtered && activeWindow.token_share_percent != null) {
+          selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
         }
-        if (activeWindow.selected) {
-          const sel = activeWindow.selected;
-          let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
-          if (currentUsageData?.key_filtered && activeWindow.token_share_percent != null) {
-            selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
-          }
-          usageStat(col, selText);
-        }
-        const mix = formatModelMix(activeWindow.models);
-        if (mix) usageStat(col, mix, 'usage-model-mix');
-
-        if (pool.newest_unmeasured && activeWindow === pool.latest) {
-          const note = document.createElement('div');
-          note.className = 'usage-stat muted';
-          note.textContent = 'Newer window not measured yet';
-          col.append(note);
-        }
-        if (activeWindow.excluded) {
-          const tag = document.createElement('span');
-          tag.className = 'pill';
-          tag.textContent = 'excluded from average';
-          col.append(tag);
-        }
+        usageStat(col, selText);
+      }
+      const mix = formatModelMix(activeWindow.models);
+      if (mix) usageStat(col, mix, 'usage-model-mix');
+      if (pool.newest_unmeasured && activeWindow === pool.latest) usageStat(col, 'Newer window not measured yet', 'usage-stat muted');
+      if (activeWindow.excluded) {
+        const tag = document.createElement('span');
+        tag.className = 'pill';
+        tag.textContent = 'left out of the average';
+        col.append(tag);
       }
     }
 
@@ -727,32 +908,59 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const win = (usageMode === 'latest' || usageSelectedWindows.has(overrideKey)) ? activeWindow : null;
       return openInspect(profile, pool, win);
     };
-
     const windowsBtn = document.createElement('button');
     windowsBtn.type = 'button';
     windowsBtn.className = 'usage-windows-btn';
     windowsBtn.textContent = 'Windows';
     windowsBtn.onclick = () => openWindows(profile, pool, overrideKey);
-
     actions.append(inspectBtn, windowsBtn);
     col.append(actions);
-
     return col;
+  }
+
+  // Pools of one card, grouped: the provider's main limits first (one column
+  // per window length), then each named pool (Fable, Claude & GPT models...).
+  function poolGroups(pools) {
+    const out = [];
+    for (const p of pools) {
+      let g = out.find(x => x.scope === p.scope);
+      if (!g) { g = { scope: p.scope, label: p.label || '', main: p.main, pools: [] }; out.push(g); }
+      g.pools.push(p);
+    }
+    for (const g of out) g.pools.sort((a, b) => kindRank(a.kind) - kindRank(b.kind));
+    return out;
+  }
+  function renderPoolGroup(profile, g) {
+    const wrap = document.createElement('div');
+    wrap.className = 'usage-pool';
+    if (g.label) {
+      const t = document.createElement('div');
+      t.className = 'usage-pool-title';
+      t.textContent = g.label;
+      wrap.append(t);
+    }
+    const cols = document.createElement('div');
+    cols.className = 'usage-columns';
+    for (const p of g.pools) cols.append(renderUsageCol(profile, p, kindTitle(p.kind)));
+    wrap.append(cols);
+    return wrap;
   }
 
   // One plain sentence about where the numbers come from (technical details),
   // and one short "as of" line on the page.
   function renderUsageRecord(data) {
-    const h = data.imported_through_ms, live = data.live || {}, stats = live.stats || {};
+    const h = data.imported_through_ms, live = data.live || {}, rec = live.record || {}, store = rec.store || {};
     const minute = ms => date(Math.floor(ms / 60000) * 60).replace(/:00 UTC$/, ' UTC');
     el('usage-asof').textContent = data.frozen_at_ms ? 'Data as of ' + minute(data.frozen_at_ms) : '';
     const parts = [];
     if (h) parts.push('Imported history (CPAMP) up to ' + minute(h) + '.');
     if (live.state === 'live') {
-      parts.push("Pacer's own record continues from there: " + (stats.native_requests || 0) + ' requests and ' + (stats.native_readings || 0) + ' meter readings, last updated ' + minute(live.built_at_ms) + '.');
-      if (stats.new_accounts) parts.push(stats.new_accounts + (stats.new_accounts === 1 ? ' account is' : ' accounts are') + ' not linked to an imported account yet and count as unassigned.');
-      if (stats.ambiguous_account) parts.push(stats.ambiguous_account + ' records were left out because their account link is ambiguous.');
-    } else if (live.state === 'waiting') parts.push("Pacer's own record starts there; nothing recorded since.");
+      parts.push("Pacer's own record continues from there: " + (store.events || 0).toLocaleString() + ' requests and ' + (store.readings || 0).toLocaleString() + ' meter readings so far, updated ' + minute(live.built_at_ms) + '.');
+      parts.push('Closed windows are stored once and never worked out again (' + (store.sealed_segments || 0).toLocaleString() + ' stored week blocks).');
+      if (rec.ambiguous_evidence) parts.push(rec.ambiguous_evidence + (rec.ambiguous_evidence === 1 ? ' login is' : ' logins are') + ' certified to several imported accounts; their records are left out until that is resolved.');
+      if (live.error) parts.push(live.error);
+    } else if (live.state === 'building') parts.push("Pacer is building its own record; the page shows the imported history until it is ready.");
+    else if (live.state === 'waiting') parts.push("Pacer's own record starts there; nothing recorded since.");
     else if (live.state === 'error' || live.state === 'starting') parts.push(live.error || "Pacer's own record is starting.");
     el('usage-record').textContent = parts.join(' ');
   }
@@ -780,15 +988,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
       const header = document.createElement('div');
       header.className = 'usage-card-header';
-
       const prov = document.createElement('span');
       prov.className = 'usage-provider';
-      prov.textContent = profile.provider || '';
-
+      prov.textContent = providerName(profile.provider);
       const name = document.createElement('span');
       name.className = 'usage-profile-name';
       name.textContent = profile.name || '';
-
       if (profile.provider) header.append(prov);
       header.append(name);
       if (profile.archived) {
@@ -797,22 +1002,22 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         badge.textContent = 'Archived';
         header.append(badge);
       }
-
       const cred = document.createElement('span');
       cred.className = 'usage-meta';
-      cred.textContent = (profile.credentials || 0) + ' credential' + (profile.credentials === 1 ? '' : 's');
+      cred.textContent = (profile.credentials || 0) + ' account' + (profile.credentials === 1 ? '' : 's');
       header.append(cred);
       card.append(header);
 
       if (Array.isArray(profile.current) && profile.current.length > 0) {
         const metersDiv = document.createElement('div');
         metersDiv.className = 'usage-meters';
-        const kinds = profile.current.map(m => m.kind);
-        for (const meter of profile.current) {
+        const kinds = profile.current.map(m => m.kind + '|' + m.scope);
+        const current = [...profile.current].sort((a, b) => (a.pool ? 1 : 0) - (b.pool ? 1 : 0) || kindRank(a.kind) - kindRank(b.kind));
+        for (const meter of current) {
           const mLine = document.createElement('div');
-          let kindLbl = meter.kind === 'weekly' ? '7-day' : meter.kind === '5h' ? '5-hour' : (meter.kind || '');
+          let kindLbl = (meter.pool ? meter.pool + ' ' : '') + kindTitle(meter.kind);
           // Several accounts on one card: name the account the meter belongs to.
-          if (meter.label && kinds.filter(k => k === meter.kind).length > 1) kindLbl = meter.label + ' · ' + kindLbl;
+          if (meter.label && kinds.filter(k => k === meter.kind + '|' + meter.scope).length > 1) kindLbl = meter.label + ' · ' + kindLbl;
           const usedStr = meter.used_percent != null ? pct1(meter.used_percent) + '% used' : 'Unknown used';
           const rstStr = meter.reset_ms ? 'resets ' + date(meter.reset_ms / 1000) : '';
           const parts = [kindLbl + ' ' + usedStr];
@@ -824,28 +1029,30 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         card.append(metersDiv);
       }
 
-      const colsDiv = document.createElement('div');
-      colsDiv.className = 'usage-columns';
-      const mainWeekly = findMainPool(profile.pools, 'weekly');
-      const main5h = findMainPool(profile.pools, '5h');
-
-      colsDiv.append(renderUsageCol(profile, mainWeekly, 'weekly', '7-day'));
-      colsDiv.append(renderUsageCol(profile, main5h, '5h', '5-hour'));
-      card.append(colsDiv);
-
-      const otherPools = (profile.pools || []).filter(p => p !== mainWeekly && p !== main5h);
-      if (otherPools.length > 0) {
+      const pools = profile.pools || [];
+      const groups = poolGroups(pools.filter(p => !p.ended));
+      if (!groups.length) usageStat(card, 'No recorded window yet');
+      for (const g of groups) card.append(renderPoolGroup(profile, g));
+      const ended = poolGroups(pools.filter(p => p.ended));
+      if (ended.length > 0) {
         const details = document.createElement('details');
         details.className = 'usage-other-limits';
         const summary = document.createElement('summary');
-        summary.textContent = 'Other limits';
+        summary.textContent = 'Ended limits: ' + ended.map(g => g.label || 'main').join(', ');
         details.append(summary);
-        for (const op of otherPools) {
-          const kindLbl = op.kind === 'weekly' ? '7-day' : op.kind === '5h' ? '5-hour' : op.kind;
-          details.append(renderUsageCol(profile, op, op.kind, `${kindLbl} (${op.scope})`));
-        }
+        for (const g of ended) details.append(renderPoolGroup(profile, g));
         card.append(details);
       }
+
+      const actions = document.createElement('div');
+      actions.className = 'usage-card-actions';
+      const manage = document.createElement('button');
+      manage.type = 'button';
+      manage.className = 'usage-manage-btn';
+      manage.textContent = profile.reference === 'unassigned' ? 'Add to a profile' : 'Manage accounts';
+      manage.onclick = () => openManage(profile.reference);
+      actions.append(manage);
+      card.append(actions);
 
       el('usage-grid').append(card);
     }
@@ -867,8 +1074,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
     try {
       const data = await api(root + '/usage/inspect', 'POST', query);
-      const kindLbl = data.query.kind === 'weekly' ? '7-day' : data.query.kind === '5h' ? '5-hour' : data.query.kind;
-      const titleParts = [data.profile_name || profile.name, kindLbl];
+      const titleParts = [data.profile_name || profile.name, poolTitle(pool)];
       if (data.mode === 'window' && data.window) {
         titleParts.push(compareSpan(data.window.start_ms, data.window.end_ms));
       } else {
@@ -892,6 +1098,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         `${tot.cache_hit_percent != null ? pct1(tot.cache_hit_percent) : '0'}% cache hit`
       ].filter(Boolean);
       el('usage-inspect-summary').textContent = summaryParts.join(' · ');
+      if (data.window?.verified) {
+        const v = document.createElement('div');
+        v.className = 'usage-stat';
+        v.append(verifiedBadge(data.window.verified), document.createTextNode(' ' + verifiedText(data.window.verified)));
+        el('usage-inspect-summary').append(v);
+      }
 
       if (data.per_percent) {
         el('usage-inspect-per-percent').hidden = false;
@@ -1024,8 +1236,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
     try {
       const data = await api(root + '/usage/windows', 'POST', query);
-      const kindLbl = pool.kind === 'weekly' ? '7-day' : pool.kind === '5h' ? '5-hour' : pool.kind;
-      el('usage-windows-title').textContent = `${profile.name} · ${kindLbl} (${pool.scope}) windows`;
+      el('usage-windows-title').textContent = `${profile.name} · ${poolTitle(pool)} windows`;
       el('usage-windows-status').hidden = true;
       el('usage-windows-rows').replaceChildren();
 
@@ -1046,6 +1257,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
         const tdRate = document.createElement('td');
         tdRate.textContent = w.rate?.status === 'available' ? formatUSDPerPercent(w.rate.usd_per_percent) : (w.rate?.reason || w.rate?.status || 'No rate');
+        if (w.verified) tdRate.append(document.createTextNode(' '), verifiedBadge(w.verified));
         tr.append(tdRate);
 
         const tdDelta = document.createElement('td');
@@ -1068,17 +1280,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
           cb.disabled = true;
           cb.title = "Needs Pacer's usage store";
         } else {
-          cb.onchange = async () => {
-            const willBeExcluded = !cb.checked;
-            let note = '';
-            if (willBeExcluded) {
-              const res = prompt('Optional short note for exclusion:');
-              if (res === null) {
-                cb.checked = true;
-                return;
-              }
-              note = res.trim();
-            }
+          const save = async (willBeExcluded, note) => {
             try {
               const patchBody = {
                 revision: currentUsageData ? currentUsageData.exclusions_revision : 0,
@@ -1092,21 +1294,22 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
               await loadUsage();
               await openWindows(profile, pool, overrideKey);
             } catch (err) {
-              if (err.status === 409 || (err.message && err.message.includes('409'))) {
+              const s = el('usage-windows-status');
+              if (err.status === 409) {
                 usageCache.clear();
                 await loadUsage();
                 await openWindows(profile, pool, overrideKey);
-                const s = el('usage-windows-status');
-                s.hidden = false;
-                s.className = 'status error';
                 s.textContent = 'Exclusions changed meanwhile. Reloaded.';
-              } else {
-                const s = el('usage-windows-status');
-                s.hidden = false;
-                s.className = 'status error';
-                s.textContent = err.message;
-              }
+              } else s.textContent = err.message;
+              s.hidden = false;
+              s.className = 'status error';
             }
+          };
+          cb.onchange = () => {
+            if (cb.checked) return save(false, '');
+            // Leaving a window out: ask why, inline, before saving.
+            cb.checked = true;
+            openExcludeEditor(tr, note => save(true, note));
           };
         }
         tdCount.append(cb);
@@ -1151,6 +1354,286 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }
   }
 
+  // ---- Accounts & profiles ----
+  // Accounts are every login Pacer and the import know, merged when linked as
+  // one provider account (a re-login). Edits save a new revision; the usage
+  // record then works out only what changed and the page follows.
+  let accountsData = null, manageMode = '', manageBusy = false;
+  const button = (text, onclick, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; if (cls) b.className = cls; b.onclick = onclick; return b; };
+  const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
+  function manageStatus(text, error = false) { const s = el('usage-manage-status'); s.hidden = !text; s.textContent = text || ''; s.className = 'status' + (error ? ' error' : ''); }
+  async function loadAccounts() { accountsData = await api(root + '/usage/accounts', 'POST', {}); return accountsData; }
+  async function openManage(mode) {
+    manageMode = mode || '';
+    manageStatus('Loading accounts…');
+    el('usage-manage-body').replaceChildren();
+    if (!el('usage-manage-dialog').open) el('usage-manage-dialog').showModal();
+    try { await loadAccounts(); manageStatus(''); renderManage(); }
+    catch (error) { manageStatus(error.message, true); }
+  }
+  // Waits until the record includes an edit, then reloads the cards.
+  async function followEdit(at) {
+    usageCache.clear();
+    for (let i = 0; i < 20 && connected; i++) {
+      await new Promise(r => setTimeout(r, i ? 1500 : 400));
+      try {
+        const data = await api(root + '/usage/profiles', 'POST', {});
+        if ((data.live?.built_at_ms || 0) >= at || data.live?.state !== 'live') { usageCache.clear(); await loadUsage(); return; }
+      } catch { return; }
+    }
+    await loadUsage();
+  }
+  async function manageEdit(op, path, body, done) {
+    if (manageBusy) return;
+    manageBusy = true;
+    manageStatus('Saving…');
+    el('usage-manage-body').querySelectorAll('button,select,input').forEach(n => n.disabled = true);
+    const at = Date.now() - 1000;
+    try {
+      await api(root + path, 'PATCH', body);
+      manageStatus(done + ' The cards update as soon as Pacer has worked it into the record.');
+      await loadAccounts();
+      followEdit(at);
+    } catch (error) {
+      manageStatus(error.message, true);
+      try { await loadAccounts(); } catch {}
+    } finally { manageBusy = false; renderManage(); }
+  }
+  const profileEdit = (body, done) => manageEdit('profile', '/usage/profile', { revision: accountsData.profiles_revision, ...body }, done);
+  const linkEdit = (body, done) => manageEdit('links', '/usage/links', { revision: accountsData.links_revision, ...body }, done);
+
+  // Which profiles count an account right now (open-ended memberships).
+  function accountProfiles(ref) {
+    return (accountsData?.profiles || []).filter(p => !p.archived && p.accounts.some(m => m.account === ref && !m.to_ms));
+  }
+  function loginLines(account) {
+    const box = document.createElement('div');
+    box.className = 'manage-logins';
+    const others = (accountsData.accounts || []).filter(a => a.provider === account.provider && a.ref !== account.ref);
+    for (const login of account.logins) {
+      const line = document.createElement('div');
+      line.className = 'manage-row';
+      const when = [login.first_ms && 'first ' + day(login.first_ms), login.last_ms && 'last ' + day(login.last_ms)].filter(Boolean).join(', ');
+      line.append(span(login.label + ' · ' + (login.source === 'imported' ? 'imported' : 'Pacer') + (when ? ' · ' + when : '') + (login.certified ? ' · same account (certified at the switch)' : '')));
+      if (login.same_as) {
+        line.append(button('Unlink', () => linkEdit({ login: login.ref, linked: false }, 'Unlinked.')));
+      }
+      box.append(line);
+    }
+    if (others.length && account.logins.length === 1 && !account.logins[0].same_as) {
+      const line = document.createElement('div');
+      line.className = 'manage-row';
+      const label = document.createElement('label');
+      label.textContent = 'This is a new login of ';
+      const select = document.createElement('select');
+      select.className = 'manage-link-select';
+      select.append(new Option('choose the earlier account…', ''));
+      for (const o of others) select.append(new Option(o.label + (o.last_ms ? ' (last used ' + day(o.last_ms) + ')' : ''), o.ref));
+      label.append(select);
+      const link = button('Link as one account', () => { if (select.value) linkEdit({ login: account.logins[0].ref, same_as: select.value, linked: true }, 'Linked: both logins now count as one account.'); }, 'manage-link');
+      link.disabled = true;
+      select.onchange = () => { link.disabled = !select.value; };
+      line.append(label, link);
+      box.append(line);
+    }
+    return box;
+  }
+  function accountBlock(account, controls) {
+    const block = document.createElement('div');
+    block.className = 'manage-account';
+    const head = document.createElement('div');
+    head.className = 'manage-account-head';
+    head.append(span(account.label, 'manage-account-name'), span(providerName(account.provider) + ' · ' + (account.requests || 0).toLocaleString() + ' requests' + (account.last_ms ? ' · last ' + day(account.last_ms) : '') + (account.logins.length > 1 ? ' · ' + account.logins.length + ' logins' : ''), 'usage-meta'));
+    block.append(head);
+    if (controls) block.append(controls);
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = account.logins.length > 1 ? 'Logins (' + account.logins.length + ')' : 'Login';
+    details.append(summary, loginLines(account));
+    block.append(details);
+    return block;
+  }
+  function addToProfileRow(account, profiles) {
+    const row = document.createElement('div');
+    row.className = 'manage-row';
+    const choices = profiles.filter(p => p.provider === account.provider && !p.archived && !accountProfiles(account.ref).includes(p));
+    if (!choices.length) { row.append(span('No other ' + providerName(account.provider) + ' profile to add it to. Create one below.', 'muted')); return row; }
+    const label = document.createElement('label');
+    label.textContent = 'Add to ';
+    const select = document.createElement('select');
+    for (const p of choices) select.append(new Option(p.name, p.reference));
+    label.append(select);
+    row.append(label, button('Add with its history', () => profileEdit({ op: 'add', profile: select.value, account: account.ref, from_ms: 0 }, 'Added; its earlier requests count too.')));
+    return row;
+  }
+  function newProfileForm() {
+    const section = document.createElement('div');
+    section.className = 'manage-section';
+    const h = document.createElement('h3');
+    h.textContent = 'New profile';
+    const form = document.createElement('form');
+    form.className = 'manage-row';
+    const nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Name ';
+    const name = document.createElement('input');
+    name.maxLength = 80;
+    name.required = true;
+    name.placeholder = 'for example: Claude Max 5x';
+    nameLabel.append(name);
+    const provLabel = document.createElement('label');
+    provLabel.textContent = 'Provider ';
+    const prov = document.createElement('select');
+    for (const p of [...new Set((accountsData.accounts || []).map(a => a.provider))].sort()) prov.append(new Option(providerName(p), p));
+    provLabel.append(prov);
+    const create = document.createElement('button');
+    create.textContent = 'Create';
+    form.append(nameLabel, provLabel, create);
+    form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'create', name: name.value.trim(), provider: prov.value }, 'Profile created. Add its accounts.'); };
+    section.append(h, form);
+    return section;
+  }
+  function renderManage() {
+    const body = el('usage-manage-body');
+    body.replaceChildren();
+    const data = accountsData;
+    if (!data) return;
+    if (data.building) { manageStatus("Pacer is still building its record; accounts appear when it is ready.", false); }
+    else if (!data.editable) manageStatus("Changes need Pacer's usage store, which is not configured here. You can look, not change.", true);
+    const profiles = data.profiles || [];
+    const byRef = new Map((data.accounts || []).map(a => [a.ref, a]));
+    const profile = profiles.find(p => p.reference === manageMode);
+    if (profile) {
+      el('usage-manage-title').textContent = 'Manage accounts · ' + profile.name;
+      const counted = document.createElement('div');
+      counted.className = 'manage-section';
+      const h = document.createElement('h3');
+      h.textContent = 'Counted on this card';
+      counted.append(h);
+      const refs = [...new Set(profile.accounts.map(m => m.account))];
+      if (!refs.length) counted.append(span('No accounts yet. Add one below.', 'muted'));
+      for (const ref of refs) {
+        const account = byRef.get(ref);
+        if (!account) continue;
+        const spans = profile.accounts.filter(m => m.account === ref);
+        const open = spans.some(m => !m.to_ms);
+        const row = document.createElement('div');
+        row.className = 'manage-row';
+        row.append(span(spans.map(m => (m.from_ms ? 'from ' + day(m.from_ms) : 'from its first use') + (m.to_ms ? ' until ' + day(m.to_ms) : ' on')).join('; ')));
+        if (open) row.append(button('Stop counting from now', () => profileEdit({ op: 'end', profile: profile.reference, account: ref, at_ms: Date.now() }, 'From now on its requests no longer count here; its history stays.')));
+        const remove = button('Remove with its history', () => {
+          remove.replaceWith(span('Its earlier requests and windows leave this card too.', 'muted'), button('Remove', () => profileEdit({ op: 'remove', profile: profile.reference, account: ref }, 'Removed from this card.')), button('Keep', renderManage));
+        });
+        row.append(remove);
+        counted.append(accountBlock(account, row));
+      }
+      body.append(counted);
+      const add = document.createElement('div');
+      add.className = 'manage-section';
+      const h2 = document.createElement('h3');
+      h2.textContent = 'Add an account';
+      add.append(h2);
+      const candidates = (data.accounts || []).filter(a => a.provider === profile.provider && !profile.accounts.some(m => m.account === a.ref && !m.to_ms));
+      if (!candidates.length) add.append(span('Every ' + providerName(profile.provider) + ' account is already counted here.', 'muted'));
+      else {
+        const form = document.createElement('form');
+        form.className = 'manage-row';
+        const label = document.createElement('label');
+        label.textContent = 'Account ';
+        const select = document.createElement('select');
+        select.className = 'manage-add-account';
+        for (const a of candidates) select.append(new Option(a.label + ' · ' + (a.requests || 0).toLocaleString() + ' requests' + (a.last_ms ? ' · last ' + day(a.last_ms) : ''), a.ref));
+        label.append(select);
+        const when = document.createElement('select');
+        when.className = 'manage-add-when';
+        when.append(new Option('with all its earlier requests', 'all'), new Option('from now on', 'now'));
+        const go = document.createElement('button');
+        go.textContent = 'Add';
+        form.append(label, when, go);
+        form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'add', profile: profile.reference, account: select.value, from_ms: when.value === 'all' ? 0 : Date.now() }, 'Added to ' + profile.name + '.'); };
+        add.append(form);
+      }
+      body.append(add);
+      const settings = document.createElement('div');
+      settings.className = 'manage-section';
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Profile';
+      const form = document.createElement('form');
+      form.className = 'manage-row';
+      const nameLabel = document.createElement('label');
+      nameLabel.textContent = 'Name ';
+      const name = document.createElement('input');
+      name.maxLength = 80;
+      name.value = profile.name;
+      name.required = true;
+      nameLabel.append(name);
+      const save = document.createElement('button');
+      save.textContent = 'Rename';
+      form.append(nameLabel, save);
+      form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'rename', profile: profile.reference, name: name.value.trim() }, 'Renamed.'); };
+      form.append(profile.archived ? button('Restore', () => profileEdit({ op: 'restore', profile: profile.reference }, 'Restored.')) : button('Archive', () => profileEdit({ op: 'archive', profile: profile.reference }, 'Archived: the card moves to the end; nothing is deleted.')));
+      settings.append(h3, form);
+      body.append(settings);
+      return;
+    }
+    const unassignedOnly = manageMode === 'unassigned';
+    el('usage-manage-title').textContent = unassignedOnly ? 'Accounts in no profile' : 'Accounts & profiles';
+    const intro = document.createElement('p');
+    intro.className = 'muted';
+    intro.textContent = unassignedOnly ? 'These accounts count on no profile card, so they have no $ per 1%. Add each to the profile of its plan.' : 'Every account Pacer and the import know. A re-login after the provider made you sign in again is the same account: link it to the earlier one so its history continues.';
+    body.append(intro);
+    const list = (data.accounts || []).filter(a => !unassignedOnly || accountProfiles(a.ref).length === 0);
+    if (!list.length) body.append(span('Every account is in a profile.', 'muted'));
+    for (const provider of [...new Set(list.map(a => a.provider))].sort()) {
+      const section = document.createElement('div');
+      section.className = 'manage-section';
+      const h = document.createElement('h3');
+      h.textContent = providerName(provider);
+      section.append(h);
+      for (const account of list.filter(a => a.provider === provider)) {
+        const controls = document.createElement('div');
+        const inProfiles = accountProfiles(account.ref);
+        if (!unassignedOnly) controls.append(span(inProfiles.length ? 'Counted on: ' + inProfiles.map(p => p.name).join(', ') : 'In no profile', 'usage-stat'));
+        controls.append(addToProfileRow(account, profiles));
+        section.append(accountBlock(account, controls));
+      }
+      body.append(section);
+    }
+    body.append(newProfileForm());
+  }
+  el('usage-accounts').onclick = () => openManage('');
+  el('usage-manage-close').onclick = () => el('usage-manage-dialog').close();
+
+  // The note editor for leaving a window out of the average, under its row.
+  function openExcludeEditor(tr, save) {
+    for (const old of el('usage-windows-rows').querySelectorAll('.usage-exclude-editor')) old.remove();
+    const editor = document.createElement('tr');
+    editor.className = 'usage-exclude-editor';
+    const td = document.createElement('td');
+    td.colSpan = tr.children.length;
+    const form = document.createElement('form');
+    const label = document.createElement('label');
+    label.textContent = 'Why leave this window out? (optional) ';
+    const input = document.createElement('input');
+    input.maxLength = 200;
+    input.className = 'usage-exclude-note';
+    input.placeholder = 'for example: ran a benchmark';
+    label.append(input);
+    const ok = document.createElement('button');
+    ok.textContent = 'Leave out of average';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    const close = () => { editor.remove(); tr.querySelector('.usage-window-count-checkbox')?.focus(); };
+    cancel.onclick = close;
+    form.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } };
+    form.onsubmit = event => { event.preventDefault(); ok.disabled = cancel.disabled = true; save(input.value.trim()); };
+    form.append(label, ok, cancel);
+    td.append(form);
+    editor.append(td);
+    tr.after(editor);
+    input.focus();
+  }
+
   el('usage-key').onchange = () => loadUsage();
   function onUsageDateInput() {
     clearTimeout(usageDateTimer);
@@ -1179,13 +1662,13 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('usage-inspect-close').onclick = () => el('usage-inspect-dialog').close();
   el('usage-windows-close').onclick = () => el('usage-windows-dialog').close();
   async function refresh(){message('');forwardControls();try{
-    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];showModels()}
+    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];modelChannels=data['channel-info']||[];renderModelTabs();showModels();loadPrices()}
     else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
     else {const data=await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await api(root+'/state');connected=true;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh()}catch(error){key='';message(error.message,true)}};
-  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
+  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
   el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;
@@ -1210,6 +1693,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }catch(error){el('model-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
   }
   el('model-form').onsubmit=event=>{event.preventDefault();saveModel()};
+  el('price-form').onsubmit=event=>{event.preventDefault();savePrice()};
+  el('price-clear').onclick=()=>savePrice(true);
+  el('price-cancel').onclick=()=>el('price-dialog').close();
+  el('prices-refresh').onclick=async()=>{el('prices-refresh').disabled=true;el('prices-status').textContent='Fetching models.dev…';try{const r=await api(root+'/models/prices/refresh','POST',{});await loadPrices();if(r.sync?.error)message('models.dev could not be read: '+r.sync.error,true)}catch(error){message(error.message,true);showPriceStatus()}};
   el('model-reset').onclick=()=>saveModel(true);
   el('add-key').onclick=()=>editMetadata('add-key');el('add-group').onclick=()=>editMetadata('put-group');
   el('metadata-form').onsubmit=event=>{event.preventDefault();saveMetadata()};el('metadata-delete').onclick=()=>saveMetadata(true);el('metadata-cancel').onclick=()=>el('metadata-dialog').close();
