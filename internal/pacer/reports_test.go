@@ -78,7 +78,10 @@ func reportFixtureFrom(t *testing.T, fixture string, events, observations int64)
 func usageFixture(t *testing.T) *Plugin {
 	t.Helper()
 	p := startPlugin(t, filepath.Join(t.TempDir(), "state.sqlite"))
-	p.reports = reportFixtureFrom(t, "historical-golden/historical-fixture.sql.gz", 240, 65)
+	reader := reportFixtureFrom(t, "historical-golden/historical-fixture.sql.gz", 240, 65)
+	p.mu.Lock()
+	p.reports = reader // the usage record's loop reads it under p.mu
+	p.mu.Unlock()
 	t.Cleanup(p.Close)
 	return p
 }

@@ -23,6 +23,15 @@ type LiveInput struct {
 	Source   string // Pacer's producer source ID (native account references)
 }
 
+// LiveStatus describes the continuous record for the page's technical details.
+type LiveStatus struct {
+	State             string    `json:"state"` // starting, off, waiting, live, error
+	ImportedThroughMS int64     `json:"imported_through_ms,omitempty"`
+	BuiltAtMS         int64     `json:"built_at_ms,omitempty"`
+	Stats             LiveStats `json:"stats"`
+	Error             string    `json:"error,omitempty"`
+}
+
 type LiveStats struct {
 	HMS             int64 `json:"h_ms"`
 	AtMS            int64 `json:"at_ms"`
@@ -275,8 +284,8 @@ func (r *Reader) usageFacts(ctx context.Context) (*cpamp.QuotaFacts, error) {
 	return frozen, nil
 }
 
-// importedThrough is H, the end of the imported history (0 when unknown).
-func (r *Reader) importedThrough(ctx context.Context) int64 {
+// ImportedThrough is H, the end of the imported history (0 when unknown).
+func (r *Reader) ImportedThrough(ctx context.Context) int64 {
 	frozen, err := r.quotaFacts(ctx)
 	if err != nil {
 		return 0

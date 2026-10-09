@@ -84,6 +84,7 @@ func (p *Plugin) startWorker() {
 		// Mode marks run apart from the loop below, so slow provider reads never
 		// leave a dry-run interval unproven.
 		p.startDryRunHeartbeat()
+		p.startUsageLive()
 		p.workerWait.Add(1)
 		go func() {
 			defer p.workerWait.Done()

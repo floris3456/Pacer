@@ -144,6 +144,7 @@ func (p *Plugin) usageAPI(req pluginapi.ManagementRequest) pluginapi.ManagementR
 		var view historyreports.CompareView
 		view, err = reader.Compare(ctx, profiles, ex)
 		view.ExclusionsRevision, view.ExclusionsEditable = exclusions.Revision, editable
+		view.Live = p.usageLiveStatus()
 		value = view
 	case "windows":
 		value, err = reader.CompareWindows(ctx, windows, ex)

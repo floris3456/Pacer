@@ -240,6 +240,40 @@ func (s *Store) History(account string, afterID int64, limit int) ([]HistoryEntr
 	return out, rows.Err()
 }
 
+// AccountHistoryEntry is a history row with its account, for consumers that
+// follow every account at once (the continuous usage record).
+type AccountHistoryEntry struct {
+	HistoryEntry
+	Account string `json:"account"`
+}
+
+// HistorySince pages every account's append-only history by sequence.
+func (s *Store) HistorySince(afterID int64, limit int) ([]AccountHistoryEntry, error) {
+	if limit <= 0 || limit > 10000 {
+		limit = 1000
+	}
+	rows, err := s.db.Query("SELECT id,account,received_at,sample,disposition FROM observation_history WHERE id>? ORDER BY id LIMIT ?", afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AccountHistoryEntry{}
+	for rows.Next() {
+		var h AccountHistoryEntry
+		var at int64
+		var raw string
+		if err := rows.Scan(&h.ID, &h.Account, &at, &raw, &h.Disposition); err != nil {
+			return nil, err
+		}
+		h.ReceivedAt = fromNS(at)
+		if err := json.Unmarshal([]byte(raw), &h.Sample); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
 func fromNS(n int64) time.Time {
 	if n == 0 {
 		return time.Time{}

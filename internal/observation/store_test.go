@@ -75,6 +75,14 @@ func TestIndependentFieldFreshnessNoSignalAndExpiry(t *testing.T) {
 	if err != nil || len(h) != 3 {
 		t.Fatalf("no-signal must not create observation: %d %v", len(h), err)
 	}
+	observe(t, s, "other", "codex", w)
+	all, err := s.HistorySince(0, 100)
+	if err != nil || len(all) != 4 || all[0].Account != "account" || all[3].Account != "other" || all[0].ID != h[0].ID || *all[0].Sample.Remaining != 50 {
+		t.Fatalf("history across accounts: %d %v", len(all), err)
+	}
+	if rest, _ := s.HistorySince(all[2].ID, 100); len(rest) != 1 || rest[0].Account != "other" {
+		t.Fatal("history cursor", rest)
+	}
 	c.Set(reset.Add(time.Second))
 	got = s.Windows("account")[0]
 	if got.State(c.Now()) != "awaiting-confirmation" || *got.Remaining != 45 || !got.Reset.Equal(reset) {
