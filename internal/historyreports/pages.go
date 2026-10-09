@@ -90,6 +90,7 @@ func (r *Reader) ListWindows(ctx context.Context, q WindowQuery) (WindowPage, er
 			return WindowPage{}, e
 		}
 	}
+	r.useFacts(ctx)
 	w, e := r.service.Workspace(ctx, f)
 	if e != nil {
 		return WindowPage{}, domainError(ctx, e)

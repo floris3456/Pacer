@@ -21,6 +21,7 @@ func reportRoutes() []map[string]string {
 	for _, name := range []string{"report", "windows", "evidence", "export"} {
 		out = append(out, map[string]string{"Method": "POST", "Path": "/plugins/pacer/history/" + name})
 	}
+	out = append(out, compareRoutes()...)
 	return append(out, legacyReportRoutes()...)
 }
 
@@ -81,6 +82,9 @@ func (p *Plugin) reportsAPI(req pluginapi.ManagementRequest) pluginapi.Managemen
 		return p.legacyReportsAPI(req)
 	}
 	op := strings.TrimPrefix(req.Path, historyRoot)
+	if strings.HasPrefix(req.Path, historyRoot) && isCompareOp(op) {
+		return p.compareAPI(req, op)
+	}
 	if !strings.HasPrefix(req.Path, historyRoot) || !(req.Method == "GET" && op == "profiles" || req.Method == "POST" && (op == "report" || op == "windows" || op == "evidence" || op == "export")) {
 		return resource(404, map[string]string{"error": "not_found"})
 	}
