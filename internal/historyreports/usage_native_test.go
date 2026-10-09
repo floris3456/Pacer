@@ -43,3 +43,28 @@ func TestNativeReadingsBecomeCPAMPObservations(t *testing.T) {
 		t.Fatal("reading without an account")
 	}
 }
+
+func TestNativeReadingsUseTheirRequestsAccount(t *testing.T) {
+	at := time.UnixMilli(1791000000000)
+	r := NativeReading{Account: "n1", Provider: "claude", At: at}
+	o := ForwardOrigins{Certificates: []ForwardOriginCertificate{
+		{LegacyAccount: "legacy-1", Provider: "claude", SourceID: "src", NativeAccount: "n1", NativeCredentialRef: "c1", StartMS: at.UnixMilli() - 1000},
+		{LegacyAccount: "legacy-1", Provider: "claude", SourceID: "src", NativeAccount: "n1", NativeCredentialRef: "c2", StartMS: at.UnixMilli() - 1000, EndMS: at.UnixMilli() + 1},
+		{LegacyAccount: "legacy-2", Provider: "claude", SourceID: "src", NativeAccount: "n2", NativeCredentialRef: "c3", StartMS: 0, EndMS: at.UnixMilli()},
+	}}
+	if got, ok := readingAccount(o, "src", r); !ok || got != "legacy-1" {
+		t.Fatal(got, ok)
+	}
+	// Outside every certificate: the native account reference requests get.
+	r2 := NativeReading{Account: "n2", Provider: "claude", At: at}
+	if got, ok := readingAccount(o, "src", r2); !ok || got != ForwardAccountRef("src", "claude", "n2") {
+		t.Fatal(got, ok)
+	}
+	if got, _ := readingAccount(o, "src", NativeReading{Account: "n1", Provider: "codex", At: at}); got != ForwardAccountRef("src", "codex", "n1") {
+		t.Fatal("certificate matched another provider", got)
+	}
+	o.Certificates = append(o.Certificates, ForwardOriginCertificate{LegacyAccount: "legacy-3", Provider: "claude", SourceID: "src", NativeAccount: "n1", NativeCredentialRef: "c4"})
+	if _, ok := readingAccount(o, "src", r); ok {
+		t.Fatal("disagreeing certificates must make the reading ambiguous")
+	}
+}

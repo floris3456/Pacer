@@ -59,3 +59,26 @@ func nativeObservation(r NativeReading, account string) (cpamp.Observation, bool
 	o.WindowID = cpamp.WindowID(o)
 	return o, true
 }
+
+// readingAccount puts a native reading on the account its requests use: the
+// legacy account when an origin certificate covers the native account at the
+// reading's time, otherwise the native account reference the forward ledger
+// gives that account's requests. Readings are per account, not per credential,
+// so certificates that disagree about the legacy account make it ambiguous.
+func readingAccount(o ForwardOrigins, source string, r NativeReading) (string, bool) {
+	at := r.At.UnixMilli()
+	legacy := ""
+	for _, c := range o.Certificates {
+		if c.Provider != r.Provider || c.NativeAccount != r.Account || at < c.StartMS || c.EndMS != 0 && at >= c.EndMS {
+			continue
+		}
+		if legacy != "" && legacy != c.LegacyAccount {
+			return "", false
+		}
+		legacy = c.LegacyAccount
+	}
+	if legacy != "" {
+		return legacy, true
+	}
+	return ForwardAccountRef(source, r.Provider, r.Account), true
+}
