@@ -1,6 +1,7 @@
 # Usage Quota: one continuous record (phase 2 design)
 
-Status 2026-10-09: **design, not implemented.** Phase 1 (`usage/*` routes, model
+Status 2026-10-09: **core implemented** (`usage_live.go`, `usage_native.go`, `forward_usage.go`,
+`internal/pacer/usage_live.go`); see "Implemented" and "Not yet" at the end. Phase 1 (`usage/*` routes, model
 mix, Inspect, exclusions, removal of the frozen-history and legacy views) reads
 only the prepared facts, which end at the import boundary H. After the
 production swap, cards would stop at H. Phase 2 continues every profile, window
@@ -74,3 +75,38 @@ reset is shown as "stale".
 - Lab: the existing forward fixture (108 native requests) plus native readings
   show at least one native window with a rate on its card; then the real-data
   drill for timings.
+
+## Implemented (2026-10-09)
+
+- `Reader.BuildLive`: per account, the imported tail `[H − 14 days, H)` plus Pacer's
+  requests and readings from H go through `cpamp.AccountFactsFor` (the same
+  per-account step `BuildQuotaFacts` uses; real data: facts identical by content
+  before/after the refactor, 389 windows, 411 buckets). Windows that reset after
+  H replace the imported copy; everything else stays imported. Native request
+  IDs continue after the imported ones, so the frozen 5-minute rule never
+  applies to them.
+- `TestLiveTailReproducesPreparedWindowsAtH`: the tail alone reproduces every
+  prepared window open at H exactly (no drift at the boundary).
+- Accounts: certified native accounts continue their legacy account; others are
+  new accounts shown on a read-only **"Not in a profile"** card (Windows and
+  Inspect work; exclusions do not).
+- Pacer follows both stores every 30 s outside the report slots, rebuilds when
+  evidence arrived, a window opens or resets, or 5 minutes passed, and swaps the
+  live facts in. `usage/profiles` carries `live` (state, counts) and
+  `imported_through_ms`; the page shows "Data as of" and one sentence in
+  technical details.
+- Real data (`TestRealLiveProbe`, a simulated week after H: 55,492 requests,
+  107,940 readings, 12 accounts): rebuild 1.0 s, `usage/profiles` 1.2 ms after it.
+
+## Not yet
+
+- **Growth.** Each rebuild re-derives every changed account from its tail plus
+  all native evidence since H and allocates ~2.4 GB (simulated week). Before
+  months of native data: seal closed windows (above) and rebuild only accounts
+  whose evidence changed.
+- **Profile edits** made in the forward store after H do not yet re-assign the
+  imported history (cards use the frozen configuration).
+- **Prices** for models absent from the frozen book stay "missing price"; the
+  forward book is not merged in yet.
+- **Scopes** other than Claude `all` are not mapped across H (see above).
+- **"Verified" mark** where Pacer's capacity check (C) also passes is not shown yet.
