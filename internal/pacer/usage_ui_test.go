@@ -336,6 +336,8 @@ const ui = sandbox.ui;
   // 3. Assert #usage-technical exists and is closed
   assert(nodes.has('usage-technical'), '#usage-technical must exist in DOM');
   assert.equal(el('usage-technical').open, false, '#usage-technical must be closed');
+  // The forward browser suite's contract: these IDs stay inside the technical details.
+  for (const id of ['forward', 'forward-title', 'forward-form', 'forward-load', 'forward-pin', 'forward-coverage', 'forward-status', 'forward-profile-editor', 'forward-json', 'forward-requests']) assert(nodes.has(id), '#' + id + ' must stay');
 
   // Connect and verify initial load
   ui.connect();
