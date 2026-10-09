@@ -110,6 +110,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 	native := map[string][]cpamp.Event{}
 	readings := map[string][]cpamp.Observation{}
 	provider := map[string]string{}
+	label := map[string]string{} // a new account is labelled with Pacer's own account name
 	for _, e := range in.Native.Events {
 		if e.StartedAt.UnixMilli() < h {
 			stats.RequestsBeforeH++
@@ -128,6 +129,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 		ev.Account = account
 		native[account] = append(native[account], ev)
 		provider[account] = ev.Provider
+		label[account] = e.Event.Account
 		stats.Requests++
 	}
 	for _, rd := range in.Readings {
@@ -147,6 +149,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 		}
 		readings[account] = append(readings[account], o)
 		provider[account] = rd.Provider
+		label[account] = rd.Account
 		stats.Readings++
 	}
 	ids := make([]string, 0, len(provider))
@@ -202,7 +205,7 @@ func (r *Reader) BuildLive(ctx context.Context, in LiveInput) (*cpamp.QuotaFacts
 				return nil, stats, err
 			}
 		} else {
-			a = cpamp.Account{ID: id, Provider: provider[id], Label: "Recorded by Pacer"}
+			a = cpamp.Account{ID: id, Provider: provider[id], Label: label[id]}
 			stats.NewAccounts++
 		}
 		windows := cpamp.AccountFactsFor(&frame, a, append(append([]cpamp.Event{}, t.events...), events...), append(append([]cpamp.Observation{}, t.obs...), obs...))

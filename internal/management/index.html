@@ -743,11 +743,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   // and one short "as of" line on the page.
   function renderUsageRecord(data) {
     const h = data.imported_through_ms, live = data.live || {}, stats = live.stats || {};
-    el('usage-asof').textContent = data.frozen_at_ms ? 'Data as of ' + date(data.frozen_at_ms / 1000) : '';
+    const minute = ms => date(Math.floor(ms / 60000) * 60).replace(/:00 UTC$/, ' UTC');
+    el('usage-asof').textContent = data.frozen_at_ms ? 'Data as of ' + minute(data.frozen_at_ms) : '';
     const parts = [];
-    if (h) parts.push('Imported history (CPAMP) up to ' + date(h / 1000) + '.');
+    if (h) parts.push('Imported history (CPAMP) up to ' + minute(h) + '.');
     if (live.state === 'live') {
-      parts.push("Pacer's own record continues from there: " + (stats.native_requests || 0) + ' requests and ' + (stats.native_readings || 0) + ' meter readings, last updated ' + date(live.built_at_ms / 1000) + '.');
+      parts.push("Pacer's own record continues from there: " + (stats.native_requests || 0) + ' requests and ' + (stats.native_readings || 0) + ' meter readings, last updated ' + minute(live.built_at_ms) + '.');
       if (stats.new_accounts) parts.push(stats.new_accounts + (stats.new_accounts === 1 ? ' account is' : ' accounts are') + ' not linked to an imported account yet and count as unassigned.');
       if (stats.ambiguous_account) parts.push(stats.ambiguous_account + ' records were left out because their account link is ambiguous.');
     } else if (live.state === 'waiting') parts.push("Pacer's own record starts there; nothing recorded since.");
@@ -781,13 +782,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
       const prov = document.createElement('span');
       prov.className = 'usage-provider';
-      prov.textContent = profile.provider || 'unknown';
+      prov.textContent = profile.provider || '';
 
       const name = document.createElement('span');
       name.className = 'usage-profile-name';
       name.textContent = profile.name || '';
 
-      header.append(prov, name);
+      if (profile.provider) header.append(prov);
+      header.append(name);
       if (profile.archived) {
         const badge = document.createElement('span');
         badge.className = 'pill';
@@ -804,9 +806,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       if (Array.isArray(profile.current) && profile.current.length > 0) {
         const metersDiv = document.createElement('div');
         metersDiv.className = 'usage-meters';
+        const kinds = profile.current.map(m => m.kind);
         for (const meter of profile.current) {
           const mLine = document.createElement('div');
-          const kindLbl = meter.kind === 'weekly' ? '7-day' : meter.kind === '5h' ? '5-hour' : (meter.kind || '');
+          let kindLbl = meter.kind === 'weekly' ? '7-day' : meter.kind === '5h' ? '5-hour' : (meter.kind || '');
+          // Several accounts on one card: name the account the meter belongs to.
+          if (meter.label && kinds.filter(k => k === meter.kind).length > 1) kindLbl = meter.label + ' · ' + kindLbl;
           const usedStr = meter.used_percent != null ? pct1(meter.used_percent) + '% used' : 'Unknown used';
           const rstStr = meter.reset_ms ? 'resets ' + date(meter.reset_ms / 1000) : '';
           const parts = [kindLbl + ' ' + usedStr];

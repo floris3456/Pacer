@@ -155,7 +155,7 @@ func TestBuildLiveContinuesAccountsAfterH(t *testing.T) {
 	ref := ForwardAccountRef(liveSource, "claude", "nx")
 	newWindow := false
 	for _, w := range live.Windows {
-		if w.Account == ref && w.Base.Kind == "5h" && w.Latest && w.Base.AccountUsage.Requests == 2 && w.Readings == 2 {
+		if w.Account == ref && w.Base.Kind == "5h" && w.Latest && w.Base.AccountUsage.Requests == 2 && w.Readings == 2 && w.Base.Label == "nx" {
 			newWindow = true
 		}
 	}
