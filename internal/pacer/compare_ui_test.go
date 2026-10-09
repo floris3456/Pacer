@@ -95,11 +95,16 @@ func TestCompareUISyntaxAndStateContracts(t *testing.T) {
 		"COMPARE_WINDOWS_DATA="+windowsFile,
 		"PROFILE_REF="+profileRef,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("Node compare UI contracts: %v\n%s", err, out)
-	} else {
-		t.Log(string(out))
 	}
+	// A never-settling promise ends Node with exit 0 and no output; require the
+	// harness's last line so a hang cannot pass silently.
+	if !strings.Contains(string(out), "PASS: compare UI syntax and contracts verified.") {
+		t.Fatalf("Node compare UI harness did not finish (a promise never settled):\n%s", out)
+	}
+	t.Log(string(out))
 }
 
 const compareUIHarness = `
