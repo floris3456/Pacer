@@ -319,7 +319,28 @@ def wait_until(predicate, seconds, interval=1.0):
 def models(key):
     code, raw = http(CPA_URL + '/v1/models', key)
     ids = sorted(m['id'] for m in (jbody(raw) or {}).get('data', [])) if code == 200 else []
-    return {'status': code, 'count': len(ids), 'sha256': sha_text('\n'.join(ids))}
+    return {'status': code, 'count': len(ids), 'sha256': sha_text('\n'.join(ids)), 'ids': ids}
+
+
+def wait_models(key, expected, seconds=90, interval=1):
+    """Health/plugin registration precede the asynchronous per-auth model catalogue.
+
+    Wait for the exact incumbent set, never accept a subset, superset or alias
+    substitution. Persistent drift still fails the unchanged models_same gate.
+    """
+    latest = None
+    observed = []
+
+    def ready():
+        nonlocal latest
+        latest = models(key)
+        identity = {k: latest[k] for k in ('status', 'count', 'sha256')}
+        if not observed or observed[-1] != identity:
+            observed.append(identity)
+        return latest['status'] == 200 and latest['sha256'] == expected['sha256']
+
+    wait_until(ready, seconds, interval)
+    return dict(latest, startup_observations=observed)
 
 
 def discovery(base, path):
@@ -1005,7 +1026,7 @@ def verify_candidate(st, pre, since, inference_session=None):
     c['quota_handoff_inactive'] = not (pl.get('quota-handoff') or {}).get('effective')
     c['plugins_preserved'] = set(pre['registered']) - {'quota-handoff', 'pacer'} <= {i for i, x in pl.items() if x['registered']}
     key = client_key()
-    v['models'] = models(key)
+    v['models'] = wait_models(key, pre['models'])
     c['models_same'] = v['models']['status'] == 200 and v['models']['sha256'] == pre['models']['sha256']
     v['auth'] = {'models_anonymous': http(CPA_URL + '/v1/models')[0], 'management_anonymous': http(CPA_URL + '/v0/management/plugins')[0]}
     c['auth_enforced'] = v['auth']['models_anonymous'] in (401, 403) and v['auth']['management_anonymous'] == 401

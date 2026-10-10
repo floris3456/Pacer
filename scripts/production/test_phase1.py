@@ -3,7 +3,9 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +15,45 @@ spec.loader.exec_module(p)
 
 
 class UsageBundle(unittest.TestCase):
+    def test_catalogue_readiness_requires_exact_incumbent_set(self):
+        expected = {'sha256': p.sha_text('alias')}
+        cases = [
+            ('startup settles', [(503, []), (200, ['alias', 'original']), (200, ['alias'])], True),
+            ('persistent extra alias', [(200, ['alias', 'original'])], False),
+            ('missing model', [(200, [])], False),
+            ('alias substitution', [(200, ['original'])], False),
+        ]
+        for name, replies, accepted in cases:
+            with self.subTest(name=name):
+                calls = []
+
+                class Handler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        calls.append(self.path)
+                        status, ids = replies[min(len(calls) - 1, len(replies) - 1)]
+                        self.send_response(status)
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'data': [{'id': x} for x in ids]}).encode())
+
+                    def log_message(self, *args):
+                        pass
+
+                server = HTTPServer(('127.0.0.1', 0), Handler)
+                worker = threading.Thread(target=server.serve_forever, daemon=True)
+                worker.start()
+                try:
+                    with patch.object(p, 'CPA_URL', 'http://127.0.0.1:%d' % server.server_port):
+                        got = p.wait_models('synthetic', expected, seconds=.1, interval=.001)
+                    self.assertEqual(got['status'] == 200 and got['sha256'] == expected['sha256'], accepted)
+                    self.assertTrue(all(path == '/v1/models' for path in calls))
+                    if accepted:
+                        self.assertEqual(got['ids'], ['alias'])
+                        self.assertEqual(len(got['startup_observations']), 3)
+                finally:
+                    server.shutdown()
+                    worker.join(5)
+                    server.server_close()
+
     def test_rollback_never_overrides_busy_gate(self):
         r = {}
         with patch.object(p, 'idle_gate', return_value={'ok': False, 'sampled': 1, 'samples': [{'quiet': False}]}), patch.object(p, 'restore_incumbent') as restore:
