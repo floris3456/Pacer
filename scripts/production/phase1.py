@@ -1,6 +1,6 @@
 """Pacer Phase 1+2 on CT104: Pacer replaces quota-handoff 0.1.5-local.1 (routing dry-run).
 
-CPA must run the pacer-boundary host (bb27d121), so this swaps the CPA image as well as
+CPA must run the pacer-boundary host (9f332564), so this swaps the CPA image as well as
 the plugin. Server phases run on CT104 with this script on stdin; nothing secret is printed:
 
   ssh <pve> 'pct exec 104 -- python3 -B - recon'                          < phase1.py
@@ -65,7 +65,7 @@ def env(name, default):
     return os.environ.get('PHASE1_' + name, default)
 
 
-TAG = 'pacer-phase1-55fa5ac-bb27d121'
+TAG = 'pacer-phase1-0efd99c-9f332564'
 ROOT = Path(env('ROOT', '/opt/cliproxyapi'))
 RELEASE = Path(env('RELEASE', str(ROOT / 'releases' / TAG)))
 BACKUP = Path(env('BACKUP', str(ROOT / 'backups' / TAG)))
@@ -78,6 +78,8 @@ QH_STATE = PLUGINS / 'quota-handoff' / 'state.sqlite'
 PACER_LIB = LIBDIR / 'pacer-v0.2.0-dev.so'
 PACER_DIR = PLUGINS / 'pacer'
 PACER_STATE = PACER_DIR / 'state.sqlite'
+PACER_REPORTS = PACER_DIR / 'reports.sqlite'
+PACER_FORWARD = PACER_DIR / 'forward-report.sqlite'
 CONTAINER_PLUGINS = env('CONTAINER_PLUGINS', '/CLIProxyAPI/plugins')
 CADDY_DIR = Path(env('CADDY_DIR', '/etc/caddy'))
 SNIPPET = CADDY_DIR / 'cliproxyapi-quota-handoff.Caddyfile'
@@ -94,7 +96,7 @@ OTHERS_PREFIX = env('OTHERS_PREFIX', '')
 CPA_URL = env('CPA_URL', 'http://127.0.0.1:8317')
 PUBLIC_URL = env('PUBLIC_URL', 'https://cliproxy.boe.moe')
 OLD_IMAGE = env('OLD_IMAGE', 'cliproxyapi-opus55:20261007-13')
-NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-bb27d121')
+NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-9f332564')
 PLATFORM = env('PLATFORM', '')
 DOCKER_PREFIX = env('DOCKER_PREFIX', 'pacer-phase1')
 SQLITE_IMAGE = env('SQLITE_IMAGE', '')
@@ -115,11 +117,11 @@ LEGACY_EVENTS = '/v0/resource/plugins/quota-handoff/events'
 PACER_EVENTS = '/v0/resource/plugins/pacer/events'
 TIMER = 'pacer-dry-run-daily.timer'
 UNIT_SERVICE = 'pacer-dry-run-daily.service'
-SOURCES = {'pacer': '55fa5acb970c9dc884920a04e52d731e9646060a',
-           'cpa': 'bb27d121a88230bbf25fa9238be1ba4018a48952'}
-PINS = {'image/CLIProxyAPI': 'f66d3605b6e2a6724f245199976f621a1799425620212b0ebb9733dc7f0aea52',
-        'pacer-v0.2.0-dev.so': 'a6fe52dbfe1a68c9997116fce2c04364935ecc8c7a08bd1f45423881de8f5e31',
-        'pacer-state': 'a19a2014e74d2e8db0f7a3b7ae3d26444b780ec3197e23407e5ac4f244f9eb0e',
+SOURCES = {'pacer': '0efd99c26b1568fe9b82bf1bed34977ca11b1487',
+           'cpa': '9f332564b5fddb12b9a524a7338952df18b72f1e'}
+PINS = {'image/CLIProxyAPI': '7df161d07f36ce54c2efc6698f168fe33652007f15ebd9a4ab4e03e5b63ad029',
+        'pacer-v0.2.0-dev.so': 'cf137cdaa6c8a1126df13c5f0a9fc858da204f7df2a5f918d80999ce1291b010',
+        'pacer-state': '80c30903018a62791131afce3b86b04007694f9d1fbf0d6b164c1a7ecd4421dd',
         'quota-handoff-v0.1.5-local.1.so': 'f40daa696d97a9ef70b5f180a74faeaf2b3ce0c4f333027bf8a214b8f2127c40'}
 DEPLOY_SCRIPTS = ('cutover_v8', 'deploy-discover', 'deploy-compact-on-switch', 'deploy-public-plugin',
                   'deploy-shadow', 'mute-notifications', 'deploy-quota-usage-ct104', 'deploy-profile-keys-ct104',
@@ -577,9 +579,19 @@ def child_indent(lines, i, end):
     raise EditError('empty block at line %d' % (i + 1))
 
 
+def forward_book_digest():
+    value = (RELEASE / 'forward-book.digest').read_text().strip()
+    if not re.fullmatch(r'[a-f0-9]{64}', value):
+        raise Refused('bundle forward book digest is invalid')
+    return value
+
+
 def pacer_block(indent, step, mode):
     rows = [(0, 'pacer:'), (1, 'enabled: true'), (1, 'priority: 1'),
             (1, 'state_path: %s/pacer/state.sqlite' % CONTAINER_PLUGINS), (1, 'compact_on_switch: true'),
+            (1, 'report_path: %s/pacer/reports.sqlite' % CONTAINER_PLUGINS),
+            (1, 'forward_report_path: %s/pacer/forward-report.sqlite' % CONTAINER_PLUGINS),
+            (1, 'forward_report_book: "%s"' % forward_book_digest()),
             (1, 'routing:'), (2, 'mode: %s' % mode), (2, 'providers: [claude]'),
             (1, 'cache_policy:'), (2, 'enabled: true'), (2, 'routes:'), (3, '- id: claude'),
             (3, '  models: [claude-opus-5-5]'), (2, 'trusted_empty_installations: []')]
@@ -588,6 +600,9 @@ def pacer_block(indent, step, mode):
 
 def pacer_config(mode):
     return {'enabled': True, 'priority': 1, 'state_path': '%s/pacer/state.sqlite' % CONTAINER_PLUGINS,
+            'report_path': '%s/pacer/reports.sqlite' % CONTAINER_PLUGINS,
+            'forward_report_path': '%s/pacer/forward-report.sqlite' % CONTAINER_PLUGINS,
+            'forward_report_book': forward_book_digest(),
             'compact_on_switch': True, 'routing': {'mode': mode, 'providers': ['claude']},
             'cache_policy': {'enabled': True, 'routes': [{'id': 'claude', 'models': ['claude-opus-5-5']}],
                              'trusted_empty_installations': []}}
@@ -739,6 +754,8 @@ def manifest():
     m = json.loads((RELEASE / 'manifest.json').read_text())
     if m.get('tag') != TAG or m.get('sources') != SOURCES:
         raise Refused('manifest tag/sources differ from this script')
+    if not {'reports.sqlite', 'forward-book.json', 'forward-book.digest'} <= set(m['files']):
+        raise Refused('bundle lacks prepared usage reports or forward book')
     bad = [name for name, sha in m['files'].items() if digest(RELEASE / name) != sha]
     bad += [name for name, sha in PINS.items() if m['files'].get(name) != sha]
     if bad:
@@ -849,6 +866,10 @@ def stage(args):
         raise Refused('stage already done; inspect %s instead of overwriting backups' % BACKUP)
     m = manifest()
     r = {'phase': 'stage', 'started': now(), 'routing_mode': args.routing_mode, 'manifest_files': m['files']}
+    # Keep room for the staged report copy, usage-record growth and the CPA image.
+    reserve = 2 * (RELEASE / 'reports.sqlite').stat().st_size + (RELEASE / 'image/CLIProxyAPI').stat().st_size
+    if shutil.disk_usage(ROOT).free - reserve < 1.5 * 2**30:
+        raise Refused('less than 1.5 GiB would remain after staging and usage-record reserve')
     p = process()
     if not p or p['image'] != OLD_IMAGE or p['status'] != 'running':
         raise Refused('incumbent CPA is not running %s' % OLD_IMAGE)
@@ -918,6 +939,37 @@ def stage(args):
         raise Refused('Pacer state did not initialize correctly: %s' % check.get('quick_check'))
     r['pacer_state'].update({'quick_check': 'ok', 'tables': len(check['tables']), 'mode': oct(PACER_STATE.stat().st_mode & 0o777),
                              'dir_mode': oct(PACER_DIR.stat().st_mode & 0o777)})
+    # Only the prepared artifact is needed by usage_live; the multi-GB history
+    # archive stays offline. Never replace an existing artifact with other bytes.
+    if PACER_REPORTS.exists():
+        if digest(PACER_REPORTS) != m['files']['reports.sqlite']:
+            raise Refused('existing reports artifact differs; refusing overwrite')
+    else:
+        with PACER_REPORTS.open('xb') as dst, (RELEASE / 'reports.sqlite').open('rb') as src:
+            shutil.copyfileobj(src, dst)
+        # OpenPrepared reports are immutable: historyreports.Open refuses owner
+        # write permission too. The separate usage record is the writable store.
+        PACER_REPORTS.chmod(0o400)
+        chown_like(PACER_REPORTS, uid, gid)
+    if digest(PACER_REPORTS) != m['files']['reports.sqlite'] or sqlite('check', PACER_REPORTS).get('quick_check') != 'ok':
+        raise Refused('prepared reports artifact failed integrity check')
+    if PACER_REPORTS.stat().st_mode & 0o277:
+        raise Refused('prepared reports artifact must be private and read-only')
+    initialized = PACER_DIR / 'forward-init.json'
+    if PACER_FORWARD.exists():
+        if not initialized.exists():
+            raise Refused('existing forward store has no successful initialization receipt')
+        result = json.loads(initialized.read_text())
+    else:
+        result = json.loads(run(['docker', 'run', '--rm', '--name', unique('forward-init'), '--network', 'none',
+            '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '%d:%d' % (uid, gid)] + platform_args() +
+            ['-v', '%s:/state' % PACER_DIR, '-v', '%s:/pacer-state:ro' % (RELEASE / 'pacer-state'),
+             '-v', '%s:/forward-book.json:ro' % (RELEASE / 'forward-book.json'), '--entrypoint', '/pacer-state', NEW_IMAGE,
+             'forward-init', '--output', '/state/forward-report.sqlite', '--book-json', '/forward-book.json'], timeout=120).stdout)
+        save(initialized, result)
+    if result.get('forward_report_book') != forward_book_digest() or sqlite('check', PACER_FORWARD).get('quick_check') != 'ok':
+        raise Refused('forward store digest or integrity differs from the bundle')
+    r['usage_record'] = {'reports_sha256': digest(PACER_REPORTS), 'forward_book': forward_book_digest(), 'history_archive': False}
     r['expected'] = {'config': sha_text(plans['config'][0]), 'compose': sha_text(plans['compose']),
                      'snippet': sha_text(plans['snippet'][0]), 'config_plan': plans['config'][1],
                      'snippet_plan': plans['snippet'][1]}
@@ -964,6 +1016,12 @@ def verify_candidate(st, pre, since, inference_session=None):
     want = set(pre['usage']['ids'])
     v['usage'] = wait_until(lambda: (lambda u: u if u['status'] == 200 and want <= set(u['ids']) else None)(usage(key)), 60, 2) or usage(key)
     c['usage_view_public'] = v['usage']['status'] == 200 and want <= set(v['usage']['ids'])
+    def usage_record():
+        code, raw = http(CPA_URL + '/v0/management/plugins/pacer/usage/profiles', mgmt_key(), {}, 'POST', timeout=60)
+        body = jbody(raw) or {}
+        return {'status': code, 'live': body.get('live'), 'profiles': len(body.get('profiles') or [])}
+    v['usage_record'] = wait_until(lambda: (lambda u: u if u['status'] == 200 and (u['live'] or {}).get('state') == 'live' else None)(usage_record()), 120, 2) or usage_record()
+    c['usage_record_live'] = v['usage_record']['status'] == 200 and (v['usage_record']['live'] or {}).get('state') == 'live' and v['usage_record']['profiles'] > 0
     before = pacer_state_view()
     v['inference'] = inference(key, inference_session)
     c['inference_public'] = v['inference']['status'] == 200
@@ -1165,12 +1223,12 @@ def restore_incumbent(st, r):
     r.setdefault('recreated_at', r.get('started'))
 
 
-def rollback_flow(st, r, reason, wait, proceed_if_busy, pre):
+def rollback_flow(st, r, reason, wait, pre):
     rb = {'reason': reason, 'started': now()}
     r['rollback'] = rb
     gate = idle_gate(wait)
     rb['idle_gate'] = {'ok': gate['ok'], 'sampled': gate['sampled'], 'last': gate['samples'][-1]}
-    if not gate['ok'] and not proceed_if_busy:
+    if not gate['ok']:
         rb['result'] = 'deferred: not idle'
         return False
     sub = {'_path': r['_path'], 'started': rb['started']}
@@ -1224,7 +1282,9 @@ def cutover(args):
         except Exception as error:
             r['error'] = '%s: %s' % (type(error).__name__, str(error)[:400])
             r['traceback'] = traceback.format_exc()[-1200:]
-            ok = rollback_flow(st, r, 'automatic: ' + r['error'], args.rollback_idle_wait, True, r['pre'])
+            # Failure is not permission to interrupt new in-flight requests.
+            # A busy rollback returns exit 5 for the operator's idle-gated retry.
+            ok = rollback_flow(st, r, 'automatic: ' + r['error'], args.rollback_idle_wait, r['pre'])
             r['result'] = 'rolled back' if ok else 'ROLLBACK INCOMPLETE'
             return EXIT_ROLLED_BACK if ok else EXIT_ROLLBACK_FAILED
         r['result'] = 'deployed'
@@ -1243,6 +1303,8 @@ def cutover(args):
 
 def rollback(args):
     guard_rehearsal()
+    if args.force:
+        raise Refused('forced rollback is prohibited; wait for confirmed idleness')
     held = lock()
     st = staged()
     r = {'phase': 'rollback', 'started': now()}
@@ -1250,7 +1312,7 @@ def rollback(args):
     try:
         pre = st['baseline']
         r['side_before'] = running_side()
-        ok = rollback_flow(st, r, 'operator', args.idle_wait, args.force, pre)
+        ok = rollback_flow(st, r, 'operator', args.idle_wait, pre)
         if r['rollback'].get('result', '').startswith('deferred'):
             r['result'] = 'not idle; nothing changed'
             return EXIT_NOT_IDLE
@@ -1311,11 +1373,15 @@ def bundle(args):
     (out / 'image').mkdir(parents=True, exist_ok=True)
     (out / 'systemd').mkdir(exist_ok=True)
     sources = {'image/CLIProxyAPI': Path(args.cpa_binary), 'pacer-v0.2.0-dev.so': Path(args.pacer_dist) / 'pacer-v0.2.0-dev.so',
-               'pacer-state': Path(args.pacer_dist) / 'pacer-state', 'quota-handoff-v0.1.5-local.1.so': Path(args.qh_lib),
-               'dry-run-daily.py': here / 'dry-run-daily.py', 'phase1.py': here / 'phase1.py'}
+                'pacer-state': Path(args.pacer_dist) / 'pacer-state', 'quota-handoff-v0.1.5-local.1.so': Path(args.qh_lib),
+                'reports.sqlite': Path(args.reports), 'forward-book.json': Path(args.book_json),
+                'dry-run-daily.py': here / 'dry-run-daily.py', 'phase1.py': here / 'phase1.py'}
+    if not re.fullmatch(r'[a-f0-9]{64}', args.book_digest):
+        raise Refused('invalid forward book digest')
     for name, src in sources.items():
         shutil.copyfile(src, out / name)
-        (out / name).chmod(0o755 if name in ('image/CLIProxyAPI', 'pacer-state') else 0o644)
+        (out / name).chmod(0o755 if name in ('image/CLIProxyAPI', 'pacer-state') else 0o600)
+    (out / 'forward-book.digest').write_text(args.book_digest + '\n')
     (out / 'image' / 'Dockerfile').write_text(DOCKERFILE)
     global RELEASE
     RELEASE = Path(args.release_path)
@@ -1346,13 +1412,16 @@ def main():
     sub.add_parser('verify')
     r = sub.add_parser('rollback')
     r.add_argument('--idle-wait', type=int, default=600)
-    r.add_argument('--force', action='store_true', help='skip waiting for idle (emergency only)')
+    r.add_argument('--force', action='store_true', help='legacy flag; always refused (rollback requires idleness)')
     b = sub.add_parser('bundle')
     b.add_argument('--out', required=True)
     b.add_argument('--release-path', default=str(RELEASE))
     b.add_argument('--cpa-binary', required=True)
     b.add_argument('--pacer-dist', required=True)
     b.add_argument('--qh-lib', required=True)
+    b.add_argument('--reports', required=True)
+    b.add_argument('--book-json', required=True)
+    b.add_argument('--book-digest', required=True)
     args = ap.parse_args()
     os.umask(0o077)
     try:

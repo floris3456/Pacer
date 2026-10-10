@@ -13,8 +13,8 @@
 #
 # Docker objects (all removed at exit): network pacer-rehearsal-net (internal), containers
 # pacer-rehearsal-{upstream,caddy,cpa}, transient pacer-rehearsal-tmp-*, image
-# pacer-rehearsal-cpa:pacer-bb27d121, and only the BuildKit cache records created by this session.
-set -euo pipefail
+# pacer-rehearsal-cpa:pacer-9f332564. BuildKit cache is retained (shared ownership).
+set -Eeuo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 WT=$(cd "$HERE/../.." && pwd)
@@ -23,17 +23,17 @@ RH=$PACER/.cache/rehearsal
 SESSION=$(date -u +%Y%m%dT%H%M%SZ)
 EVID=$PACER/evidence/implementation/phase1-rehearsal/session-$SESSION
 NATIVE=$PACER/.cache/native
-CPA_BIN=$NATIVE/cpa-bb27d121-cgo-linux-amd64
-PACER_DIST=$NATIVE/src-pacer-55fa5ac-1/dist/linux_amd64
+CPA_BIN=$NATIVE/cpa-9f332564-cgo-linux-amd64
+PACER_DIST=$NATIVE/src-pacer-0efd99c-1/dist/linux_amd64
 QH_LIB=$(cd "$PACER/../quota-switch-compaction/artifacts/release-0.1.5-local.1" && pwd)/quota-handoff-v0.1.5-local.1.so
 SNIPPET_SRC=$(cd "$PACER/../credential-handoff/config" && pwd)/cliproxyapi-quota-handoff.Caddyfile
 UPSTREAM_PY=$WT/tests/lab/upstream.py
 BASE_IMAGE=cliproxyapi-opus55:20261007-13
-NEW_IMAGE=pacer-rehearsal-cpa:pacer-bb27d121
+NEW_IMAGE=pacer-rehearsal-cpa:pacer-9f332564
 TOOL_IMAGE=python:3.12-slim
 CADDY_IMAGE=caddy:2.10.2-alpine
 NET=pacer-rehearsal-net
-TAG=pacer-phase1-55fa5ac-bb27d121
+TAG=pacer-phase1-0efd99c-9f332564
 RUNS=${1:-2}
 LEGACY=/v0/resource/plugins/quota-handoff/events
 FIXTURE=http://pacer-rehearsal-upstream.orb.local:8080
@@ -43,6 +43,8 @@ PY=$RH/venv/bin/python
 FAILED=0
 CACHE_BEFORE=$RH/buildcache-before.txt
 CACHE_LEFT=
+OWNED=()
+OWN_NET=
 
 mkdir -p "$RH" "$EVID"
 LOG=$EVID/rehearsal.log
@@ -54,23 +56,34 @@ die() { log "ABORT: $*"; FAILED=1; collect; exit 1; }
 
 docker_names() { docker "$@" 2>/dev/null | grep -E '^pacer-rehearsal(-|:)' || true; }
 
-teardown() {  # remove every pacer-rehearsal-* Docker object
-  docker_names ps -a --format '{{.Names}}' | xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker network rm "$NET" >/dev/null 2>&1 || true
+teardown() {  # exact session-owned IDs only, after application and kernel-idle proof
+  [[ ${#OWNED[@]} == 0 ]] && return 0
+  local current
+  current=$(docker inspect --format '{{.Id}} {{index .Config.Labels "pacer.rehearsal"}}' pacer-rehearsal-cpa 2>/dev/null) || return 1
+  [[ ${current#* } == "$SESSION" ]] || return 1
+  OWNED[2]=${current%% *}
+  if ! "$PY" -B -c 'import runpy,sys; p=runpy.run_path(sys.argv[1]); s=p["sample"](); sys.exit(0 if s["caddy_inflight"] == 0 and s["plugin_open"] == 0 and s.get("observation_inflight",0) == 0 else 1)' "$RELEASE/phase1.py"; then
+    log 'cleanup deferred: replica idleness not proven; retaining containers and files'
+    return 1
+  fi
+  local id
+  for id in "${OWNED[@]}"; do
+    [[ $(docker inspect --format '{{index .Config.Labels "pacer.rehearsal"}}' "$id") == "$SESSION" ]] || return 1
+  done
+  # CPA first, then Caddy and its fixture. No force removal and no name-based kill.
+  for ((i=${#OWNED[@]}-1;i>=0;i--)); do
+    id=${OWNED[$i]}
+    docker stop --time 30 "$id" >/dev/null || return 1
+    [[ $(docker inspect --format '{{.State.Running}} {{.State.Pid}}' "$id") == 'false 0' ]] || return 1
+    docker rm "$id" >/dev/null || return 1
+  done
+  OWNED=()
+  if [[ -n $OWN_NET ]]; then docker network rm "$OWN_NET" >/dev/null || return 1; OWN_NET=; fi
   docker image rm "$NEW_IMAGE" >/dev/null 2>&1 || true
 }
 
 prune_build_cache() {  # only cache records that did not exist before this session
-  [[ -f $CACHE_BEFORE ]] || return 0
-  docker buildx du --verbose 2>/dev/null | awk '/^ID:/{print $2}' | sort >"$RH/buildcache-after.txt"
-  local id n=0
-  for id in $(comm -13 "$CACHE_BEFORE" "$RH/buildcache-after.txt"); do
-    # --all is needed for records shared with the image store; the id filter keeps it to this record.
-    docker buildx prune -f --all --filter "id=$id" >/dev/null 2>&1 && n=$((n + 1))
-  done
-  docker buildx du --verbose 2>/dev/null | awk '/^ID:/{print $2}' | sort >"$RH/buildcache-after.txt"
-  CACHE_LEFT=$(comm -13 "$CACHE_BEFORE" "$RH/buildcache-after.txt" | tr '\n' ' ')
-  log "build cache: pruned $n record(s) created by this session; remaining new: ${CACHE_LEFT:-none}"
+  log 'shared BuildKit cache retained; timestamp difference is not ownership proof'
 }
 
 leftovers() {
@@ -83,25 +96,27 @@ leftovers() {
 cleanup() {
   local rc=$?
   set +e
+  if [[ $rc != 0 ]]; then FAILED=1; collect; fi
   if [[ $FAILED != 0 && ${KEEP:-0} == 1 ]]; then
     log "KEEP=1: leaving the failed replica and containers in place under $RH"
     return
   fi
-  teardown
+  teardown || { log 'cleanup incomplete: owned replica retained for diagnosis'; exit 1; }
   prune_build_cache
   local left
   left=$(leftovers)${CACHE_LEFT:+ build-cache:$CACHE_LEFT}
   if [[ -n $left ]]; then
     log "LEFTOVER Docker objects: $left"
   else
-    log "cleanup: no pacer-rehearsal-* containers, networks, images, volumes or session build-cache records remain"
+    log "cleanup: no pacer-rehearsal-* containers, networks, images or volumes remain; shared cache retained"
   fi
-  rm -rf "$RH"/run-* "$CACHE_BEFORE" "$RH/buildcache-after.txt"
+  # Private fixture files/receipts are retained; no broad deletion of earlier runs.
   printf '{"session": "%s", "failed": %s, "leftovers": %s}\n' "$SESSION" "$FAILED" \
     "$([[ -z $left ]] && echo '[]' || echo '"see log"')" >"$EVID/cleanup.json"
   exit $rc
 }
 trap cleanup EXIT
+trap 'log "failed command at line $LINENO (exit $?)"' ERR
 
 # ------------------------------------------------------------------ preflight
 for f in "$CPA_BIN" "$PACER_DIST/pacer-v0.2.0-dev.so" "$PACER_DIST/pacer-state" "$QH_LIB" "$SNIPPET_SRC" "$UPSTREAM_PY"; do
@@ -115,7 +130,7 @@ if [[ ! -x $PY ]] || ! "$PY" -c 'import yaml' 2>/dev/null; then
   /usr/bin/python3 -m venv "$RH/venv"
   "$RH/venv/bin/pip" install --no-cache-dir --disable-pip-version-check -q pyyaml
 fi
-[[ -z $(leftovers) ]] || { log "removing leftovers from an earlier session: $(leftovers | tr '\n' ' ')"; teardown; }
+[[ -z $(leftovers) ]] || { log 'refusing existing rehearsal Docker objects; ownership is unknown'; exit 1; }
 # A kept (KEEP=1) failed session leaves its snapshot so its build cache is still pruned later.
 [[ -f $CACHE_BEFORE ]] || docker buildx du --verbose 2>/dev/null | awk '/^ID:/{print $2}' | sort >"$CACHE_BEFORE"
 log "session $SESSION: $RUNS run(s); evidence $EVID"
@@ -309,8 +324,8 @@ EOF
 }
 
 build_replica() {
-  RUNDIR=$RH/run-$RUN
-  rm -rf "$RUNDIR"
+  RUNDIR=$RH/run-$SESSION-$RUN
+  [[ ! -e $RUNDIR ]] || die 'run directory already exists'
   ROOT=$RUNDIR/opt/cliproxyapi
   CADDY=$RUNDIR/etc/caddy
   TLS=$RUNDIR/tls
@@ -356,6 +371,8 @@ services:
     image: cliproxyapi-opus55:20261007-13
     platform: linux/amd64
     container_name: pacer-rehearsal-cpa
+    labels:
+      pacer.rehearsal: "${PACER_REHEARSAL_SESSION:?}"
     restart: unless-stopped
     environment:
       - SSL_CERT_FILE=/etc/pacer-rehearsal/ca.pem
@@ -420,6 +437,7 @@ http://:8080 {
 EOF
 
   export COMPOSE_PROJECT_NAME=pacer-rehearsal
+  export PACER_REHEARSAL_SESSION=$SESSION
   export PHASE1_REHEARSAL=1 PHASE1_ROOT=$ROOT PHASE1_CADDY_DIR=$CADDY
   export PHASE1_CADDY_CMD="docker exec pacer-rehearsal-caddy caddy" PHASE1_CADDY_CONFIG_ARG=/etc/caddy/Caddyfile
   export PHASE1_CADDY_ADMIN=http://pacer-rehearsal-caddy.orb.local:2019 PHASE1_CADDY_UPSTREAM=pacer-rehearsal-cpa:8317
@@ -449,13 +467,14 @@ usage_has_credentials() {
 }
 
 start_replica() {
-  docker network create --internal "$NET" >/dev/null
-  docker run -d --name pacer-rehearsal-upstream --network "$NET" --network-alias api.anthropic.com \
+  OWN_NET=$(docker network create --internal --label "pacer.rehearsal=$SESSION" "$NET")
+  OWNED+=("$(docker run -d --name pacer-rehearsal-upstream --label "pacer.rehearsal=$SESSION" --network "$NET" --network-alias api.anthropic.com \
     --network-alias console.anthropic.com --pull never -e FIXTURE_CERT=/tls/cert.pem -e FIXTURE_KEY=/tls/key.pem \
-    -v "$TLS:/tls:ro" -v "$UPSTREAM_PY:/app/upstream.py:ro" "$TOOL_IMAGE" python -B /app/upstream.py >/dev/null
-  docker run -d --name pacer-rehearsal-caddy --network "$NET" --pull never -v "$CADDY:/etc/caddy" \
-    "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+    -v "$TLS:/tls:ro" -v "$UPSTREAM_PY:/app/upstream.py:ro" "$TOOL_IMAGE" python -B /app/upstream.py)")
+  OWNED+=("$(docker run -d --name pacer-rehearsal-caddy --label "pacer.rehearsal=$SESSION" --network "$NET" --pull never -v "$CADDY:/etc/caddy" \
+    "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile --adapter caddyfile)")
   (cd "$ROOT" && docker compose up -d --pull never >/dev/null 2>"$OUT/compose-up.err")
+  OWNED+=("$(docker inspect --format '{{.Id}}' pacer-rehearsal-cpa)")
   wait_for 60 fixture curl -sf --max-time 3 "$FIXTURE/health"
   wait_for 60 'caddy admin' curl -sf --max-time 3 http://pacer-rehearsal-caddy.orb.local:2019/reverse_proxy/upstreams
   wait_for 180 'incumbent CPA health' curl -sf --max-time 3 "$CPA/healthz"
@@ -502,8 +521,31 @@ one_run() {
     *) STYLE=b INJECT_CHECK=usage_view_public INJECT_STEP=step:caddy_reloaded ;;
   esac
   build_replica
+  # A small prepared report artifact exercises startup and the actual usage view.
+  # The same CLI used for the production import prepares checked-in synthetic data.
+  "$PY" -B - "$WT" "$RUNDIR" <<'EOF'
+import gzip, hashlib, json, pathlib, sqlite3, sys
+wt, root = map(pathlib.Path, sys.argv[1:])
+p = root / 'fixture'; p.mkdir(mode=0o700)
+(p / 'prepared').mkdir(mode=0o700)
+db = sqlite3.connect(str(p / 'usage.sqlite'))
+db.executescript(gzip.open(wt / 'internal/historyreports/testdata/historical-golden/historical-fixture.sql.gz', 'rt').read())
+book = next(json.loads(r[0]) for r in db.execute('SELECT payload FROM analytics_normalization_rules') if json.loads(r[0]).get('policy') == 'profile-api-value-v3')
+book.pop('historical', None)
+(p / 'book.json').write_text(json.dumps({'id': 'rehearsal-unqualified', 'book': book, 'qualifications': []}))
+db.close(); (p / 'usage.sqlite').chmod(0o400)
+b = dict(schema='cpamp-usage-v3', snapshot_sha256=hashlib.sha256((p / 'usage.sqlite').read_bytes()).hexdigest(), lineage_sha256='a'*64, checkpoint_sha256='c'*64, h_ms=1790812800000, events_through=240, observations_through=65)
+(p / 'boundary.json').write_text(json.dumps(b))
+EOF
+  if [[ -n ${PACER_REHEARSAL_BOOK:-} ]]; then cp "$PACER_REHEARSAL_BOOK" "$RUNDIR/fixture/book.json"; fi
+  docker run --rm --pull=never --platform linux/amd64 --network none -v "$RUNDIR/fixture:/fixture" -v "$PACER_DIST:/tools:ro" \
+    --entrypoint /bin/sh "$BASE_IMAGE" -c '/tools/history-import --source /fixture/usage.sqlite --store /fixture/archive.sqlite --manifest /fixture/boundary.json --frozen --batch 1000 && /tools/pacer-state prepare-reports --archive /fixture/archive.sqlite --output-dir /fixture/prepared && /tools/pacer-state forward-init --output /fixture/forward.sqlite --book-json /fixture/book.json' >"$OUT/fixture.out"
+  BOOK_DIGEST=$(tail -n 1 "$OUT/fixture.out" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["forward_report_book"])')
+  REPORTS=$("$PY" -c 'import json,sys; print(next(json.loads(l)["artifact_path"] for l in open(sys.argv[1]) if "artifact_path" in json.loads(l)))' "$OUT/fixture.out")
+  REPORTS="$RUNDIR/fixture/${REPORTS#/fixture/}"
   step bundle 0 "$PY" -B "$HERE/phase1.py" bundle --out "$RELEASE" --release-path "$RELEASE" \
-    --cpa-binary "$CPA_BIN" --pacer-dist "$PACER_DIST" --qh-lib "$QH_LIB"
+    --cpa-binary "$CPA_BIN" --pacer-dist "$PACER_DIST" --qh-lib "$QH_LIB" \
+    --reports "$REPORTS" --book-json "$RUNDIR/fixture/book.json" --book-digest "$BOOK_DIGEST"
   start_replica
 
   step recon 0 p1 recon
@@ -588,6 +630,8 @@ one_run() {
   step verify-final 0 p1 verify
 
   collect
+  # Compose recreated this owned labelled service during each swap.
+  OWNED[2]=$(docker inspect --format '{{.Id}}' pacer-rehearsal-cpa)
   teardown
   log "run $RUN: complete"
 }
