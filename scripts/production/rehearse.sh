@@ -25,7 +25,7 @@ EVID=$PACER/evidence/implementation/phase1-rehearsal/session-$SESSION
 NATIVE=$PACER/.cache/native
 CPA_BIN=$NATIVE/cpa-9f332564-cgo-linux-amd64
 PACER_DIST=$NATIVE/src-pacer-0efd99c-1/dist/linux_amd64
-QH_LIB=$(cd "$PACER/../quota-switch-compaction/artifacts/release-0.1.5-local.1" && pwd)/quota-handoff-v0.1.5-local.1.so
+QH_LIB=$NATIVE/quota-handoff-v0.1.5-local.2.so
 SNIPPET_SRC=$(cd "$PACER/../credential-handoff/config" && pwd)/cliproxyapi-quota-handoff.Caddyfile
 UPSTREAM_PY=$WT/tests/lab/upstream.py
 BASE_IMAGE=cliproxyapi-opus55:20261007-13
@@ -33,7 +33,7 @@ NEW_IMAGE=pacer-rehearsal-cpa:pacer-9f332564
 TOOL_IMAGE=python:3.12-slim
 CADDY_IMAGE=caddy:2.10.2-alpine
 NET=pacer-rehearsal-net
-TAG=pacer-phase1-0efd99c-9f332564
+TAG=pacer-phase1-0efd99c-9f332564-qh2
 RUNS=${1:-2}
 LEGACY=/v0/resource/plugins/quota-handoff/events
 FIXTURE=http://pacer-rehearsal-upstream.orb.local:8080
@@ -184,7 +184,7 @@ root, caddy, backup = sys.argv[1:4]
 st = json.load(open(os.path.join(backup, 'stage.json')))
 paths = {'config': root + '/config.yaml', 'compose': root + '/docker-compose.yml',
          'snippet': caddy + '/cliproxyapi-quota-handoff.Caddyfile',
-         'qh_lib': root + '/plugins/linux/amd64/quota-handoff-v0.1.5-local.1.so'}
+         'qh_lib': root + '/plugins/linux/amd64/quota-handoff-v0.1.5-local.2.so'}
 sha = lambda p: hashlib.sha256(open(p, 'rb').read()).hexdigest()
 out = {}
 for name, path in paths.items():
@@ -307,7 +307,7 @@ plugins:
   enabled: true
   dir: /CLIProxyAPI/plugins
   configs:
-    # Credential handoff (quota-handoff 0.1.5-local.1)
+    # Credential handoff (quota-handoff 0.1.5-local.2)
     quota-handoff:
       enabled: true
       priority: 1
@@ -390,7 +390,7 @@ networks:
     external: true
 EOF
   cp "$QH_LIB" "$ROOT/plugins/linux/amd64/"
-  chmod 755 "$ROOT/plugins/linux/amd64/quota-handoff-v0.1.5-local.1.so"
+  chmod 755 "$ROOT/plugins/linux/amd64/quota-handoff-v0.1.5-local.2.so"
 
   cp "$SNIPPET_SRC" "$CADDY/cliproxyapi-quota-handoff.Caddyfile"
   printf 'request_header Authorization "Bearer %s"\n' "$MGMT_KEY" >"$CADDY/cliproxyapi-management-auth.Caddyfile"

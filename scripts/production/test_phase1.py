@@ -15,6 +15,21 @@ spec.loader.exec_module(p)
 
 
 class UsageBundle(unittest.TestCase):
+    def test_disk_reserve_counts_retained_artifacts_once_but_keeps_growth_margin(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / 'image').mkdir()
+            (root / 'reports.sqlite').write_bytes(b'reports')
+            (root / 'image/CLIProxyAPI').write_bytes(b'bin')
+            existing = root / 'installed.sqlite'
+            with patch.object(p, 'RELEASE', root), patch.object(p, 'PACER_REPORTS', existing):
+                with patch.object(p, 'image_id', return_value=None):
+                    self.assertEqual(p.stage_reserve(), 17)
+                    existing.write_bytes(b'reports')
+                    self.assertEqual(p.stage_reserve(), 10)
+                with patch.object(p, 'image_id', return_value='existing-pinned-image'):
+                    self.assertEqual(p.stage_reserve(), 7)
+
     def test_catalogue_readiness_requires_exact_incumbent_set(self):
         expected = {'sha256': p.sha_text('alias')}
         cases = [
