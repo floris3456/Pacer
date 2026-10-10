@@ -298,6 +298,7 @@ const sandbox = {
   fetch: async (path, opts) => {
     assert.equal(opts.redirect, 'error');
     assert.equal(opts.cache, 'no-store');
+    if (!opts.headers.Authorization && path.endsWith('/state')) return { ok: false, status: 401, json: async () => ({}) };
     assert.equal(opts.headers.Authorization, 'Bearer synthetic-memory-key');
     const body = opts.body ? JSON.parse(opts.body) : undefined;
     const method = opts.method || 'GET';
