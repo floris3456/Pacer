@@ -1,6 +1,6 @@
 """Pacer Phase 1+2 on CT104: Pacer replaces quota-handoff 0.1.5-local.2 (routing dry-run).
 
-CPA must run the pacer-boundary host (9f332564), so this swaps the CPA image as well as
+CPA must run the pacer-boundary host (71fb2ac4), so this swaps the CPA image as well as
 the plugin. Server phases run on CT104 with this script on stdin; nothing secret is printed:
 
   ssh <pve> 'pct exec 104 -- python3 -B - recon'                          < phase1.py
@@ -65,7 +65,7 @@ def env(name, default):
     return os.environ.get('PHASE1_' + name, default)
 
 
-TAG = 'pacer-phase1-0efd99c-9f332564-qh2'
+TAG = 'pacer-phase1-0efd99c-71fb2ac4-qh2'
 ROOT = Path(env('ROOT', '/opt/cliproxyapi'))
 RELEASE = Path(env('RELEASE', str(ROOT / 'releases' / TAG)))
 BACKUP = Path(env('BACKUP', str(ROOT / 'backups' / TAG)))
@@ -96,7 +96,7 @@ OTHERS_PREFIX = env('OTHERS_PREFIX', '')
 CPA_URL = env('CPA_URL', 'http://127.0.0.1:8317')
 PUBLIC_URL = env('PUBLIC_URL', 'https://cliproxy.boe.moe')
 OLD_IMAGE = env('OLD_IMAGE', 'cliproxyapi-opus55:20261007-13')
-NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-9f332564')
+NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-71fb2ac4')
 PLATFORM = env('PLATFORM', '')
 DOCKER_PREFIX = env('DOCKER_PREFIX', 'pacer-phase1')
 SQLITE_IMAGE = env('SQLITE_IMAGE', '')
@@ -118,8 +118,8 @@ PACER_EVENTS = '/v0/resource/plugins/pacer/events'
 TIMER = 'pacer-dry-run-daily.timer'
 UNIT_SERVICE = 'pacer-dry-run-daily.service'
 SOURCES = {'pacer': '0efd99c26b1568fe9b82bf1bed34977ca11b1487',
-           'cpa': '9f332564b5fddb12b9a524a7338952df18b72f1e'}
-PINS = {'image/CLIProxyAPI': '7df161d07f36ce54c2efc6698f168fe33652007f15ebd9a4ab4e03e5b63ad029',
+           'cpa': '71fb2ac4c01cea3676e765a01c8b5d8dfb1011bf'}
+PINS = {'image/CLIProxyAPI': '9eea70f35675070ada63ce5e62062b0e07581c6a38b4019fffed7c5826d53880',
         'pacer-v0.2.0-dev.so': 'cf137cdaa6c8a1126df13c5f0a9fc858da204f7df2a5f918d80999ce1291b010',
         'pacer-state': '80c30903018a62791131afce3b86b04007694f9d1fbf0d6b164c1a7ecd4421dd',
         'quota-handoff-v0.1.5-local.2.so': '176f68a8ce34db0f35bc30372d15bddd4348978a3905b6cd916d8a6a40a3343f'}

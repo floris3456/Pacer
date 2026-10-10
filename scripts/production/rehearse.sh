@@ -13,7 +13,7 @@
 #
 # Docker objects (all removed at exit): network pacer-rehearsal-net (internal), containers
 # pacer-rehearsal-{upstream,caddy,cpa}, transient pacer-rehearsal-tmp-*, image
-# pacer-rehearsal-cpa:pacer-9f332564. BuildKit cache is retained (shared ownership).
+# pacer-rehearsal-cpa:pacer-71fb2ac4. BuildKit cache is retained (shared ownership).
 set -Eeuo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -23,17 +23,17 @@ RH=$PACER/.cache/rehearsal
 SESSION=$(date -u +%Y%m%dT%H%M%SZ)
 EVID=$PACER/evidence/implementation/phase1-rehearsal/session-$SESSION
 NATIVE=$PACER/.cache/native
-CPA_BIN=$NATIVE/cpa-9f332564-cgo-linux-amd64
+CPA_BIN=$NATIVE/cpa-71fb2ac4-cgo-linux-amd64
 PACER_DIST=$NATIVE/src-pacer-0efd99c-1/dist/linux_amd64
 QH_LIB=$NATIVE/quota-handoff-v0.1.5-local.2.so
 SNIPPET_SRC=$(cd "$PACER/../credential-handoff/config" && pwd)/cliproxyapi-quota-handoff.Caddyfile
 UPSTREAM_PY=$WT/tests/lab/upstream.py
 BASE_IMAGE=cliproxyapi-opus55:20261007-13
-NEW_IMAGE=pacer-rehearsal-cpa:pacer-9f332564
+NEW_IMAGE=pacer-rehearsal-cpa:pacer-71fb2ac4
 TOOL_IMAGE=python:3.12-slim
 CADDY_IMAGE=caddy:2.10.2-alpine
 NET=pacer-rehearsal-net
-TAG=pacer-phase1-0efd99c-9f332564-qh2
+TAG=pacer-phase1-0efd99c-71fb2ac4-qh2
 RUNS=${1:-2}
 LEGACY=/v0/resource/plugins/quota-handoff/events
 FIXTURE=http://pacer-rehearsal-upstream.orb.local:8080
