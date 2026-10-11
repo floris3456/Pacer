@@ -212,14 +212,8 @@ func (s *Store) Observe(account, provider string, samples []Window) error {
 			if !retired {
 				next, disposition = merge(old, sample)
 			}
-			if disposition == "accepted-cycle" && !sameReset(old.Reset, next.Reset) {
-				for _, reset := range []time.Time{old.Reset, timestamp(old.Cycle)} {
-					if !reset.IsZero() {
-						if _, err := c.ExecContext(context.Background(), "INSERT OR IGNORE INTO observation_retired(account,key,reset) VALUES(?,?,?)", account, key, reset.UnixNano()); err != nil {
-							return err
-						}
-					}
-				}
+			if err := retireReplacedCycle(c, account, key, old, next, disposition); err != nil {
+				return err
 			}
 			raw, err := json.Marshal(sample)
 			if err != nil {
@@ -238,6 +232,22 @@ func (s *Store) Observe(account, provider string, samples []Window) error {
 		}
 		return s.reconcileJob(c, account, s.clock().UTC())
 	})
+}
+
+// retireReplacedCycle must share the transaction that persists next. Keep both
+// reset anchors so accumulated same-cycle corrections cannot revive an old cycle.
+func retireReplacedCycle(c *sql.Conn, account, key string, old, next Window, disposition string) error {
+	if disposition != "accepted-cycle" || sameReset(old.Reset, next.Reset) {
+		return nil
+	}
+	for _, reset := range []time.Time{old.Reset, timestamp(old.Cycle)} {
+		if !reset.IsZero() {
+			if _, err := c.ExecContext(context.Background(), "INSERT OR IGNORE INTO observation_retired(account,key,reset) VALUES(?,?,?)", account, key, reset.UnixNano()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type HistoryEntry struct {

@@ -56,14 +56,27 @@ func migrateCodexPremium(c *sql.Conn) error {
 				return err
 			}
 		}
-		next, _ := merge(old, e.window)
+		next, disposition := merge(old, e.window)
 		if old.Valid() && !e.window.Reset.IsZero() {
 			var retired int
 			if err := c.QueryRowContext(ctx, "SELECT count(*) FROM observation_retired WHERE account=? AND key IN (?,?) AND reset BETWEEN ? AND ?", e.account, key, e.key, e.window.Reset.Add(-CycleTolerance).UnixNano(), e.window.Reset.Add(CycleTolerance).UnixNano()).Scan(&retired); err != nil {
 				return err
 			}
 			if retired > 0 {
-				next = old
+				next, disposition = old, "stale-cycle"
+			}
+		}
+		if err := retireReplacedCycle(c, e.account, key, old, next, disposition); err != nil {
+			return err
+		}
+		if (disposition == "stale" || disposition == "stale-cycle") && !next.Conflict && !next.Ambiguous {
+			// A newer main row can also have superseded the alias's cycle.
+			// Reconstruct that chronological transition before deleting the
+			// alias, using normal merge rules to distinguish a proven cycle
+			// replacement from jitter, partial evidence, or a contradiction.
+			_, replacement := merge(e.window, next)
+			if err := retireReplacedCycle(c, e.account, key, e.window, next, replacement); err != nil {
+				return err
 			}
 		}
 		raw, err := json.Marshal(next)
