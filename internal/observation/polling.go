@@ -7,6 +7,46 @@ import (
 	"time"
 )
 
+// The state database is shared with the guarded measurement feed. Like the
+// physical-proof schema migration, check its old generation before executing
+// this specific additive DDL and advance only in the same write transaction.
+// Never acknowledge a pre-existing schema change or a partial polling schema.
+func openPollingSchema(c *sql.Conn) error {
+	ctx := context.Background()
+	var tables, feed int
+	if err := c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('observation_poll_profiles','observation_poll_accounts')`).Scan(&tables); err != nil {
+		return err
+	}
+	if tables == 2 {
+		return nil
+	}
+	if tables != 0 {
+		return errors.New("observation: partial polling schema")
+	}
+	if err := c.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='measurement_report_meta'`).Scan(&feed); err != nil {
+		return err
+	}
+	if feed != 0 {
+		var version int
+		var saved, current int64
+		if err := c.QueryRowContext(ctx, `SELECT version,schema_cookie,(SELECT schema_version FROM pragma_schema_version) FROM measurement_report_meta WHERE id=1`).Scan(&version, &saved, &current); err != nil {
+			return err
+		}
+		if version != 2 || saved != current {
+			return errors.New("observation: pre-existing report feed schema change")
+		}
+	}
+	if _, err := c.ExecContext(ctx, `CREATE TABLE observation_poll_profiles (profile TEXT PRIMARY KEY, seconds INTEGER NOT NULL, revision INTEGER NOT NULL);
+CREATE TABLE observation_poll_accounts (account TEXT PRIMARY KEY, seconds INTEGER NOT NULL);`); err != nil {
+		return err
+	}
+	if feed != 0 {
+		_, err := c.ExecContext(ctx, `UPDATE measurement_report_meta SET schema_cookie=(SELECT schema_version FROM pragma_schema_version) WHERE id=1 AND version=2`)
+		return err
+	}
+	return nil
+}
+
 type PollingSetting struct {
 	Seconds  int   `json:"seconds"`
 	Revision int64 `json:"revision"`

@@ -20,10 +20,6 @@ type Store struct {
 }
 
 const schema = `
-CREATE TABLE IF NOT EXISTS observation_poll_profiles (
- profile TEXT PRIMARY KEY, seconds INTEGER NOT NULL, revision INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS observation_poll_accounts (
- account TEXT PRIMARY KEY, seconds INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS observation_windows (
  account TEXT NOT NULL, key TEXT NOT NULL, provider TEXT NOT NULL, body TEXT NOT NULL,
  PRIMARY KEY(account,key));
@@ -65,6 +61,9 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 			return err
 		}
 		if err := addActivityColumn(c); err != nil {
+			return err
+		}
+		if err := openPollingSchema(c); err != nil {
 			return err
 		}
 		return migrateCodexPremium(c)
