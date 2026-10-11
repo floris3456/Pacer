@@ -31,6 +31,19 @@ try{
   const profileResponse=await page.request.post(url+'v0/management/plugins/pacer/usage/profiles',{data:{latest_only:true}});
   const profiles=(await profileResponse.json()).profiles;
   const gp=profiles.find(p=>p.name==='Gemini Pro');assert.equal(gp.active_credentials,3);
+  const claude=page.locator('.usage-card').filter({has:page.getByText('Claude Pro',{exact:true})});
+  const cp=profiles.find(p=>p.name==='Claude Pro');
+  for(const scope of new Set(cp.current.map(m=>m.scope))){
+    if(scope==='all'&&cp.pools.some(p=>p.scope===scope&&p.kind==='5h'&&!p.ended)){
+      const scoped=claude.locator('.usage-meter-group[data-scope="all"] .usage-meter-table');
+      assert.equal(await scoped.count(),1,'Reported 5-hour limit remains visible without a current reading');
+      assert.equal(await scoped.getByText('5-hour',{exact:true}).count(),1);
+      const kinds=new Set([...cp.current.filter(m=>m.scope===scope).map(m=>m.kind),...cp.pools.filter(p=>p.scope===scope&&!p.ended).map(p=>p.kind)]);
+      const accounts=new Set(cp.current.filter(m=>m.scope===scope).map(m=>m.account));
+      assert.equal(await scoped.locator('.usage-meter-mini').count(),kinds.size*accounts.size);
+      if(!cp.current.some(m=>m.scope===scope&&m.kind==='5h'))assert.equal(await scoped.locator('.usage-percent').filter({hasText:'—'}).count(),accounts.size,'Missing balances remain unknown');
+    }
+  }
   const weekly=gp.current.filter(m=>m.scope==='gemini'&&m.kind==='weekly');
   const combined=weekly.reduce((sum,m)=>sum+100-m.used_percent,0)/3;
   const geminiPool=gemini.locator('.usage-col').filter({has:page.getByText('Gemini models',{exact:true})});
@@ -48,6 +61,10 @@ try{
   assert.equal(headings.length,4);assert.equal(new Set(headings).size,1,'All four selector categories share one row');
   assert((await gemini.locator('.usage-window-change').first().innerText()).includes('→'));
   const options=gemini.locator('.usage-window-options');
+  assert.equal(await options.evaluate(n=>getComputedStyle(n).transitionDuration),'0.9s');
+  const chevron=gemini.locator('.usage-window-expand span');
+  assert.equal(await chevron.innerText(),'');
+  assert.deepEqual(await chevron.evaluate(n=>{const s=getComputedStyle(n);return [s.width,s.height,s.transitionDuration]}),['8px','8px','0.9s']);
   assert.equal(Math.round((await options.boundingBox()).height),95);
   const controls=await gemini.locator('.usage-window-controls').evaluate(n=>[...n.children].map(c=>{const r=c.getBoundingClientRect();return r.top+r.height/2}));
   assert(Math.max(...controls)-Math.min(...controls)<2,'Selection and polling controls share a row');
