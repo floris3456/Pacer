@@ -173,7 +173,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
-<section id="login"><h2>Connect to management</h2><p class="muted">Use your CPA management key, or the CPAMP administrator login when opening this page through CPAMP. Ordinary inference keys cannot administer Pacer.</p><form id="signin"><label>Management key <input id="key" type="password" autocomplete="off" required></label><button>Connect</button></form><small>The key stays in this page’s memory only. It is never stored in the browser or sent in a URL.</small></section>
+<section id="login"><h2>Connect to Pacer</h2><p class="muted">Pacer uses your existing authenticated session. If your session has expired, reload this page to sign in.</p><button id="reconnect" type="button">Retry connection</button></section>
 <div id="message" role="status" class="status" hidden></div>
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
@@ -244,7 +244,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <script>
 (() => {
   'use strict';
-  let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
+  let tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
   const pending = new Map();let allowBridge=true;
   let metadata={revision:0,keys:[],groups:[]}, metadataEdit=null;
   const root = '/v0/management/plugins/pacer';
@@ -268,7 +268,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
     if(window.parent===window||event.source!==window.parent||event.origin!==location.origin)return;
     const data=event.data;if(!data||data.version!==1)return;
     if(data.type==='pacer:bridge-disconnected'&&bridge){disconnect();return}
-    if(data.type==='pacer:bridge-ready'&&allowBridge&&!key&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
+    if(data.type==='pacer:bridge-ready'&&allowBridge&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
     if(data.type!=='pacer:response'||typeof data.id!=='string')return;
     const call=pending.get(data.id);if(!call)return;pending.delete(data.id);clearTimeout(call.timer);
     if(data.ok===true)call.resolve(data.data);else call.reject(Object.assign(Error(typeof data.error==='string'?data.error.slice(0,500):'Management request failed'),{status:data.status}));
@@ -278,8 +278,8 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
     if (!allowed.has(method+' '+path)&&!(method==='GET'&&body===undefined&&path.startsWith(profilePrefix)&&forwardDecimal(path.slice(profilePrefix.length)))) throw Error('Management operation is not allowed');
     const startedGeneration=generation;
     if(bridge){const data=await bridgeCall(path,method,body);if(startedGeneration!==generation)throw Error('Management connection changed');return data}
-    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',signal,headers:{...(key?{Authorization:'Bearer '+key}:{}),'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Object.assign(Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.'),{status:response.status})}
+    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',signal,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Object.assign(Error(response.status===401||response.status===403?'Your session is not authorized. Reload this page to sign in.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.'),{status:response.status})}
     const data=await response.json();if(startedGeneration!==generation)throw Error('Management connection changed');return data;
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
@@ -1711,10 +1711,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
-  async function showWorkspace(data){connected=true;allowBridge=false;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
-  el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await showWorkspace(await api(root+'/state'))}catch(error){key='';message(error.message,true)}};
-  async function connectProxySession(){try{await showWorkspace(await api(root+'/state'))}catch{ /* No authorized proxy session: keep the explicit key login. */ }}
-  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
+  async function showWorkspace(data){connected=true;allowBridge=false;el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
+  async function connectProxySession(){message('Connecting…');el('reconnect').disabled=true;try{await showWorkspace(await api(root+'/state'))}catch(error){message(error.message,true)}finally{el('reconnect').disabled=false}}
+  el('reconnect').onclick=()=>{if(window.parent!==window){allowBridge=true;window.parent.postMessage({type:'pacer:hello',version:1},location.origin)}else connectProxySession()};
+  function disconnect(){allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected from Pacer. Retry to reconnect through your authenticated session.')}
   el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
   el('refresh').onclick=refresh;el('filter').oninput=showModels;

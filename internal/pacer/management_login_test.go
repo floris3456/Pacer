@@ -36,6 +36,7 @@ func TestManagementProxyLogin(t *testing.T) {
 const managementLoginHarness = `
 const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
 const html=fs.readFileSync(0,'utf8'), script=html.split('<script>')[1].split('</script>')[0];
+assert(!html.includes('id="key"'));assert(!html.includes('id="signin"'));
 const settle=async()=>{for(let i=0;i<20;i++)await new Promise(r=>setImmediate(r))};
 async function scenario(status, action){
   const nodes=new Map(), calls=[], messages=[];
@@ -52,7 +53,8 @@ async function scenario(status, action){
       assert.equal(path,'/v0/management/plugins/pacer/state');
       assert.equal(opts.redirect,'error');assert.equal(opts.cache,'no-store');
       assert.equal(opts.credentials,'same-origin');
-      if(calls.length===1){assert.equal(opts.headers.Authorization,undefined);if(action==='disconnect')await new Promise(r=>release=r)}
+      assert.equal(opts.headers.Authorization,undefined);
+      if(calls.length===1&&action==='disconnect')await new Promise(r=>release=r);
       const code=calls.length===1?status:200;
       return {ok:code===200,status:code,json:async()=>({routing:{mode:'dry-run',can_activate:false},accounts:[]})};
     }};
@@ -69,11 +71,13 @@ async function scenario(status, action){
   const authorized=status===200&&action!=='disconnect';
   assert.equal(el('login').hidden,authorized);assert.equal(el('workspace').hidden,!authorized);
   if(authorized){assert.equal(el('mode').value,'dry-run');el('disconnect').onclick();await settle();assert.equal(calls.length,1);assert.equal(el('workspace').hidden,true)}
-  if(status===401){
-    el('key').value='synthetic-admin';await el('signin').onsubmit({preventDefault(){}});
-    assert.equal(calls.length,2);assert.equal(calls[1].opts.headers.Authorization,'Bearer synthetic-admin');
-    assert.equal(el('login').hidden,true);assert.equal(el('workspace').hidden,false);assert.equal(el('key').value,'');
+  if(status!==200){
+    assert.equal(el('message').hidden,false);
+    assert.equal(el('reconnect').disabled,false);
+    el('reconnect').onclick();await settle();
+    assert.equal(calls.length,2);
+    assert.equal(el('login').hidden,true);assert.equal(el('workspace').hidden,false);
   }
 }
-(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'disconnect');await scenario(200,'iframe');console.log('PASS: proxy login, refusals, manual login, disconnect race, iframe bridge')})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'disconnect');await scenario(200,'iframe');console.log('PASS: proxy login, refusals, session retry, disconnect race, iframe bridge')})().catch(e=>{console.error(e);process.exitCode=1});
 `

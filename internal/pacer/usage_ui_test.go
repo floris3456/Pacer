@@ -298,8 +298,8 @@ const sandbox = {
   fetch: async (path, opts) => {
     assert.equal(opts.redirect, 'error');
     assert.equal(opts.cache, 'no-store');
-    if (!opts.headers.Authorization && path.endsWith('/state')) return { ok: false, status: 401, json: async () => ({}) };
-    assert.equal(opts.headers.Authorization, 'Bearer synthetic-memory-key');
+    if (path.endsWith('/state')) return { ok: false, status: 401, json: async () => ({}) };
+    assert.equal(opts.headers.Authorization, undefined);
     const body = opts.body ? JSON.parse(opts.body) : undefined;
     const method = opts.method || 'GET';
     calls.push({ path, body, method });
@@ -328,7 +328,7 @@ sandbox.window.parent = sandbox.window;
 Object.defineProperty(sandbox, 'localStorage', { get() { throw Error('Persistent credentials forbidden'); } });
 Object.defineProperty(sandbox, 'sessionStorage', { get() { throw Error('Persistent credentials forbidden'); } });
 
-const hook = 'globalThis.ui={loadUsage,renderUsage,clearUsage,openInspect,openWindows,connect(){connected=true;generation++;key="synthetic-memory-key"},state(){return {currentUsageData,usageMode,usageGeneration,usageCache,connected,key}},allowed};';
+const hook = 'globalThis.ui={loadUsage,renderUsage,clearUsage,openInspect,openWindows,connect(){connected=true;generation++},state(){return {currentUsageData,usageMode,usageGeneration,usageCache,connected}},allowed};';
 const script = html.split('<script>')[1].split('</script>')[0];
 assert(script.includes('  if(window.parent!==window)'));
 vm.createContext(sandbox);
