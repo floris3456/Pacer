@@ -80,6 +80,50 @@ Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a
 
 ## How often Pacer reads meters
 
+### Per-chat next-use preview
+
+`GET /v0/resource/plugins/pacer/events?view=usage&v=1&model=<client-provider/model>`
+with `Authorization: Bearer <private chat capability>` adds `next_use` to the usage
+view. It is scoped by the existing binding capability and route; the shared API-key
+view does not expose other chats' routing preferences. The raw capability is never
+returned. Older clients can ignore this additive field.
+
+```json
+{"v":1,"at_ms":1791587233865,"expires_ms":1791587263865,
+ "candidates_at_ms":1791587200000,"mode":"dry-run","provider":"claude",
+ "model":"claude-opus-5-5","reason":"cold_move","auth":"claude-y.json",
+ "alias":"Y","forced":false}
+```
+
+This is a **proposal, not a reservation or a promise of CPA's next selection**.
+Each read reruns the same routing scorer with current observed quotas, measured
+capacity/runway, and the chat's real cache protection and in-flight state. Economic
+changes (`cold_move`) are hidden while protection is warm or unknown. Exhaustion
+at the scorer's hard floors can yield `forced_move` even while warm. It does not
+invent an exhaustion forecast from missing measurements.
+
+Candidate eligibility comes from that chat's last primary scheduler invocation
+(`candidates_at_ms`), intersected with the current discovered credential inventory.
+CPA revalidates cooldowns, model eligibility and availability on actual dispatch.
+No candidate snapshot after restart, one older than 24 hours, missing quota
+evidence, or routing off means no target. The in-memory snapshot cache is bounded.
+The `auth` and `alias` fields are absent whenever no replacement is proposed.
+
+Render **NEXT USE** separately from **LAST USED**, and explicitly label `dry-run`
+proposals: routing in this mode remains CPA's choice. Hide a preview after
+`expires_ms`, on a failed read, or when switching chat/model. Visible sidebars may
+refresh every 15 seconds. Reads only consult local state: they do not enroll,
+admit, move, compact, reserve capacity or fetch provider quotas.
+
+### Live request percentages
+
+The response interceptor observes the upstream percentage headers **before**
+building `X-Pacer-Quota`. For streaming requests this happens at header init,
+before the first content chunk. Payload chunks do no quota work. Clients should
+apply the header immediately and push their local UI update rather than waiting
+for the usage poll; auxiliary replies update meters but not the chat's LAST USED
+identity. This adds no network request per inference response.
+
 Reads of a provider's quota endpoint are Pacer's alone; clients and pages only read Pacer's copy
 ([observation-contract.md](observation-contract.md)). Claude and Codex report quota with their responses, so an
 account in use needs no reads; an idle one is read every 30 minutes, and once just after a reset. Antigravity and

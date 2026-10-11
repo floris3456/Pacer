@@ -168,5 +168,9 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	if !binding.LastUsed.IsZero() {
 		last = binding.LastUsed.Unix()
 	}
-	return resource(200, map[string]any{"protocol": 1, "view": "usage", "now": p.now().Unix(), "max_age_seconds": 3600, "all": all == "true", "provider": binding.Provider, "model": binding.Model, "current": binding.Auth, "active": active, "last_used": last, "credentials": rows})
+	view := map[string]any{"protocol": 1, "view": "usage", "now": p.now().Unix(), "max_age_seconds": 3600, "all": all == "true", "provider": binding.Provider, "model": binding.Model, "current": binding.Auth, "active": active, "last_used": last, "credentials": rows}
+	if binding.Key != "" && req.Query.Get("v") == "1" {
+		view["next_use"] = p.nextUse(binding)
+	}
+	return resource(200, view)
 }

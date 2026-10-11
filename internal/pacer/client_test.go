@@ -125,6 +125,40 @@ func TestQuotaReplyOnlyForDeclaredClients(t *testing.T) {
 	}
 }
 
+func TestStreamQuotaIsLiveAtHeadersWithNoPerTokenMeterWork(t *testing.T) {
+	f := newRoutingFixture(t, "off", false)
+	p := f.p
+	f.clock.Add(int64(time.Second))
+	req := pluginapi.RequestInterceptRequest{RequestID: "live-quota", Model: "claude-opus-5-5", Headers: http.Header{clientHeader: {"v=1; caps=quota"}}, Metadata: map[string]any{"caller_scope": "test-caller", "selected_auth_id": "a"}}
+	invoke(t, p, pluginabi.MethodRequestInterceptBefore, req)
+	invoke(t, p, pluginabi.MethodRequestInterceptAfter, req)
+	// No host call (and therefore no provider quota fetch) is needed to relay a reading.
+	host := p.Host
+	p.Host = func(method string, input any) (json.RawMessage, error) {
+		t.Errorf("live response unexpectedly called host: %s", method)
+		return host(method, input)
+	}
+	defer func() { p.Host = host }()
+	headers := http.Header{"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.625"}, "Anthropic-Ratelimit-Unified-5h-Reset": {strconv.FormatInt(p.now().Add(3*time.Hour-time.Second).Unix(), 10)}}
+	result := invoke(t, p, pluginabi.MethodResponseInterceptStreamChunk, pluginapi.StreamChunkInterceptRequest{RequestID: req.RequestID, ChunkIndex: -1, Metadata: req.Metadata, ResponseHeaders: headers}).(pluginapi.StreamChunkInterceptResponse)
+	value := decodeQuota(t, result.Headers)
+	if len(value.Windows) == 0 || value.Windows[0].Left == nil || *value.Windows[0].Left != 37.5 {
+		t.Fatal(value)
+	}
+	// Payload chunks pass through untouched: no JSON quota header, DB writes or meter polling per token.
+	headers.Set("Anthropic-Ratelimit-Unified-5h-Utilization", "0.99")
+	for i := 0; i < 100; i++ {
+		chunk := invoke(t, p, pluginabi.MethodResponseInterceptStreamChunk, pluginapi.StreamChunkInterceptRequest{RequestID: req.RequestID, ChunkIndex: i, Metadata: req.Metadata, ResponseHeaders: headers, Body: []byte("data: token\n\n")}).(pluginapi.StreamChunkInterceptResponse)
+		if len(chunk.Headers) != 0 || len(chunk.Body) != 0 || chunk.DropChunk {
+			t.Fatal(chunk)
+		}
+	}
+	current, _ := p.quotaReplyValue(p.observer, p.creds["a"], req.Model)
+	if latest := decodeQuota(t, http.Header{quotaReplyHeader: {current}}); latest.Windows[0].Left == nil || *latest.Windows[0].Left != 37.5 {
+		t.Fatal(latest)
+	}
+}
+
 func TestQuotaReplyForUsageOnlyProvider(t *testing.T) {
 	host := func(method string, input any) (json.RawMessage, error) {
 		if method == "host.auth.list" {

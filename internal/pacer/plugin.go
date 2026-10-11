@@ -126,6 +126,7 @@ type Plugin struct {
 	record             *historyreports.Record
 	priceSync          priceSync
 	requests           map[string]attempt
+	previews           map[string]routingPreviewInput
 	decisionErrors     int64
 	workerOnce         sync.Once
 	workerDone         chan struct{}
@@ -653,41 +654,14 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			}
 		}
 	}
-	accounts := []routing.Account{}
-	expected := 0.0
-	candidates := []credential{}
-	p.mu.Lock()
+	ids := make([]string, 0, len(req.Candidates))
 	for _, candidate := range req.Candidates {
-		c, ok := p.creds[candidate.ID]
-		if !ok || c.Provider != provider {
-			continue
-		}
-		candidates = append(candidates, c)
-		windows, readErr := p.observer.ReadWindows(c.Account)
-		if readErr != nil {
-			continue
-		}
-		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(provider, req.Model, windows, p.now())}
-		if report, ok := p.measurements[c.Account]; ok && p.now().Sub(report.AsOf) < time.Minute {
-			if managed {
-				prior := report.Expected(measurement.ChatRef{CallerID: selection.Scope.CallerScope, InstallationID: selection.Scope.InstallationID, SessionID: selection.Scope.SessionID, ProviderRoute: selection.Scope.ProviderRoute, Provider: provider, AccountID: c.Account, ContextEpoch: selection.ContextEpoch}, measurement.TTL(selection.TTL))
-				if prior.Known && prior.USD > expected {
-					expected = prior.USD
-				}
-			}
-			if report.SevenDay.Known {
-				account.Size = report.SevenDay.USDPerPercent
-			}
-			if report.FiveHour.Known {
-				account.ShortValue = report.FiveHour.USDPerPercent
-				account.RunwayUnknown = !report.WarmBurn.Bounded
-			}
-			if report.WarmBurn.Bounded {
-				account.WarmBurn = report.WarmBurn.HighUSDPerHour
-			}
-		}
-		accounts = append(accounts, account)
+		ids = append(ids, candidate.ID)
 	}
+	p.mu.Lock()
+	input := routingPreviewInput{At: p.now(), Provider: provider, Model: req.Model, Candidates: ids, Selection: selection, Managed: managed}
+	p.rememberPreviewLocked(key, input)
+	accounts, expected, candidates := p.routingInputsLocked(input, p.now())
 	p.mu.Unlock()
 	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active, ExpectedValue: expected}, accounts)
 	p.mu.Lock()
