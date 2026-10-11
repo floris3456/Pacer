@@ -47,6 +47,18 @@ try{
   const headings=await gemini.locator('.usage-window-category h4').evaluateAll(nodes=>nodes.map(n=>Math.round(n.getBoundingClientRect().top)));
   assert.equal(headings.length,4);assert.equal(new Set(headings).size,1,'All four selector categories share one row');
   assert((await gemini.locator('.usage-window-change').first().innerText()).includes('→'));
+  const options=gemini.locator('.usage-window-options');
+  assert.equal(Math.round((await options.boundingBox()).height),264);
+  const controls=await gemini.locator('.usage-window-controls').evaluate(n=>[...n.children].map(c=>{const r=c.getBoundingClientRect();return r.top+r.height/2}));
+  assert(Math.max(...controls)-Math.min(...controls)<2,'Selection and polling controls share a row');
+  const heights=await gemini.locator('.usage-window-option').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().height));
+  assert(heights.every(h=>h===68),'Latest marker adds no row height');
+  await gemini.getByRole('button',{name:'Show all windows',exact:true}).click();
+  await page.waitForFunction(()=>{const n=[...document.querySelectorAll('.usage-card')].find(c=>c.querySelector('.usage-profile-name')?.textContent==='Gemini Pro')?.querySelector('.usage-window-options');return n&&n.clientHeight>=n.scrollHeight-1});
+  assert((await options.boundingBox()).height>264);
+  await page.screenshot({path:'/evidence/preview-windows-expanded.png',fullPage:true});
+  await gemini.getByRole('button',{name:'Show fewer windows',exact:true}).click();
+  await page.waitForFunction(()=>{const n=[...document.querySelectorAll('.usage-card')].find(c=>c.querySelector('.usage-profile-name')?.textContent==='Gemini Pro')?.querySelector('.usage-window-options');return n&&Math.round(n.getBoundingClientRect().height)===264});
   await page.screenshot({path:'/evidence/preview-window-picker.png',fullPage:true});
   await gemini.locator('.usage-window-picker summary').click();
   const chat=page.locator('.usage-card').filter({has:page.getByText('ChatGPT Pro 20x',{exact:true})});
@@ -63,7 +75,6 @@ try{
   await chat.getByRole('button',{name:'Deselect all',exact:true}).click();
   await page.waitForFunction(()=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.textContent.includes('ChatGPT Pro 20x'));return c&&c.querySelectorAll('.usage-window-option input:enabled:checked').length===0});
   assert(await chat.locator('.usage-window-option input:disabled:checked').count()>0);
-  await chat.locator('.usage-window-picker summary').click();
   const polling=page.getByLabel('ChatGPT Pro 20x polling minutes');
   const original=await polling.inputValue();
   const changed=original==='60'?'120':'60';
@@ -74,6 +85,7 @@ try{
     assert.equal((await response).status(),200);
     await page.reload();await page.locator('#workspace').waitFor();
     await page.getByRole('button',{name:'Usage Quota',exact:true}).click();
+    await chat.locator('.usage-window-picker summary').click();
     await polling.waitFor();assert.equal(await polling.inputValue(),changed);
   }finally{
     await polling.fill(original);

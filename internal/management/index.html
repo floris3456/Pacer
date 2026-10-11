@@ -115,18 +115,30 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-picker-selection{margin-left:auto;font-size:11px;color:var(--muted)}
 .usage-picker-chevron{font-size:20px;line-height:1;transition:transform .15s}
 .usage-window-picker[open] .usage-picker-chevron{transform:rotate(180deg)}
-.usage-window-options{max-height:330px;overflow:auto;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start}
+.usage-window-options{height:264px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 420ms cubic-bezier(.4,0,.2,1)}
+.usage-window-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 0}
+.usage-window-controls>button{padding:5px 7px;font-size:11px;white-space:nowrap}
+.usage-window-controls .usage-polling{margin-left:auto;flex-wrap:nowrap;gap:5px}
+.usage-window-controls .usage-polling label{display:flex;align-items:center;gap:4px;margin:0;white-space:nowrap;font-size:11px}
+.usage-window-controls .usage-polling input{width:52px}
+.usage-window-expand{display:flex;justify-content:center;align-items:center;width:100%;height:26px;border:0;border-top:1px solid var(--line-strong);background:transparent;padding:0;color:var(--muted);border-radius:0}
+.usage-window-expand:hover{color:var(--text);border-color:var(--muted);background:var(--raised)}
+.usage-window-expand span{display:block;font-size:20px;line-height:1;transition:transform 420ms cubic-bezier(.4,0,.2,1)}
+.usage-window-expand[aria-expanded=true] span{transform:rotate(180deg)}
+@media(prefers-reduced-motion:reduce){.usage-window-options,.usage-window-expand span{transition:none}}
+@media(max-width:560px){.usage-window-controls{gap:4px}.usage-window-controls>button{font-size:10px;padding:4px}.usage-window-controls .usage-polling{gap:3px}.usage-window-controls .usage-polling label{font-size:10px;gap:2px}.usage-window-controls .usage-polling input{width:40px;padding:4px 2px}.usage-window-controls .usage-polling button{font-size:10px;padding:4px}}
 .usage-window-category{min-width:0}
 .usage-window-category h4{display:flex;flex-direction:column;justify-content:end;min-height:46px;margin:0 0 6px;padding:4px;font-size:11px;border-bottom:1px solid var(--line-strong)}
 .usage-window-category h4 span:first-child{color:var(--muted);font-weight:400}
-.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:start;padding:7px 3px;font-size:11px;line-height:1.5;border-bottom:1px solid var(--line)}
+.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:start;height:68px;padding:7px 3px;font-size:11px;line-height:1.5;border-bottom:1px solid var(--line);margin:0}
 .usage-window-option:has(input:checked){background:#27352c}
 .usage-window-option:hover{background:var(--hover)}
 .usage-window-text{display:grid;min-width:0;gap:2px}
 .usage-window-account{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .usage-window-dates{font-size:10px}
-.usage-window-change{color:var(--text);font-variant-numeric:tabular-nums;font-size:11px}
-.usage-window-badge{color:#99cbaa;font-size:9px}
+.usage-window-change{display:flex;align-items:center;white-space:nowrap;color:var(--text);font-variant-numeric:tabular-nums;font-size:10px;letter-spacing:-.2px}
+.usage-window-badge{color:#99cbaa;font-size:8px;margin-left:3px;white-space:nowrap}
+.usage-window-dates{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .usage-window-option input{margin:3px 0;width:auto}
 .usage-window-option small{display:block;color:var(--muted)}
 .usage-summary-note{font-size:12px;color:var(--muted)}
@@ -1012,9 +1024,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const details=document.createElement('details');details.className='usage-window-picker';details.dataset.profile=profile.reference;
     const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
     const summary=document.createElement('summary');summary.append(span('Windows in average','usage-picker-title'),span(chosen.size?'Latest + '+chosen.size+' selected':'Latest only','usage-picker-selection'),span('⌄','usage-picker-chevron'));details.append(summary);
-    const controls=document.createElement('div');controls.className='toolbar';
+    const controls=document.createElement('div');controls.className='usage-window-controls';
     const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true);const picker=[...document.querySelectorAll('.usage-window-picker')].find(p=>p.dataset.profile===profile.reference);if(picker)picker.open=true};
     controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
+    if(profile.polling_seconds)controls.append(profilePollingControl(profile));
     details.append(controls);
     const list=document.createElement('div');list.className='usage-window-options';
     if(!usageWindowLists.has(profile.reference))list.append(span('Loading windows…','muted'));
@@ -1033,14 +1046,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const simpleDate=ms=>ms?new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'}):'—';
       text.append(span(simpleDate(w.start_ms)+' → '+simpleDate(w.end_ms),'usage-window-dates'));
       const start=w.rate?.start_percent,end=w.rate?.end_percent??w.used_percent;
-      text.append(span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change'));
-      if(w.latest||w.excluded)text.append(span(w.latest?'Latest · included':'Excluded','usage-window-badge'));
+      const change=span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change');
+      if(w.latest||w.excluded)change.append(span(w.latest?'Latest':'Excluded','usage-window-badge'));
+      text.append(change);
       cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
       label.append(cb,text);category.append(label);
       }
       list.append(category);
     }
-    details.append(list);return details;
+    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show all windows');list.style.height=expanded?list.scrollHeight+'px':'264px'},'usage-window-expand');
+    expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','Show all windows');expand.append(span('⌄'));
+    details.append(list,expand);return details;
   }
 
   function appendRateDisplay(col, rate) {
@@ -1175,7 +1191,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function renderUsage() {
-    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.open).map(p=>[p.dataset.profile,p.querySelector('.usage-window-options')?.scrollTop||0]));
+    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.open).map(p=>[p.dataset.profile,p.querySelector('.usage-window-expand')?.getAttribute('aria-expanded')==='true']));
     el('usage-grid').replaceChildren();
     el('usage-asof').textContent = '';
     if (!currentUsageData) return;
@@ -1224,7 +1240,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       header.append(cred);
       card.append(header);
       card.append(profileWindowPicker(profile));
-      if(profile.polling_seconds)card.append(profilePollingControl(profile));
 
       if (activeCount>1&&Array.isArray(profile.current) && profile.current.length > 0) {
         card.append(profileMeters(profile));
@@ -1264,7 +1279,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         archivedGrid.append(card);
       } else el('usage-grid').append(card);
     }
-    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){picker.open=true;picker.querySelector('.usage-window-options').scrollTop=openPickers.get(picker.dataset.profile)}
+    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){picker.open=true;if(openPickers.get(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height=list.scrollHeight+'px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows')}}
   }
 
   async function openInspect(profile, pool, window) {
