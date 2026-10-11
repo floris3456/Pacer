@@ -108,6 +108,9 @@ that must not see each other's credential IDs, aliases or quota bars.
 
 ## Build and test
 
+The quota consistency changes and their regression coverage are described in
+[contribution validation](docs/contribution-validation.md).
+
 The independent historical store and native display metadata contracts are in
 [Historical preservation / keys and groups](docs/history-import.md). Its trusted
 offline importer preserves a frozen CPAMP snapshot; native Usage Quota report

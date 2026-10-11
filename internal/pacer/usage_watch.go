@@ -40,6 +40,12 @@ func (u *usageChanges) notify() {
 
 func (u *usageChanges) wait(after string, duration time.Duration, done <-chan struct{}) (string, bool) {
 	u.mu.Lock()
+	select {
+	case <-done:
+		u.mu.Unlock()
+		return "", false
+	default:
+	}
 	u.init()
 	cursor, changed := u.cursor(), u.changed
 	if duration <= 0 || after != cursor {
@@ -65,5 +71,11 @@ func (u *usageChanges) wait(after string, duration time.Duration, done <-chan st
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	// Shutdown wins when it races with a change or timeout becoming ready.
+	select {
+	case <-done:
+		return "", false
+	default:
+	}
 	return u.cursor(), true
 }

@@ -113,8 +113,8 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		return resource(200, map[string]any{"protocol": 1, "mode": "off", "primary_used": binding.PrimaryUsed, "consumed": binding.Consumed, "cursor": 0, "generation": binding.Generation, "alias": binding.Alias, "intent": "", "available": true, "windows": windows, "events": []any{}})
 	}
-	// Authenticate before waiting. Capture the cursor before reading windows:
-	// changes concurrent with this snapshot then wake the next subscription.
+	// Authenticate before waiting. Capture the cursor before reloading the
+	// binding and windows, so concurrent changes wake the next subscription.
 	var wait time.Duration
 	if raw := req.Query.Get("wait_ms"); raw != "" {
 		ms, err := strconv.Atoi(raw)
@@ -126,6 +126,16 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	cursor, ok := p.usageChanges.wait(req.Query.Get("cursor"), wait, p.workerDone)
 	if !ok {
 		return resource(503, map[string]string{"error": "usage_watch_unavailable"})
+	}
+	if req.Query.Get("auth") != "api-key" {
+		// The chat may have switched accounts or lost its capability while held.
+		// Keep this request scoped to the same caller's binding even if the
+		// capability was removed and subsequently reused by another chat.
+		current, err := p.chats.ByCapability(token, req.Query.Get("model"))
+		if err != nil || current.Key != binding.Key {
+			return resource(401, map[string]string{"error": "unauthorized"})
+		}
+		binding = current
 	}
 	p.mu.Lock()
 	creds := make([]credential, 0, len(p.creds)+len(p.usageCreds))
