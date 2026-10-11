@@ -59,6 +59,66 @@ func TestForcedSwitchCheckpointSurvivesRestartAndAuxiliaries(t *testing.T) {
 	}
 }
 
+func TestByCapabilityRequiresUniqueBindingWithinRoute(t *testing.T) {
+	for _, scope := range []string{"different-caller", "different-session"} {
+		t.Run(scope, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "state.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+			clock := func() time.Time { return now }
+			s, err := Open(db, clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const token = "client-persisted-capability-for-this-session"
+			q := Claim{Protocol: 1, Installation: "install", Session: "chat", Route: "claude/opus", Request: "request", Kind: "primary", Capability: Digest(token)}
+			first, err := s.Admit("first", Key("caller", "claude", q), Selection{Auth: "a", Account: "a", Provider: "claude"}, &q, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := q
+			other.Route = "claude/sonnet"
+			separateRoute, err := s.Admit("other-route", Key("caller", "claude", other), Selection{Auth: "c", Account: "c", Provider: "claude"}, &other, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := s.ByCapability(token, q.Route); err != nil || got != first {
+				t.Fatalf("unique protocol 1 capability failed: %#v, %v", got, err)
+			}
+			for _, lookup := range [][2]string{{"unknown-token", q.Route}, {token, "unknown-route"}} {
+				if got, err := s.ByCapability(lookup[0], lookup[1]); err == nil || got != (Binding{}) {
+					t.Fatalf("unknown capability or route returned a binding: %#v, %v", got, err)
+				}
+			}
+			caller := "caller"
+			if scope == "different-caller" {
+				caller = "another-caller"
+			} else {
+				q.Session = "another-chat"
+			}
+			second, err := s.Admit("second", Key(caller, "claude", q), Selection{Auth: "b", Account: "b", Provider: "claude"}, &q, true)
+			if err != nil || first.Key == second.Key {
+				t.Fatalf("distinct binding fixture failed: %#v, %v", second, err)
+			}
+			// Existing databases may already contain duplicates. Reopening must
+			// reject their lookup without changing admission or storage format.
+			s, err = Open(db, clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := s.ByCapability(token, q.Route); err == nil || got != (Binding{}) {
+				t.Fatalf("ambiguous capability returned a caller's binding: %#v, %v", got, err)
+			}
+			if got, err := s.ByCapability(token, other.Route); err != nil || got != separateRoute {
+				t.Fatalf("ambiguity crossed into another route: %#v, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestColdMoveNeverCompactsAndWarmthUsesRequestStart(t *testing.T) {
 	db, _ := sql.Open("sqlite3", filepath.Join(t.TempDir(), "state.sqlite"))
 	defer db.Close()

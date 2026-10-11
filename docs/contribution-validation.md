@@ -13,6 +13,9 @@ They retain protocol 1, the shared credential pool and existing routing policy.
 - Codex premium-to-main migration retires superseded cycles in either timestamp
   direction. Both reset anchors, rollback, reopen and delayed replay are covered;
   ambiguous evidence is not promoted into a proven retirement.
+- Capability reads require a unique chat/route match. Legacy clients that reused
+  one capability across callers or sessions receive the existing authorization
+  error instead of another caller's current account or routing preview.
 
 Validated on Linux amd64 with Go 1.26.9 and a C compiler:
 
@@ -27,6 +30,8 @@ The build includes the native C ABI load/register/buffer-ownership/shutdown prob
 Focused regressions live in `internal/pacer/usage_watch_test.go` and
 `internal/observation/premium_test.go`; they include cancellation, 256-waiter
 saturation, transactional failures and three overlapping caller views.
+`internal/tracker/tracker_test.go` also covers unique, ambiguous, route-separated
+and reopened capability lookups.
 
 This is local automated validation with synthetic credentials. It does not assert
 live provider behavior, identify a deployed CPA binary, or establish the schema-7

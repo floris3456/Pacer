@@ -272,9 +272,18 @@ func (s *Store) Complete(id string) { s.mu.Lock(); defer s.mu.Unlock(); delete(s
 func (s *Store) ByCapability(token, route string) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var raw []byte
-	err := s.db.QueryRow(`SELECT body FROM pacer_chats WHERE capability=? AND route=?`, Digest(token), route).Scan(&raw)
+	// Older clients may have reused a capability across callers or sessions.
+	// Require one match in a single snapshot; never choose an arbitrary caller.
+	rows, err := s.db.Query(`SELECT body FROM pacer_chats WHERE capability=? AND route=? LIMIT 2`, Digest(token), route)
 	if err != nil {
+		return Binding{}, errors.New("unknown session capability")
+	}
+	defer rows.Close()
+	var raw []byte
+	if !rows.Next() || rows.Scan(&raw) != nil {
+		return Binding{}, errors.New("unknown session capability")
+	}
+	if rows.Next() || rows.Err() != nil {
 		return Binding{}, errors.New("unknown session capability")
 	}
 	var b Binding
