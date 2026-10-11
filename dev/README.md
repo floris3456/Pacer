@@ -8,6 +8,10 @@ values. Export refuses if a current production credential appears in the copy.
 Provider quota endpoints are local TLS fixtures initialized from the snapshot's
 meter readings. The Docker network has no external route. Provider inference is
 deliberately not simulated; the fixture returns an explicit error for it.
+Quota balances remain the captured values until the next snapshot; dummy polls
+exercise freshness and scheduling, not new real provider consumption. OpenCode
+Go also synthesizes two dummy-key identities alongside the copied historical
+identities; those additional dev identities are not production accounts.
 
 Preview: **https://cliproxy.boe.moe/pacer-dev/**, behind the same PocketID and email
 allowlist as management. A development banner shows the snapshot time. Preview
@@ -45,6 +49,14 @@ preview edits is important. Snapshots are never modified by the running preview.
 
 ## Host layout and isolation
 
+Initial host prerequisites: Docker Compose, Python 3 and OpenSSL; the production
+CPA image must already exist locally. Pull `python:3.12-slim` for the preview
+services and `golang:1.26-bookworm` for builds. Run `sync`, `snapshot`, then `up`.
+Install `dev/caddy-route.caddy` as `/etc/caddy/pacer-preview.Caddyfile` and import
+it inside the existing authenticated route after PocketID/email checks and
+before the production fallback. Validate and reload Caddy. This route is already
+installed on CT104; setup requires no production CPA restart.
+
 All runtime material is under **`/opt/pacer-dev`**, outside this repository:
 
 - `source/`: synced development source and build artifacts.
@@ -55,7 +67,8 @@ All runtime material is under **`/opt/pacer-dev`**, outside this repository:
 - `current.json`, `preview.env`: the selected dev runtime and pinned host image.
 
 Compose project `pacer-preview` owns `cpa`, `providers`, `web` and an internal-only
-network. Only web port **127.0.0.1:18319** is published. Production directories are
+backend network. Only web also joins a frontend network, to publish
+**127.0.0.1:18319**; CPA and the provider fixtures have no external route. Production directories are
 never mounted. The CPA image is pinned by immutable image ID at snapshot time.
 Builder caches have their own `pacer-preview-*` volumes. The database exporter
 uses SQLite read snapshots and preserves the copied schema generation required

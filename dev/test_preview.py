@@ -17,6 +17,10 @@ snapshot, serve = module("snapshot"), module("serve")
 
 
 class PreviewTests(unittest.TestCase):
+    def test_block_yaml_for_native_plugin_key_objects(self):
+        text=snapshot.yaml_text({"api-keys":[{"value":"dummy-value"}],"enabled":True})
+        self.assertEqual(text,'api-keys:\n  - value: "dummy-value"\nenabled: true\n')
+
     def test_backup_preserves_guarded_generation_and_refuses_invalid_source(self):
         with tempfile.TemporaryDirectory() as directory:
             source, copy = Path(directory)/"source.sqlite", Path(directory)/"copy.sqlite"

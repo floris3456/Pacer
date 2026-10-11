@@ -22,6 +22,23 @@ ADMIN = "pacer-preview-admin-not-production"
 SECRET_FIELDS = {"api-key", "api_key", "access_token", "refresh_token", "id_token", "secret-key", "token"}
 
 
+def yaml_text(value, indent=0):
+    """Emit block YAML with JSON-quoted scalars (also accepted by older plugins)."""
+    lines = []
+    entries = value.items() if isinstance(value, dict) else [(None, item) for item in value]
+    for key, item in entries:
+        if key is None and isinstance(item, dict) and item:
+            block = yaml_text(item, indent+2).splitlines(keepends=True)
+            lines.append(" " * indent + "- " + block[0][indent+2:] + "".join(block[1:]))
+            continue
+        label = "-" if key is None else (key if re.fullmatch(r"[A-Za-z0-9_.-]+", key) else json.dumps(key)) + ":"
+        if isinstance(item, (dict, list)) and item:
+            lines.append(" " * indent + label + "\n" + yaml_text(item, indent+2))
+        else:
+            lines.append(" " * indent + label + " " + json.dumps(item) + "\n")
+    return "".join(lines)
+
+
 def secret_values(value, field=""):
     if isinstance(value, dict):
         return set().union(*(secret_values(v, k) for k, v in value.items())) if value else set()
@@ -55,6 +72,8 @@ def take_snapshot(root, production, key_file):
     root, production = root.resolve(), production.resolve()
     if root == production or production in root.parents:
         raise ValueError("Preview must be outside the production directory")
+    inspect = lambda: subprocess.check_output(["docker", "inspect", "--format", "{{.Image}} {{.State.StartedAt}}", "cliproxyapi"], text=True).strip().split()
+    before_process = inspect()
     key = re.search(r'Bearer\s+([^"\s]+)', key_file.read_text()).group(1)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -124,22 +143,22 @@ def take_snapshot(root, production, key_file):
     pacer = {"enabled": True, "priority": 1, "state_path": "/preview/runtime/data/state.sqlite", "report_path": "/preview/runtime/data/reports.sqlite", "forward_report_path": "/preview/runtime/data/forward-report.sqlite", "forward_report_book": plugins["pacer"]["forward_report_book"], "compact_on_switch": True, "routing": {"mode": "off"}}
     preview = {"config-version": 8, "server": {"host": "0.0.0.0", "port": 8317}, "management": {"allow-remote": True, "secret-key": ADMIN, "disable-control-panel": True}, "access": {"api-keys": ["pacer-preview-client-" + str(i+1) for i in range(len(config["access"]["api-keys"]))]}, "oauth": {"auth-dir": "/preview/runtime/auths", **{k: v for k, v in config["oauth"].items() if k in ("settings", "excluded-models", "model-alias")}}, "plugins": {"enabled": True, "dir": "/preview/runtime/plugins", "configs": {"pacer": pacer}}, "routing": {"strategy": "fill-first"}}
     if "opencode-go-cliproxyapi" in plugins:
-        preview["plugins"]["configs"]["opencode-go-cliproxyapi"] = {"enabled": True, "api-keys": [], "base-url": "https://opencode.ai/zen/go/v1", "model-prefix": plugins["opencode-go-cliproxyapi"].get("model-prefix", "")}
+        preview["plugins"]["configs"]["opencode-go-cliproxyapi"] = {"enabled": True, "api-keys": [{"value": token} for token, fixture in fixtures.items() if fixture["provider"] == "opencode-go"], "base-url": "https://opencode.ai/zen/go/v1", "model-prefix": plugins["opencode-go-cliproxyapi"].get("model-prefix", "")}
     compatibility = []
     for i, item in enumerate(config.get("api-keys", {}).get("openai-compatibility", [])):
         clean = {k:v for k,v in item.items() if k in ("name", "priority", "disabled", "prefix", "models", "excluded-models")}
-        clean.update({"base-url":"https://opencode.ai/preview-unsupported", "api-key-entries":[{"api-key":"preview-compat-"+str(i)+"-"+str(j)} for j,_ in enumerate(item.get("api-key-entries", []))]})
+        clean.update({"base-url":"https://opencode.ai/preview-unsupported", "keys":[{"api-key":"preview-compat-"+str(i)+"-"+str(j)} for j,_ in enumerate(item.get("keys", []))]})
         compatibility.append(clean)
     codex = []
     for i, item in enumerate(config.get("api-keys", {}).get("codex", [])):
-        clean = {k:v for k,v in item.items() if k in ("priority", "weight", "prefix", "models", "excluded-models", "websockets")}
-        clean.update({"api-key": "preview-codex-api-key-" + str(i), "base-url": "https://chatgpt.com/backend-api/codex"})
+        clean = {k:v for k,v in item.items() if k in ("name", "priority", "prefix", "models", "excluded-models")}
+        clean.update({"keys": [{"api-key": "preview-codex-api-key-" + str(i) + "-" + str(j), **{k:v for k,v in key.items() if k in ("weight", "websockets")}} for j,key in enumerate(item.get("keys", []))], "base-url": "https://chatgpt.com/backend-api/codex"})
         codex.append(clean)
     preview["api-keys"] = {"openai-compatibility": compatibility, "codex": codex}
     for library in (production / "plugins/linux/amd64").glob("*.so"):
         if library.name.startswith(("pacer-", "opencode-go-")):
             shutil.copy2(library, target / "plugins/linux/amd64" / library.name)
-    (target / "config.yaml").write_text(json.dumps(preview, indent=2))
+    (target / "config.yaml").write_text(yaml_text(preview))
     (target / "fixtures.json").write_text(json.dumps(fixtures, indent=2))
     # Exact current secrets are never exported, including into copied raw blobs.
     # Keep a failed snapshot private for diagnosis; do not make it runnable.
@@ -149,8 +168,8 @@ def take_snapshot(root, production, key_file):
         with path.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as content:
             if pattern.search(content):
                 raise ValueError("Snapshot contains a source credential; export refused (file: " + path.name + ")")
-    image = subprocess.check_output(["docker", "inspect", "--format", "{{.Image}}", "cliproxyapi"], text=True).strip()
-    manifest = {"snapshot": name, "snapshot_at": stamp.isoformat(), "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "cpa_image": image, "providers": providers, "credential_scan": "passed", "source": "live read-only SQLite snapshots; no production restart", "dummy_auths": len(inventory)}
+    assert inspect() == before_process, "Production runtime changed during snapshot; take a new snapshot"
+    manifest = {"snapshot": name, "snapshot_at": stamp.isoformat(), "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "cpa_image": before_process[0], "production_started_at": before_process[1], "providers": providers, "credential_scan": "passed", "source": "live read-only SQLite snapshots; no production restart", "dummy_auths": len(inventory)}
     (target / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return target, manifest
 

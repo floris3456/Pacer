@@ -1,0 +1,7 @@
+# Import INSIDE cliproxy.boe.moe's existing PocketID/email-gated route,
+# after its identity checks and before its fallback production handler.
+@pacer_preview path /pacer-dev /pacer-dev/*
+handle @pacer_preview {
+    request_header -Authorization
+    reverse_proxy 127.0.0.1:18319
+}

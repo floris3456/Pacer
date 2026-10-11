@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 
 HERE = Path(__file__).resolve().parent
 
@@ -57,6 +56,8 @@ def activate(root, snapshot=None, fresh=False):
         os.chown(path, 1000, 1000)
         os.chmod(path, 0o700 if path.is_dir() else 0o600)
     for path in (runtime / "plugins").rglob("*.so"): os.chmod(path, 0o755)
+    # The prepared report reader requires a sealed owner-read-only artifact.
+    os.chmod(runtime / "data/reports.sqlite", 0o400)
     tls = root / "tls"
     tls.mkdir(mode=0o755, exist_ok=True)
     if not (tls / "cert.pem").exists():

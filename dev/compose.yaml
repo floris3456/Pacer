@@ -2,6 +2,7 @@ name: pacer-preview
 services:
   cpa:
     image: ${CPA_IMAGE:?snapshot image required}
+    entrypoint: ["/CLIProxyAPI/CLIProxyAPI"]
     command: ["--config", "/preview/runtime/config.yaml", "--local-model"]
     user: "1000:1000"
     restart: unless-stopped
@@ -31,8 +32,9 @@ services:
     volumes:
       - ${ROOT}/source:/source:ro
       - ${RUNTIME}/manifest.json:/manifest.json:ro
-    networks: [offline]
+    networks: [offline, frontend]
     depends_on: [cpa]
 networks:
   offline:
     internal: true
+  frontend: {}
