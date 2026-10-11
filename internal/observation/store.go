@@ -20,6 +20,10 @@ type Store struct {
 }
 
 const schema = `
+CREATE TABLE IF NOT EXISTS observation_poll_profiles (
+ profile TEXT PRIMARY KEY, seconds INTEGER NOT NULL, revision INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS observation_poll_accounts (
+ account TEXT PRIMARY KEY, seconds INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS observation_windows (
  account TEXT NOT NULL, key TEXT NOT NULL, provider TEXT NOT NULL, body TEXT NOT NULL,
  PRIMARY KEY(account,key));

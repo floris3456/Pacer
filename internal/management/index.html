@@ -96,14 +96,24 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
 .usage-profile-name{font-weight:650;font-size:18px}
 .usage-meta{color:var(--muted);font-size:12px}
-.usage-meters{font-size:13px;color:var(--text);padding:12px;background:var(--field);border:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.usage-meters{font-size:12px;color:var(--text);display:flex;flex-direction:column;gap:10px}
+.usage-meter-account{display:flex;flex-direction:column;gap:4px;min-width:0}
+.usage-meter-label{color:var(--muted);overflow-wrap:anywhere;font-size:11px}
+.usage-meter-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.usage-meter-mini{display:grid;grid-template-columns:auto minmax(12px,1fr) auto;align-items:center;gap:6px;min-width:0;font-variant-numeric:tabular-nums}
+.usage-meter-mini .usage-bar{height:7px;border-radius:2px}
+.usage-meter-mini .usage-percent{font-size:11px;white-space:nowrap}
+.usage-bar.blocked>span{background:#858585}
+.usage-polling{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.usage-polling input{width:76px;padding:4px 6px}
+.usage-polling button{padding:4px 8px}
 .usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:20px}
 .usage-window-picker{display:flex;align-items:stretch;flex-direction:column;gap:6px;min-width:0}
 .usage-window-picker select{width:100%;min-width:0}
 .usage-meter{display:flex;flex-direction:column;gap:6px}
 .usage-meter-title{display:flex;justify-content:space-between;gap:12px;font-weight:600}
 .usage-bar{height:5px;background:var(--line);overflow:hidden}
-.usage-bar>span{display:block;height:100%;background:var(--text)}
+.usage-bar>span{display:block;height:100%;background:#69b982}
 .usage-metric-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .usage-pool{display:flex;flex-direction:column;gap:6px}
 .usage-pool-title{font-size:12px;font-weight:650;color:var(--text);margin-top:4px}
@@ -697,6 +707,51 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   const usageWindowLists = new Map();
   const usageProfileSelection = new Map();
   let usageWindowsCache = new WeakMap();
+  allowed.add('PATCH '+root+'/usage/polling');
+
+  function profilePollingControl(profile){
+    const form=document.createElement('form');form.className='usage-polling';
+    const label=document.createElement('label');label.textContent='Poll every ';
+    const input=document.createElement('input');input.type='number';input.min='15';input.max='1440';input.step='1';input.value=profile.polling_seconds/60;
+    input.setAttribute('aria-label',profile.name+' polling minutes');input.title='15–1440 minutes. Provider backoff still applies; activity and reset checks may run sooner.';
+    label.append(input,document.createTextNode(' min'));
+    const save=document.createElement('button');save.type='submit';save.textContent='Save';
+    form.append(label,save);
+    form.onsubmit=async event=>{
+      event.preventDefault();const minutes=Number(input.value);
+      if(!Number.isInteger(minutes)||minutes<15||minutes>1440){showUsageError('Polling must be 15–1440 whole minutes.');return}
+      save.disabled=true;
+      try{await api(root+'/usage/polling','PATCH',{profile:profile.reference,seconds:minutes*60,revision:profile.polling_revision||0});usageCache.clear();await loadUsage(true)}
+      catch(error){showUsageError(error.message)}finally{save.disabled=false}
+    };
+    return form;
+  }
+
+  function profileMeters(profile){
+    const meters=document.createElement('div');meters.className='usage-meters';
+    const groups=new Map();
+    for(const m of profile.current){const key=(m.account||m.label)+'|'+m.scope;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(m)}
+    const mini=(meter,kind,blocked)=>{
+      const row=document.createElement('div');row.className='usage-meter-mini';
+      row.append(span(kind==='weekly'?'7 day':kind==='5h'?'5 hour':'Monthly'));
+      const remaining=meter?.used_percent==null?null:Math.max(0,Math.min(100,100-meter.used_percent));
+      const bar=document.createElement('div');bar.className='usage-bar'+(blocked?' blocked':'');
+      if(remaining!==null){const fill=document.createElement('span');fill.style.width=remaining+'%';bar.append(fill);bar.setAttribute('role','meter');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-valuenow',String(remaining))}
+      const description=(meter?.label||profile.name)+' · '+(meter?.pool||'')+' '+(kind==='weekly'?'7 day':kind==='5h'?'5 hour':'Monthly');
+      bar.setAttribute('aria-label',description+' percent left');
+      row.title=meter?[meter.reset_ms?'Resets '+date(meter.reset_ms/1000):'No reset reported',meter.last_observed_ms?'Read '+date(meter.last_observed_ms/1000):'',meter.stale?'Reading is stale':'',blocked?'Unavailable while the 7-day allowance is empty':''].filter(Boolean).join(' · '):'No meter reported';
+      row.append(bar,span(remaining===null?'—':pct1(remaining)+'% left','usage-percent'));return row;
+    };
+    for(const list of [...groups.values()].sort((a,b)=>(a[0].label+'|'+a[0].scope).localeCompare(b[0].label+'|'+b[0].scope))){
+      const group=document.createElement('div');group.className='usage-meter-account';
+      group.append(span([profile.credentials>1?list[0].label:'',list[0].pool,list.some(m=>m.stale)?'stale':''].filter(Boolean).join(' · '),'usage-meter-label'));
+      const week=list.find(m=>m.kind==='weekly'),short=list.find(m=>m.kind==='5h');
+      if(week||short){const pair=document.createElement('div');pair.className='usage-meter-pair';pair.append(mini(week,'weekly',false),mini(short,'5h',week?.used_percent>=100));group.append(pair)}
+      const monthly=list.find(m=>m.kind==='monthly');if(monthly)group.append(mini(monthly,'monthly',false));
+      meters.append(group);
+    }
+    return meters;
+  }
   const usageInflight = new Map();
 
   const cleanModelName = name => (name || '').replace(/^(claude|gpt|gemini)-/, '');
@@ -929,7 +984,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       usageStat(col, formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%' + (rate.reference_name ? ' (' + rate.reference_name + ')' : ''));
     }
     if (rate.start_percent != null && rate.end_percent != null) {
-      usageStat(col, `Meter ${pct1(rate.start_percent)}% → ${pct1(rate.end_percent)}% (Δ ${pct1(rate.delta_pp)} pp)`);
+      usageStat(col, `Remaining ${pct1(100-rate.start_percent)}% → ${pct1(100-rate.end_percent)}% (Δ ${pct1(rate.delta_pp)} pp)`);
     } else if (rate.delta_pp != null) {
       usageStat(col, `Meter Δ ${pct1(rate.delta_pp)} pp`);
     }
@@ -965,8 +1020,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     } else if (!activeWindow) {
       usageStat(col, 'No recorded window');
     } else {
-      usageStat(col, activeWindow.used_percent==null?'Usage unavailable':pct1(activeWindow.used_percent)+'% used', 'usage-rate-big');
-      if(activeWindow.used_percent!=null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,activeWindow.used_percent))+'%';bar.append(fill);col.append(bar)}
+      usageStat(col, activeWindow.used_percent==null?'Balance unavailable':pct1(100-activeWindow.used_percent)+'% left', 'usage-rate-big');
+      if(activeWindow.used_percent!=null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,100-activeWindow.used_percent))+'%';bar.append(fill);col.append(bar)}
       if(activeWindow.start_ms&&activeWindow.end_ms)usageStat(col,windowSpan(activeWindow),'usage-stat muted');
       usageStat(col,activeWindow.status==='current'?'Current window':'Completed window','usage-metric-label');
       appendRateDisplay(col, activeWindow.rate || {});
@@ -1103,29 +1158,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       header.append(cred);
       card.append(header);
       if(usageMode==='latest')card.append(profileWindowPicker(profile));
+      if(profile.polling_seconds)card.append(profilePollingControl(profile));
 
       if (usageMode==='latest'&&!usageProfileSelection.has(profile.reference)&&Array.isArray(profile.current) && profile.current.length > 0) {
-        const metersDiv = document.createElement('div');
-        metersDiv.className = 'usage-meters';
-        const kinds = profile.current.map(m => m.kind + '|' + m.scope);
-        const current = [...profile.current].sort((a, b) => (a.pool ? 1 : 0) - (b.pool ? 1 : 0) || kindRank(a.kind) - kindRank(b.kind));
-        for (const meter of current) {
-          const mLine = document.createElement('div');
-          let kindLbl = (meter.pool ? meter.pool + ' ' : '') + kindTitle(meter.kind);
-          // Several accounts on one card: name the account the meter belongs to.
-          if (meter.label && kinds.filter(k => k === meter.kind + '|' + meter.scope).length > 1) kindLbl = meter.label + ' · ' + kindLbl;
-          const usedStr = meter.used_percent != null ? pct1(meter.used_percent) + '% used' : 'Unknown used';
-          const rstStr = meter.reset_ms ? 'resets ' + date(meter.reset_ms / 1000) : '';
-          const parts = [kindLbl + ' ' + usedStr];
-          if (rstStr) parts.push(rstStr);
-          if (meter.stale) parts.push('stale');
-          mLine.className='usage-meter';
-          const title=document.createElement('div');title.className='usage-meter-title';title.append(span(kindLbl),span(usedStr));
-          mLine.append(title);
-          if(rstStr||meter.stale)mLine.append(span([rstStr,meter.stale?'Reading is stale':''].filter(Boolean).join(' · '),'muted'));
-          metersDiv.append(mLine);
-        }
-        card.append(metersDiv);
+        card.append(profileMeters(profile));
       }
 
       const selected=usageProfileSelection.get(profile.reference);
@@ -1225,7 +1261,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       el('usage-inspect-meter').replaceChildren();
       const meterParts = [];
       if (data.meter.start_percent != null && data.meter.end_percent != null) {
-        meterParts.push(`${pct1(data.meter.start_percent)}% → ${pct1(data.meter.end_percent)}%`);
+        meterParts.push(`${pct1(100-data.meter.start_percent)}% → ${pct1(100-data.meter.end_percent)}% left`);
       }
       meterParts.push(`Δ ${pct1(data.meter.delta_pp)} pp`);
       meterParts.push(`${data.meter.readings} reading${data.meter.readings === 1 ? '' : 's'}`);

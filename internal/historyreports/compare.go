@@ -112,6 +112,7 @@ type ModelShare struct {
 }
 
 type CompareMeter struct {
+	Account        string   `json:"account"`
 	Kind           string   `json:"kind"`
 	Scope          string   `json:"scope"`
 	Pool           string   `json:"pool,omitempty"` // pool name ("" for the main pool)
@@ -143,17 +144,19 @@ type ComparePool struct {
 }
 
 type CompareProfile struct {
-	Reference   string         `json:"reference"`
-	Name        string         `json:"name"`
-	Provider    string         `json:"provider"`
-	Archived    bool           `json:"archived"`
-	Credentials int            `json:"credentials"`
-	FirstMS     int64          `json:"first_ms"`
-	LastMS      int64          `json:"last_ms"`
-	Lifetime    CompareTotals  `json:"lifetime"`
-	Selected    CompareTotals  `json:"selected"`
-	Current     []CompareMeter `json:"current"`
-	Pools       []ComparePool  `json:"pools"`
+	PollingSeconds  int            `json:"polling_seconds"`
+	PollingRevision int64          `json:"polling_revision"`
+	Reference       string         `json:"reference"`
+	Name            string         `json:"name"`
+	Provider        string         `json:"provider"`
+	Archived        bool           `json:"archived"`
+	Credentials     int            `json:"credentials"`
+	FirstMS         int64          `json:"first_ms"`
+	LastMS          int64          `json:"last_ms"`
+	Lifetime        CompareTotals  `json:"lifetime"`
+	Selected        CompareTotals  `json:"selected"`
+	Current         []CompareMeter `json:"current"`
+	Pools           []ComparePool  `json:"pools"`
 }
 
 type ComparePriceBook struct {
@@ -296,7 +299,7 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 		}
 		cp.Credentials = len(accounts)
 		for _, c := range p.Current {
-			cp.Current = append(cp.Current, CompareMeter{Kind: c.Kind, Scope: c.Scope, Pool: PoolLabel(c.Provider, c.Scope), Label: c.Label, UsedPercent: c.Used, ResetMS: c.Reset, LastObservedMS: c.LastObserved, Stale: c.Stale})
+			cp.Current = append(cp.Current, CompareMeter{Account: AccountRef(c.Account), Kind: c.Kind, Scope: c.Scope, Pool: PoolLabel(c.Provider, c.Scope), Label: c.Label, UsedPercent: c.Used, ResetMS: c.Reset, LastObservedMS: c.LastObserved, Stale: c.Stale})
 		}
 		newest := int64(0) // the card's newest reading of any pool
 		poolNewest := map[string]int64{}

@@ -127,6 +127,9 @@ func (p *Plugin) reconcile() {
 	if stopped {
 		return
 	}
+	if err := p.applyProfilePolling(creds); err != nil {
+		p.metricError(err)
+	}
 	for _, c := range creds {
 		select {
 		case <-p.workerDone:
