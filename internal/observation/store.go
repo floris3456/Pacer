@@ -20,6 +20,7 @@ type Store struct {
 }
 
 const schema = `
+CREATE TABLE IF NOT EXISTS observation_migrations (id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS observation_windows (
  account TEXT NOT NULL, key TEXT NOT NULL, provider TEXT NOT NULL, body TEXT NOT NULL,
  PRIMARY KEY(account,key));
@@ -63,7 +64,10 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 		if err := addActivityColumn(c); err != nil {
 			return err
 		}
-		return migrateCodexPremium(c)
+		if err := migrateCodexPremium(c); err != nil {
+			return err
+		}
+		return migrateCodexResetDrift(c)
 	}); err != nil {
 		return nil, fmt.Errorf("observation schema: %w", err)
 	}

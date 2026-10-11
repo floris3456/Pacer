@@ -101,6 +101,23 @@ An estimated reset can establish a new cycle over an older absolute reset when c
 evidence also shows replenishment with a later reset, or the preceding cycle has passed.
 It remains estimated. A relative-only correction does not downgrade an absolute deadline.
 
+Codex additionally accepts a complete, strictly newer reset correction within **60 seconds
+of the current cycle's original reset anchor**, while both deadlines remain in the future
+and remaining quota does not increase. It preserves cycle identity and source timestamps,
+stores the exact corrected deadline, and never downgrades absolute evidence to estimated
+evidence. The fixed anchor prevents successive corrections from walking the tolerance.
+This addresses observed weekly reset drift (`09:33:59` → `09:34:11` → `09:33:59`) that
+otherwise retires the live allowance and freezes its balance. Other providers retain the
+2-second rule. Replenishment, incomplete evidence and genuine retired-cycle replays do
+not qualify for this exception.
+
+On upgrade, `codex-reset-drift-v1` examines Codex windows with nearby retirement markers.
+It requires the original accepted/conflicting audit records to reconstruct the existing
+projection exactly. It removes only markers proved to have come from these corrections,
+preserving markers for genuine cycle changes and unexplained markers. Audit history is
+unchanged; the next live observation supplies the new balance. The repair and its completion
+record are committed in the same startup transaction, and repeated opens are idempotent.
+
 ### Verified parser coverage
 
 - Claude OAuth unified duration/scoped utilization and absolute reset headers; usage API

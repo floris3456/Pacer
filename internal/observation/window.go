@@ -17,6 +17,9 @@ const (
 	APISource      = "api"
 	EventSource    = "event"
 	CycleTolerance = 2 * time.Second
+	// Codex can correct the same future deadline by several seconds while the
+	// balance keeps falling. Bound corrections to the cycle's original anchor.
+	CodexResetCorrection = time.Minute
 )
 
 // Field describes the source of one value, not the time its callback finished.
@@ -178,6 +181,12 @@ func conflict(old, next Window) Window {
 // checked by the store before this function. Equal-time contradictions are never
 // settled by callback order; only strictly newer complete evidence clears them.
 func merge(old, next Window) (Window, string) {
+	return mergeWithResetCorrections(old, next, true)
+}
+
+// The migration also needs the original merge to verify the persisted audit
+// reconstructs the old projection before repairing any retirement markers.
+func mergeWithResetCorrections(old, next Window, corrections bool) (Window, string) {
 	if !old.Valid() {
 		return cycle(next), "accepted"
 	}
@@ -203,6 +212,9 @@ func merge(old, next Window) (Window, string) {
 		return cycle(next), "accepted-cycle"
 	}
 	changedReset := !old.Reset.IsZero() && !next.Reset.IsZero() && !sameReset(old.Reset, next.Reset)
+	if corrections && codexResetCorrection(old, next) {
+		changedReset = false
+	}
 	if changedReset {
 		if next.ResetEvidence.At.Before(latest(old.ObservedAt(), old.ConflictAt)) {
 			return old, "stale"
@@ -252,4 +264,19 @@ func merge(old, next Window) (Window, string) {
 		}
 	}
 	return result, disposition
+}
+
+func codexResetCorrection(old, next Window) bool {
+	if old.Provider != "codex" || next.Provider != "codex" || old.Key() != next.Key() ||
+		old.Remaining == nil || next.Remaining == nil || *next.Remaining > *old.Remaining ||
+		!next.Usage.At.Equal(next.ResetEvidence.At) || !next.Usage.At.After(latest(old.ObservedAt(), old.ConflictAt)) ||
+		!old.Reset.After(next.Usage.At) || !next.Reset.After(next.Usage.At) ||
+		(old.ResetEvidence.Quality == Absolute && next.ResetEvidence.Quality != Absolute) {
+		return false
+	}
+	anchor := timestamp(old.Cycle)
+	if anchor.IsZero() {
+		anchor = old.Reset
+	}
+	return next.Reset.Sub(anchor) <= CodexResetCorrection && anchor.Sub(next.Reset) <= CodexResetCorrection
 }
