@@ -334,10 +334,15 @@ func ApplyProfileEdit(effective cpamp.ProfileConfig, e ProfileEdit, members []st
 	}
 	switch e.Op {
 	case "create":
-		if !validProfileName(e.Name) || e.Provider == "" || len(e.Provider) > 64 || newID == "" {
+		if !validProfileName(e.Name) || e.Provider == "" || len(e.Provider) > 64 || newID == "" || e.FromMS < 0 {
 			return p, ErrInput
 		}
-		return cpamp.Profile{ID: newID, Name: strings.TrimSpace(e.Name), Provider: e.Provider, Memberships: []cpamp.ProfileMembership{}}, nil
+		created := cpamp.Profile{ID: newID, Name: strings.TrimSpace(e.Name), Provider: e.Provider, Memberships: []cpamp.ProfileMembership{}}
+		for _, account := range members {
+			created.Memberships = append(created.Memberships, cpamp.ProfileMembership{Account: account, Start: e.FromMS})
+		}
+		created.Memberships = mergeMemberships(created.Memberships)
+		return created, nil
 	}
 	if !found {
 		return p, ErrInput

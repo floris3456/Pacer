@@ -148,7 +148,7 @@ class Element {
     this.value = '';
     this._text = '';
     this.dataset = {};
-    this.style = {};
+    this.style = {setProperty(k,v){this[k]=v}};
     this.disabled = false;
     this.hidden = false;
     this.checked = false;
@@ -286,7 +286,9 @@ const sandbox = {
     getElementById: el,
     createElement: tag => new Element(tag),
     createTextNode: text => ({ textContent: text }),
-    querySelectorAll: () => []
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    addEventListener() {}
   },
   location: { origin: 'https://offline.invalid' },
   setTimeout(fn) {
@@ -295,6 +297,7 @@ const sandbox = {
     return id;
   },
   clearTimeout(id) { timers.delete(id); },
+  setInterval() { return 1; },
   fetch: async (path, opts) => {
     assert.equal(opts.redirect, 'error');
     assert.equal(opts.cache, 'no-store');
@@ -328,7 +331,7 @@ sandbox.window.parent = sandbox.window;
 Object.defineProperty(sandbox, 'localStorage', { get() { throw Error('Persistent credentials forbidden'); } });
 Object.defineProperty(sandbox, 'sessionStorage', { get() { throw Error('Persistent credentials forbidden'); } });
 
-const hook = 'globalThis.ui={loadUsage,renderUsage,clearUsage,openInspect,openWindows,connect(){connected=true;generation++},state(){return {currentUsageData,usageMode,usageGeneration,usageCache,connected}},allowed};';
+const hook = 'globalThis.ui={loadUsage,renderUsage,clearUsage,openInspect,openWindows,disconnect,connect(){connected=true;generation++},state(){return {currentUsageData,usageGeneration,usageCache,connected}},allowed};';
 const script = html.split('<script>')[1].split('</script>')[0];
 assert(script.includes('  if(window.parent!==window)'));
 vm.createContext(sandbox);
@@ -362,7 +365,7 @@ const ui = sandbox.ui;
   await ui.loadUsage();
   assert.equal(calls.filter(c=>c.path.endsWith('/usage/profiles')).length, 1, 'Initial load fetches profiles once');
   assert(calls[0].path.endsWith('/usage/profiles'));
-  assert.deepEqual(calls[0].body, {});
+   assert.deepEqual(calls[0].body, {latest_only:true,selected_windows:{}});
 
   const profilesData = JSON.parse(fs.readFileSync(process.env.USAGE_PROFILES_DATA, 'utf8'));
   assert.equal(calls.filter(c=>c.body?.all).length,profilesData.profiles.length,'Each profile gets one window list');
@@ -385,19 +388,10 @@ const ui = sandbox.ui;
     }
   }
 
-  // 5. Toggle sends no request
-  const callsBeforeToggle = calls.length;
-  el('usage-mode-average').onclick();
-  assert.equal(calls.length, callsBeforeToggle, 'Toggle to Average must NOT send an API request');
-  assert.equal(el('usage-mode-latest').getAttribute('aria-pressed'), 'false');
-  assert.equal(el('usage-mode-average').getAttribute('aria-pressed'), 'true');
-  assert.equal(ui.state().usageMode, 'average');
-
-  el('usage-mode-latest').onclick();
-  assert.equal(calls.length, callsBeforeToggle, 'Toggle to Latest must NOT send an API request');
-  assert.equal(el('usage-mode-latest').getAttribute('aria-pressed'), 'true');
-  assert.equal(el('usage-mode-average').getAttribute('aria-pressed'), 'false');
-  assert.equal(ui.state().usageMode, 'latest');
+   // 5. One average view, with per-profile selection. Session teardown remains
+   // available to the host, without manual refresh/disconnect controls.
+   for(const id of ['usage-mode-average','usage-mode-latest','refresh','disconnect'])assert(!nodes.has(id));
+   assert(cards[0].querySelector('.usage-window-picker'));
 
   // 6. Key change sends exactly one request, cached filter sends zero
   const callsBeforeKey = calls.length;
@@ -538,7 +532,7 @@ const ui = sandbox.ui;
   assert.equal(el('usage-windows-dialog').open, false, 'Windows dialog must be closed');
 
   // 10. Disconnect clears state and cache
-  el('disconnect').onclick();
+   ui.disconnect();
   assert.equal(ui.state().currentUsageData, null, 'Disconnect clears usage data');
   assert.equal(ui.state().usageCache.size, 0, 'Disconnect clears usage cache');
   assert.equal(el('usage-asof').textContent, '', 'Disconnect clears the as-of line');

@@ -29,6 +29,9 @@ type CompareQuery struct {
 	// From and Through are inclusive UTC days, YYYY-MM-DD.
 	From    string `json:"from,omitempty"`
 	Through string `json:"through,omitempty"`
+	// Request-local rate selection; latest windows always remain included.
+	SelectedWindows map[string][]string `json:"selected_windows,omitempty"`
+	LatestOnly      bool                `json:"latest_only,omitempty"`
 }
 
 type CompareWindowsQuery struct {
@@ -75,6 +78,8 @@ type CompareRate struct {
 }
 
 type CompareWindow struct {
+	Account           string        `json:"account"`
+	Latest            bool          `json:"latest"`
 	ID                string        `json:"id"`
 	Label             string        `json:"label"`
 	Kind              string        `json:"kind"`
@@ -144,19 +149,20 @@ type ComparePool struct {
 }
 
 type CompareProfile struct {
-	PollingSeconds  int            `json:"polling_seconds"`
-	PollingRevision int64          `json:"polling_revision"`
-	Reference       string         `json:"reference"`
-	Name            string         `json:"name"`
-	Provider        string         `json:"provider"`
-	Archived        bool           `json:"archived"`
-	Credentials     int            `json:"credentials"`
-	FirstMS         int64          `json:"first_ms"`
-	LastMS          int64          `json:"last_ms"`
-	Lifetime        CompareTotals  `json:"lifetime"`
-	Selected        CompareTotals  `json:"selected"`
-	Current         []CompareMeter `json:"current"`
-	Pools           []ComparePool  `json:"pools"`
+	PollingSeconds    int            `json:"polling_seconds"`
+	PollingRevision   int64          `json:"polling_revision"`
+	Reference         string         `json:"reference"`
+	Name              string         `json:"name"`
+	Provider          string         `json:"provider"`
+	Archived          bool           `json:"archived"`
+	Credentials       int            `json:"credentials"`
+	ActiveCredentials int            `json:"active_credentials"`
+	FirstMS           int64          `json:"first_ms"`
+	LastMS            int64          `json:"last_ms"`
+	Lifetime          CompareTotals  `json:"lifetime"`
+	Selected          CompareTotals  `json:"selected"`
+	Current           []CompareMeter `json:"current"`
+	Pools             []ComparePool  `json:"pools"`
 }
 
 type ComparePriceBook struct {
@@ -250,7 +256,23 @@ func compareRate(n *cpamp.ProfileNormalization) CompareRate {
 }
 
 func compareWindow(w cpamp.QuotaUsageWindow) CompareWindow {
-	return CompareWindow{ID: w.ID, Label: w.Label, Kind: w.Kind, Scope: w.Scope, StartMS: w.Start, ResetMS: w.Reset, EndMS: w.AttributionEnd, Status: w.Status, UsedPercent: w.Used, Rate: compareRate(w.Normalization), Selected: compareTotals(w.Selected), AccountValue: compareTotals(w.AccountUsage), TokenSharePercent: w.TokenShare}
+	return CompareWindow{Account: AccountRef(w.Account), ID: w.ID, Label: w.Label, Kind: w.Kind, Scope: w.Scope, StartMS: w.Start, ResetMS: w.Reset, EndMS: w.AttributionEnd, Status: w.Status, UsedPercent: w.Used, Rate: compareRate(w.Normalization), Selected: compareTotals(w.Selected), AccountValue: compareTotals(w.AccountUsage), TokenSharePercent: w.TokenShare}
+}
+
+func latestProfileWindows(p cpamp.SavedProfileUsage) map[string]bool {
+	out, seen := map[string]bool{}, map[string]bool{}
+	newest := int64(0)
+	for _, w := range p.Windows {
+		newest = max(newest, w.LastObserved)
+	}
+	for _, w := range p.Windows { // facts are newest first
+		key := w.Account + "|" + w.Kind + "|" + w.Scope
+		if !seen[key] && newest-w.LastObserved <= 3*dayMS {
+			out[w.ID] = true
+		}
+		seen[key] = true
+	}
+	return out
 }
 
 func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclusions) (*cpamp.QuotaFacts, Workspace, error) {
@@ -270,6 +292,46 @@ func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclus
 	})
 	if e != nil {
 		return nil, Workspace{}, domainError(ctx, e)
+	}
+	if q.LatestOnly || len(q.SelectedWindows) > 0 {
+		if len(q.SelectedWindows) > 256 {
+			return nil, Workspace{}, ErrInput
+		}
+		selected := map[string]map[string]bool{}
+		for _, c := range usageCards(w) {
+			ids, ok := q.SelectedWindows[c.reference]
+			if !ok && !q.LatestOnly {
+				continue
+			}
+			if len(ids) > 10000 {
+				return nil, Workspace{}, ErrInput
+			}
+			keep := latestProfileWindows(c.usage)
+			valid := map[string]bool{}
+			for _, win := range c.usage.Windows {
+				valid[win.ID] = true
+			}
+			for _, id := range ids {
+				if !valid[id] {
+					return nil, Workspace{}, ErrInput
+				}
+				keep[id] = true
+			}
+			selected[c.reference] = keep
+		}
+		for ref := range q.SelectedWindows {
+			if selected[ref] == nil {
+				return nil, Workspace{}, ErrInput
+			}
+		}
+		w, e = cpamp.FactsView(ctx, facts, "", "", "", q.Key, from, to, func(profileID, windowID string) bool {
+			ref := "profile:" + hash(profileID)
+			keep, filtered := selected[ref]
+			return ex.has(ref, windowID) || (filtered && !keep[windowID])
+		})
+		if e != nil {
+			return nil, Workspace{}, domainError(ctx, e)
+		}
 	}
 	return facts, w, nil
 }
@@ -298,6 +360,13 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 			accounts[m.Account] = true
 		}
 		cp.Credentials = len(accounts)
+		active := map[string]bool{}
+		for _, m := range p.Periods {
+			if m.Start <= facts.Filter.At && (m.End == 0 || m.End > facts.Filter.At) {
+				active[m.Account] = true
+			}
+		}
+		cp.ActiveCredentials = len(active)
 		for _, c := range p.Current {
 			cp.Current = append(cp.Current, CompareMeter{Account: AccountRef(c.Account), Kind: c.Kind, Scope: c.Scope, Pool: PoolLabel(c.Provider, c.Scope), Label: c.Label, UsedPercent: c.Used, ResetMS: c.Reset, LastObservedMS: c.LastObserved, Stale: c.Stale})
 		}
@@ -384,9 +453,12 @@ func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex E
 			continue
 		}
 		out := CompareWindowList{Version: CompareVersion, Query: q.CompareQuery, Profile: q.Profile, Kind: q.Kind, Scope: q.Scope, Windows: []CompareWindow{}}
+		latest := latestProfileWindows(p)
 		for _, win := range p.Windows {
 			if q.All || win.Kind == q.Kind && win.Scope == q.Scope {
-				out.Windows = append(out.Windows, r.usageWindow(facts, card, keys, win, ex[q.Profile]))
+				cw := r.usageWindow(facts, card, keys, win, ex[q.Profile])
+				cw.Latest = latest[win.ID]
+				out.Windows = append(out.Windows, cw)
 			}
 		}
 		return out, nil

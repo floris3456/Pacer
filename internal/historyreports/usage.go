@@ -354,8 +354,13 @@ func (r *Reader) Inspect(ctx context.Context, q InspectQuery, ex Exclusions) (In
 				}
 			}
 			if len(windowIDs) == 0 { // nothing measured: still show the mix of every counted window
+				ids, filtered := q.SelectedWindows[ref]
+				keep := latestProfileWindows(p)
+				for _, id := range ids {
+					keep[id] = true
+				}
 				for _, win := range p.Windows {
-					if win.Kind == q.Kind && win.Scope == q.Scope && !ex.has(ref, win.ID) {
+					if win.Kind == q.Kind && win.Scope == q.Scope && !ex.has(ref, win.ID) && (!(filtered || q.LatestOnly) || keep[win.ID]) {
 						windowIDs = append(windowIDs, win.ID)
 					}
 				}

@@ -90,8 +90,8 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
 .usage-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .usage-toggle button+button{border-left:1px solid var(--line-strong)}
-.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:20px;margin:20px 0}
-.usage-card{border:1px solid var(--line-strong);background:var(--surface);color:var(--text);padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:20px;margin:20px 0;align-items:start}
+.usage-card{border:1px solid var(--line-strong);background:var(--surface);color:var(--text);padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .usage-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;background:transparent;color:var(--text);border:0}
 .usage-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
 .usage-profile-name{font-weight:650;font-size:18px}
@@ -100,14 +100,29 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-meter-account{display:flex;flex-direction:column;gap:4px;min-width:0}
 .usage-meter-label{color:var(--muted);overflow-wrap:anywhere;font-size:11px}
 .usage-meter-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
-.usage-meter-mini{display:grid;grid-template-columns:auto minmax(12px,1fr) auto;align-items:center;gap:6px;min-width:0;font-variant-numeric:tabular-nums}
+.usage-meter-mini{display:grid;grid-template-columns:minmax(24px,1fr) 42px;align-items:center;gap:6px;min-width:0;font-variant-numeric:tabular-nums}
+.usage-meter-table{display:grid;grid-template-columns:repeat(var(--meter-columns),minmax(0,1fr)) minmax(75px,.65fr);align-items:center;gap:8px 16px;width:100%}
+.usage-meter-heading{color:var(--muted);font-size:12px}
+.usage-meter-family{grid-column:1/-1;font-size:13px;font-weight:600;margin-top:2px}
+.usage-meter-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.usage-meter-mini .usage-percent{text-align:right}
+.usage-meter-group+.usage-meter-group{margin-top:14px}
+.usage-window-picker{margin:0;padding:0}
+.usage-window-picker summary{cursor:pointer;font-size:13px;padding:8px 0}
+.usage-window-options{max-height:250px;overflow:auto;display:grid;gap:3px;border-top:1px solid var(--line);padding-top:8px}
+.usage-window-option{display:grid;grid-template-columns:18px 1fr;gap:8px;align-items:start;padding:6px;font-size:12px;line-height:1.5}
+.usage-window-option input{margin:3px 0;width:auto}
+.usage-window-option small{display:block;color:var(--muted)}
+.usage-summary-note{font-size:12px;color:var(--muted)}
+.usage-details{margin:2px 0;font-size:12px}
+.usage-details summary{cursor:pointer;color:var(--muted)}
 .usage-meter-mini .usage-bar{height:7px;border-radius:2px}
 .usage-meter-mini .usage-percent{font-size:11px;white-space:nowrap}
 .usage-bar.blocked>span{background:#858585}
 .usage-polling{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .usage-polling input{width:76px;padding:4px 6px}
 .usage-polling button{padding:4px 8px}
-.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:20px}
+.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(120px,100%),1fr));gap:14px}
 .usage-window-picker{display:flex;align-items:stretch;flex-direction:column;gap:6px;min-width:0}
 .usage-window-picker select{width:100%;min-width:0}
 .usage-meter{display:flex;flex-direction:column;gap:6px}
@@ -136,6 +151,29 @@ pre,code,kbd,samp{background:var(--field)}
 .manage-row select,.manage-row input{min-width:0;max-width:100%}
 .manage-logins{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid var(--line)}
 .manage-section{margin:14px 0}
+.manage-nav{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 22px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.manage-nav [aria-current=page]{background:var(--line-strong);color:var(--text)}
+.manage-intro{display:block;color:var(--muted);margin-bottom:18px;line-height:1.6}
+.manage-profile-row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:18px 0;border-bottom:1px solid var(--line)}
+.manage-profile-row>div{display:grid;gap:6px;min-width:0}
+.manage-profile-members{font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.manage-account{padding:16px 0;gap:12px}
+.manage-account-head{display:grid;gap:5px}
+.manage-row label,.manage-create-form>label{display:grid;gap:6px;font-size:13px;justify-content:stretch;margin:0}
+.manage-create-form input:not([type=checkbox]),.manage-create-form select{width:100%;max-width:100%}
+.manage-row{gap:12px;align-items:end}
+.manage-dates{flex-basis:100%;font-size:12px;color:var(--muted)}
+.manage-active{color:#8ed8a2}
+.manage-link-details{font-size:13px;margin-top:5px}
+.manage-link-details summary{cursor:pointer;color:var(--muted)}
+.manage-link-details[open]{display:grid;gap:12px;padding:12px;background:var(--surface)}
+.manage-link-details .muted{display:block;line-height:1.6;margin:12px 0}
+.manage-create-form{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.manage-create-form>button{justify-self:start}
+.manage-account-choices{grid-column:1/-1;border:1px solid var(--line);padding:14px;display:grid;gap:12px}
+.manage-account-choices label{display:flex;align-items:center;justify-content:flex-start;gap:10px;overflow-wrap:anywhere;margin:0;padding:5px 0}
+.manage-account-choices input{width:auto;margin:0}
+@media(max-width:560px){.manage-create-form{grid-template-columns:1fr}.usage-meter-table{gap:8px}.usage-meter-mini{grid-template-columns:minmax(12px,1fr) 36px;gap:3px}}
 .models-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
 .models-tabs button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .model-harness{font-size:12px;color:var(--muted)}
@@ -192,10 +230,10 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <main>
 <section id="login"><h2>Connect to Pacer</h2><p class="muted">Pacer uses your existing authenticated session. If your session has expired, reload this page to sign in.</p><button id="reconnect" type="button">Retry connection</button></section>
 <div id="message" role="status" class="status" hidden></div>
-<section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
+<section id="workspace" hidden><div class="toolbar"><span id="updated" class="muted" aria-live="off"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
-<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Single window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
+<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
 <div id="usage-status" role="status" class="status" hidden></div>
 <p id="usage-asof" class="muted"></p>
 <div id="usage-grid" class="usage-grid"></div>
@@ -700,7 +738,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('forward-profile-form').onsubmit=event=>{event.preventDefault();return forwardSaveProfile()};el('forward-profile-new').onclick=forwardNewProfile;el('forward-membership-add').onclick=()=>{try{forwardMembership()}catch(e){el('forward-profile-status').textContent=e.message}};
   const usageCache = new Map();
   let currentUsageData = null;
-  let usageMode = 'latest';
   let usageGeneration = 0;
   let usageDateTimer = null;
   const usageSelectedWindows = new Map();
@@ -730,28 +767,35 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function profileMeters(profile){
     const meters=document.createElement('div');meters.className='usage-meters';
     const groups=new Map();
-    for(const m of profile.current){const key=(m.account||m.label)+'|'+m.scope;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(m)}
+    for(const m of profile.current||[]){if(!groups.has(m.scope))groups.set(m.scope,[]);groups.get(m.scope).push(m)}
     const mini=(meter,kind,blocked)=>{
       const row=document.createElement('div');row.className='usage-meter-mini';
-      row.append(span(kind==='weekly'?'7 day':kind==='5h'?'5 hour':'Monthly'));
       const remaining=meter?.used_percent==null?null:Math.max(0,Math.min(100,100-meter.used_percent));
       const bar=document.createElement('div');bar.className='usage-bar'+(blocked?' blocked':'');
       if(remaining!==null){const fill=document.createElement('span');fill.style.width=remaining+'%';bar.append(fill);bar.setAttribute('role','meter');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-valuenow',String(remaining))}
       const description=(meter?.label||profile.name)+' · '+(meter?.pool||'')+' '+(kind==='weekly'?'7 day':kind==='5h'?'5 hour':'Monthly');
       bar.setAttribute('aria-label',description+' percent left');
       row.title=meter?[meter.reset_ms?'Resets '+date(meter.reset_ms/1000):'No reset reported',meter.last_observed_ms?'Read '+date(meter.last_observed_ms/1000):'',meter.stale?'Reading is stale':'',blocked?'Unavailable while the 7-day allowance is empty':''].filter(Boolean).join(' · '):'No meter reported';
-      row.append(bar,span(remaining===null?'—':pct1(remaining)+'% left','usage-percent'));return row;
+      row.append(bar,span(remaining===null?'—':pct1(remaining)+'%','usage-percent'));return row;
     };
-    for(const list of [...groups.values()].sort((a,b)=>(a[0].label+'|'+a[0].scope).localeCompare(b[0].label+'|'+b[0].scope))){
-      const group=document.createElement('div');group.className='usage-meter-account';
-      group.append(span([profile.credentials>1?list[0].label:'',list[0].pool,list.some(m=>m.stale)?'stale':''].filter(Boolean).join(' · '),'usage-meter-label'));
-      const week=list.find(m=>m.kind==='weekly'),short=list.find(m=>m.kind==='5h');
-      if(week||short){const pair=document.createElement('div');pair.className='usage-meter-pair';pair.append(mini(week,'weekly',false),mini(short,'5h',week?.used_percent>=100));group.append(pair)}
-      const monthly=list.find(m=>m.kind==='monthly');if(monthly)group.append(mini(monthly,'monthly',false));
-      meters.append(group);
+    for(const [scope,list] of [...groups].sort(([a],[b])=>(a==='gemini'?-1:b==='gemini'?1:a.localeCompare(b)))){
+      const kinds=[...new Set(list.map(m=>m.kind))].sort((a,b)=>kindRank(a)-kindRank(b));
+      const group=document.createElement('section');group.className='usage-meter-group';group.dataset.scope=scope;
+      const grid=document.createElement('div');grid.className='usage-meter-table';grid.style.setProperty('--meter-columns',kinds.length);
+      for(const kind of kinds)grid.append(span(kindTitle(kind),'usage-meter-heading'));
+      grid.append(span('Account','usage-meter-heading'));
+      if(list[0].pool){const title=span(list[0].pool,'usage-meter-family');grid.append(title)}
+      const accounts=[...new Set(list.map(m=>m.account))].sort((a,b)=>list.find(m=>m.account===a).label.localeCompare(list.find(m=>m.account===b).label));
+      for(const account of accounts){
+        const items=list.filter(m=>m.account===account),week=items.find(m=>m.kind==='weekly');
+        for(const kind of kinds)grid.append(mini(items.find(m=>m.kind===kind),kind,kind==='5h'&&week?.used_percent>=100));
+        const label=span(shortAccount(items[0].label),'usage-meter-name');label.title=items[0].label;grid.append(label);
+      }
+      group.append(grid);meters.append(group);
     }
     return meters;
   }
+  const shortAccount=label=>(label||'Unknown account').split('@')[0];
   const usageInflight = new Map();
 
   const cleanModelName = name => (name || '').replace(/^(claude|gpt|gemini)-/, '');
@@ -866,9 +910,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     usageProfileSelection.clear();
     usageWindowsCache = new WeakMap();
     currentUsageData = null;
-    usageMode = 'latest';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-    el('usage-mode-average').setAttribute('aria-pressed', 'false');
     el('usage-key').value = '';
     while (el('usage-key').options.length > 1) el('usage-key').remove(1);
     el('usage-from').value = '';
@@ -885,14 +926,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const keyVal = el('usage-key').value;
     const fromVal = el('usage-from').value;
     const throughVal = el('usage-through').value;
-    const cacheKey = `${keyVal}|${fromVal}|${throughVal}`;
-
-    usageSelectedWindows.clear();
-    usageWindowLists.clear();
-    usageProfileSelection.clear();
+    const selection=Object.fromEntries([...usageProfileSelection].map(([ref,ids])=>[ref,[...ids].sort()]));
+    const cacheKey = `${keyVal}|${fromVal}|${throughVal}|${JSON.stringify(selection)}`;
 
     const cached = usageCache.get(cacheKey);
-    if (cached && refreshing && Date.now() - cached.at > 60000) usageCache.delete(cacheKey);
+    if (cached && refreshing) usageCache.delete(cacheKey);
     else if (cached) {
       currentUsageData = cached.data;
       showUsageError('');
@@ -902,7 +940,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     }
 
     showUsageError('');
-    const query = {};
+    const query = {latest_only:true,selected_windows:selection};
     if (keyVal) query.key = keyVal;
     if (fromVal) query.from = fromVal;
     if (throughVal) query.through = throughVal;
@@ -951,25 +989,25 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function profileWindowPicker(profile){
-    const label=document.createElement('label');label.className='usage-window-picker';
-    label.append(document.createTextNode('Window'));
-    const select=document.createElement('select');select.setAttribute('aria-label',profile.name+' window');
-    const latest=document.createElement('option');latest.value='';latest.textContent='Latest window';select.append(latest);
-    for(const w of usageWindowLists.get(profile.reference)||[]){
-      const option=document.createElement('option');option.value=w.id;
+    const details=document.createElement('details');details.className='usage-window-picker';details.dataset.profile=profile.reference;
+    const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
+    const summary=document.createElement('summary');summary.textContent='Windows in average · latest'+(chosen.size?' + '+chosen.size+' selected':' only');details.append(summary);
+    const controls=document.createElement('div');controls.className='toolbar';
+    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true);const picker=[...document.querySelectorAll('.usage-window-picker')].find(p=>p.dataset.profile===profile.reference);if(picker)picker.open=true};
+    controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
+    details.append(controls);
+    const list=document.createElement('div');list.className='usage-window-options';
+    if(!usageWindowLists.has(profile.reference))list.append(span('Loading windows…','muted'));
+    for(const w of windows){
+      const label=document.createElement('label');label.className='usage-window-option';
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=w.latest||chosen.has(w.id);cb.disabled=w.latest;
       const pool=profile.pools.find(p=>p.kind===w.kind&&p.scope===w.scope);
-      option.textContent=(pool?.label?pool.label+' · ':'')+kindTitle(w.kind)+' · '+windowSpan(w)+(profile.credentials>1?' · '+w.label:'');
-      select.append(option);
+      const text=span((pool?.label?pool.label+' · ':'')+kindTitle(w.kind)+' · '+shortAccount(w.label)+(w.latest?' · Latest':''));
+      const dates=document.createElement('small');dates.textContent=windowSpan(w)+(w.excluded?' · excluded from rates':'');text.append(dates);
+      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
+      label.append(cb,text);list.append(label);
     }
-    select.value=usageProfileSelection.get(profile.reference)?.id||'';
-    select.disabled=!usageWindowLists.has(profile.reference);
-    select.onchange=()=>{
-      const chosen=(usageWindowLists.get(profile.reference)||[]).find(w=>w.id===select.value);
-      if(chosen)usageProfileSelection.set(profile.reference,chosen);else usageProfileSelection.delete(profile.reference);
-      for(const pool of profile.pools)usageSelectedWindows.delete(profile.reference+':'+pool.kind+':'+pool.scope);
-      renderUsage();
-    };
-    label.append(select);return label;
+    details.append(list);return details;
   }
 
   function appendRateDisplay(col, rate) {
@@ -1009,40 +1047,25 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
     const activeWindow = usageSelectedWindows.get(overrideKey) || pool.latest;
 
-    if (usageMode === 'average') {
+    {
+      const meters=(profile.current||[]).filter(m=>m.kind===pool.kind&&m.scope===pool.scope);
+      const known=meters.filter(m=>m.used_percent!=null);
+      const expected=profile.active_credentials||meters.length;
+      const remaining=known.length===expected&&known.length?known.reduce((sum,m)=>sum+Math.max(0,Math.min(100,100-m.used_percent)),0)/known.length:null;
+      usageStat(col,remaining===null?'Balance unavailable':pct1(remaining)+'% left','usage-rate-big');
+      if(remaining!==null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=remaining+'%';bar.append(fill);bar.setAttribute('role','meter');bar.setAttribute('aria-label',profile.name+' '+colTitle+' combined percent left');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-valuenow',String(remaining));col.append(bar)}
+      usageStat(col,known.length<expected?'Readings available for '+known.length+' of '+expected+' accounts':expected>1?'Combined · '+expected+' active accounts':'Current balance','usage-summary-note');
       const rate = pool.average || {};
-      appendRateDisplay(col, rate);
+      if(rate.status==='available')usageStat(col,formatUSDPerPercent(rate.usd_per_percent),'usage-stat');
+      else usageStat(col,'Rate not measured yet','usage-summary-note');
       const samples = rate.samples || 0;
       const excluded = pool.excluded || 0;
-      usageStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'}` + (excluded ? ` · ${excluded} left out` : ''));
+      const details=document.createElement('details');details.className='usage-details';const summary=document.createElement('summary');summary.textContent=`Average · ${samples} measured window${samples === 1 ? '' : 's'}`;details.append(summary);
+      appendRateDisplay(details,rate);
+      if(excluded)usageStat(details,excluded+' windows excluded');
       const mix = formatModelMix(pool.average_models);
-      if (mix) usageStat(col, mix, 'usage-model-mix');
-    } else if (!activeWindow) {
-      usageStat(col, 'No recorded window');
-    } else {
-      usageStat(col, activeWindow.used_percent==null?'Balance unavailable':pct1(100-activeWindow.used_percent)+'% left', 'usage-rate-big');
-      if(activeWindow.used_percent!=null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,100-activeWindow.used_percent))+'%';bar.append(fill);col.append(bar)}
-      if(activeWindow.start_ms&&activeWindow.end_ms)usageStat(col,windowSpan(activeWindow),'usage-stat muted');
-      usageStat(col,activeWindow.status==='current'?'Current window':'Completed window','usage-metric-label');
-      appendRateDisplay(col, activeWindow.rate || {});
-      if (activeWindow.verified) col.append(verifiedBadge(activeWindow.verified));
-      if (activeWindow.selected) {
-        const sel = activeWindow.selected;
-        let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
-        if (currentUsageData?.key_filtered && activeWindow.token_share_percent != null) {
-          selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
-        }
-        usageStat(col, selText);
-      }
-      const mix = formatModelMix(activeWindow.models);
-      if (mix) usageStat(col, mix, 'usage-model-mix');
-      if (pool.newest_unmeasured && activeWindow === pool.latest) usageStat(col, 'Newer window not measured yet', 'usage-stat muted');
-      if (activeWindow.excluded) {
-        const tag = document.createElement('span');
-        tag.className = 'pill';
-        tag.textContent = 'left out of the average';
-        col.append(tag);
-      }
+      if (mix) usageStat(details, mix, 'usage-model-mix');
+      col.append(details);
     }
 
     const actions = document.createElement('div');
@@ -1052,8 +1075,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     inspectBtn.className = 'usage-inspect-btn';
     inspectBtn.textContent = 'Inspect';
     inspectBtn.onclick = () => {
-      const win = usageMode === 'latest' ? activeWindow : null;
-      return openInspect(profile, pool, win);
+      return openInspect(profile, pool, null);
     };
     const windowsBtn = document.createElement('button');
     windowsBtn.type = 'button';
@@ -1113,6 +1135,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function renderUsage() {
+    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.open).map(p=>[p.dataset.profile,p.querySelector('.usage-window-options')?.scrollTop||0]));
     el('usage-grid').replaceChildren();
     el('usage-asof').textContent = '';
     if (!currentUsageData) return;
@@ -1135,6 +1158,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     for (const profile of profiles) {
       const card = document.createElement('div');
       card.className = 'usage-card';
+      card.dataset.profile=profile.reference;
 
       const header = document.createElement('div');
       header.className = 'usage-card-header';
@@ -1154,26 +1178,20 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       const cred = document.createElement('span');
       cred.className = 'usage-meta';
-      cred.textContent = (profile.credentials || 0) + ' account' + (profile.credentials === 1 ? '' : 's');
+      const activeCount=profile.active_credentials??new Set((profile.current||[]).map(m=>m.account)).size;
+      cred.textContent = activeCount + ' active account' + (activeCount === 1 ? '' : 's');
+      cred.title=(profile.credentials||0)+' accounts in this profile’s history';
       header.append(cred);
       card.append(header);
-      if(usageMode==='latest')card.append(profileWindowPicker(profile));
+      card.append(profileWindowPicker(profile));
       if(profile.polling_seconds)card.append(profilePollingControl(profile));
 
-      if (usageMode==='latest'&&!usageProfileSelection.has(profile.reference)&&Array.isArray(profile.current) && profile.current.length > 0) {
+      if (activeCount>1&&Array.isArray(profile.current) && profile.current.length > 0) {
         card.append(profileMeters(profile));
       }
 
-      const selected=usageProfileSelection.get(profile.reference);
-      const pools = (profile.pools || []).flatMap(pool=>{
-        if(usageMode==='average')return [pool];
-        if(!selected)return pool.ended?[]:[pool];
-        const windows=(usageWindowLists.get(profile.reference)||[]).filter(w=>w.kind===pool.kind&&w.scope===pool.scope&&w.start_ms<selected.end_ms&&w.end_ms>selected.start_ms);
-        const chosen=windows.find(w=>w.id===selected.id)||windows[0];
-        if(!chosen)return [];
-        usageSelectedWindows.set(profile.reference+':'+pool.kind+':'+pool.scope,chosen);
-        return [{...pool,latest:chosen}];
-      });
+      const selected=usageProfileSelection.get(profile.reference)||new Set();
+      const pools = (profile.pools || []).filter(pool=>!pool.ended||(usageWindowLists.get(profile.reference)||[]).some(w=>selected.has(w.id)&&w.kind===pool.kind&&w.scope===pool.scope));
       const groups = poolGroups(pools);
       if (!groups.length) usageStat(card, 'No recorded window yet');
       for (const g of groups) card.append(renderPoolGroup(profile, g));
@@ -1202,6 +1220,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         archivedGrid.append(card);
       } else el('usage-grid').append(card);
     }
+    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){picker.open=true;picker.querySelector('.usage-window-options').scrollTop=openPickers.get(picker.dataset.profile)}
   }
 
   async function openInspect(profile, pool, window) {
@@ -1211,6 +1230,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       scope: pool.scope,
     };
     if (window?.id) query.window = window.id;
+    else {query.latest_only=true;query.selected_windows=Object.fromEntries([...usageProfileSelection].map(([ref,ids])=>[ref,[...ids]]))}
     const keyVal = el('usage-key').value;
     const fromVal = el('usage-from').value;
     const throughVal = el('usage-through').value;
@@ -1490,16 +1510,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         const cardBtn = document.createElement('button');
         cardBtn.type = 'button';
         cardBtn.className = 'usage-window-card-btn';
-        cardBtn.textContent = 'Show on card';
+        cardBtn.textContent = 'Include in average';
         cardBtn.onclick = () => {
-          usageProfileSelection.set(profile.reference,w);
-          usageSelectedWindows.set(overrideKey, w);
-          if (usageMode !== 'latest') {
-            usageMode = 'latest';
-            el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-            el('usage-mode-average').setAttribute('aria-pressed', 'false');
-          }
-          renderUsage();
+          const selected=usageProfileSelection.get(profile.reference)||new Set();selected.add(w.id);usageProfileSelection.set(profile.reference,selected);
+          loadUsage(true);
           el('usage-windows-dialog').close();
         };
         tdCard.append(cardBtn);
@@ -1518,7 +1532,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   // Accounts are every login Pacer and the import know, merged when linked as
   // one provider account (a re-login). Edits save a new revision; the usage
   // record then works out only what changed and the page follows.
-  let accountsData = null, manageMode = '', manageBusy = false;
+  let accountsData = null, manageMode = '', manageBusy = false, manageView='profiles';
   const button = (text, onclick, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; if (cls) b.className = cls; b.onclick = onclick; return b; };
   const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
   function manageStatus(text, error = false) { const s = el('usage-manage-status'); s.hidden = !text; s.textContent = text || ''; s.className = 'status' + (error ? ' error' : ''); }
@@ -1550,7 +1564,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('usage-manage-body').querySelectorAll('button,select,input').forEach(n => n.disabled = true);
     const at = Date.now() - 1000;
     try {
-      await api(root + path, 'PATCH', body);
+      const result=await api(root + path, 'PATCH', body);
+      if(body.op==='create'&&result.profile)manageMode=result.profile;
       manageStatus(done + ' The cards update as soon as Pacer has worked it into the record.');
       await loadAccounts();
       followEdit(at);
@@ -1587,17 +1602,18 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const line = document.createElement('div');
     line.className = 'manage-row';
     const label = document.createElement('label');
-    label.textContent = 'New login of an earlier account? ';
+    label.textContent = 'Same provider account as';
     const select = document.createElement('select');
     select.className = 'manage-link-select';
-    select.append(new Option('no', ''));
+    select.append(new Option('Choose the existing account…', ''));
     for (const o of others) select.append(new Option(o.label + (o.last_ms ? ' (last used ' + day(o.last_ms) + ')' : ''), o.ref));
     label.append(select);
     const link = button('Link as one account', () => { if (select.value) linkEdit({ login: account.logins[0].ref, same_as: select.value, linked: true }, 'Linked: both logins now count as one account, with one history.'); }, 'manage-link');
     link.disabled = true;
     select.onchange = () => { link.disabled = !select.value; };
     line.append(label, link);
-    return line;
+    const details=document.createElement('details');details.className='manage-link-details';const summary=document.createElement('summary');summary.textContent='Link a replacement login';details.append(summary,span('Use this when you signed in again to the same provider account. To group different accounts, add them to a profile instead.','muted'),line);
+    return details;
   }
   function accountBlock(account, controls, withProvider = true) {
     const block = document.createElement('div');
@@ -1622,13 +1638,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const row = document.createElement('div');
     row.className = 'manage-row';
     const choices = profiles.filter(p => p.provider === account.provider && !p.archived && !accountProfiles(account.ref).includes(p));
-    if (!choices.length) { row.append(span('No other ' + providerName(account.provider) + ' profile to add it to. Create one below.', 'muted')); return row; }
+    if (!choices.length) { row.append(span('No other matching profile.', 'muted')); return row; }
     const label = document.createElement('label');
     label.textContent = 'Add to ';
     const select = document.createElement('select');
     for (const p of choices) select.append(new Option(p.name, p.reference));
     label.append(select);
-    row.append(label, button('Add with its history', () => profileEdit({ op: 'add', profile: select.value, account: account.ref, from_ms: 0 }, 'Added; its earlier requests count too.')));
+    const go=button('Add to profile',()=>{const p=choices.find(p=>p.reference===select.value),previous=p.accounts.some(m=>m.account===account.ref);return profileEdit({op:'add',profile:select.value,account:account.ref,from_ms:previous?Date.now():0},previous?'Active again from now; previous history kept.':'Added with its history.')});
+    row.append(label,go);
     return row;
   }
   function newProfileForm() {
@@ -1637,7 +1654,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const h = document.createElement('h3');
     h.textContent = 'New profile';
     const form = document.createElement('form');
-    form.className = 'manage-row';
+    form.className = 'manage-create-form';
     const nameLabel = document.createElement('label');
     nameLabel.textContent = 'Name ';
     const name = document.createElement('input');
@@ -1648,12 +1665,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const provLabel = document.createElement('label');
     provLabel.textContent = 'Provider ';
     const prov = document.createElement('select');
+    prov.setAttribute('aria-label','Provider');
     for (const p of [...new Set((accountsData.accounts || []).map(a => a.provider))].sort()) prov.append(new Option(providerName(p), p));
     provLabel.append(prov);
     const create = document.createElement('button');
-    create.textContent = 'Create';
-    form.append(nameLabel, provLabel, create);
-    form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'create', name: name.value.trim(), provider: prov.value }, 'Profile created. Add its accounts.'); };
+    create.textContent = 'Create profile';
+    const accounts=document.createElement('fieldset');accounts.className='manage-account-choices';const selected=new Set();
+    const renderChoices=()=>{selected.clear();accounts.replaceChildren();const legend=document.createElement('legend');legend.textContent='Choose accounts';accounts.append(legend);for(const a of accountsData.accounts.filter(a=>a.provider===prov.value)){const label=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.value=a.ref;cb.onchange=()=>{if(cb.checked)selected.add(a.ref);else selected.delete(a.ref)};label.append(cb,span(a.label));accounts.append(label)}};
+    prov.onchange=renderChoices;renderChoices();
+    const history=document.createElement('label');history.textContent='Include usage';const when=document.createElement('select');when.append(new Option('All recorded history','all'),new Option('From now onward','now'));history.append(when);
+    form.append(nameLabel, provLabel, accounts,history,create);
+    form.onsubmit = event => { event.preventDefault();return profileEdit({ op: 'create', name: name.value.trim(), provider: prov.value,accounts:[...selected],from_ms:when.value==='all'?0:Date.now() }, 'Profile and selected accounts saved.'); };
     section.append(h, form);
     return section;
   }
@@ -1667,12 +1689,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const profiles = data.profiles || [];
     const byRef = new Map((data.accounts || []).map(a => [a.ref, a]));
     const profile = profiles.find(p => p.reference === manageMode);
+    const nav=document.createElement('nav');nav.className='manage-nav';nav.setAttribute('aria-label','Account management');
+    for(const [view,title] of [['profiles','Profiles'],['accounts','Accounts & logins'],['create','Create profile']]){const b=button(title,()=>{manageMode='';manageView=view;manageStatus('');renderManage()});b.setAttribute('aria-current',!profile&&manageView===view?'page':'false');nav.append(b)}body.append(nav);
     if (profile) {
       el('usage-manage-title').textContent = 'Manage accounts · ' + profile.name;
       const counted = document.createElement('div');
       counted.className = 'manage-section';
       const h = document.createElement('h3');
-      h.textContent = 'Counted on this card';
+      h.textContent = 'Accounts in '+profile.name;
       counted.append(h);
       const refs = [...new Set(profile.accounts.map(m => m.account))];
       if (!refs.length) counted.append(span('No accounts yet. Add one below.', 'muted'));
@@ -1683,8 +1707,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         const open = spans.some(m => !m.to_ms);
         const row = document.createElement('div');
         row.className = 'manage-row';
-        row.append(span(spans.map(m => (m.from_ms ? 'from ' + day(m.from_ms) : 'from its first use') + (m.to_ms ? ' until ' + day(m.to_ms) : ' on')).join('; ')));
-        if (open) row.append(button('Stop counting from now', () => profileEdit({ op: 'end', profile: profile.reference, account: ref, at_ms: Date.now() }, 'From now on its requests no longer count here; its history stays.')));
+        row.append(span(open?'Active':'Historical only',open?'pill manage-active':'pill'));
+        const dates=span(spans.map(m => (m.from_ms ? day(m.from_ms) : 'First recorded use') + ' → '+(m.to_ms ? day(m.to_ms) : 'present')).join('; '),'manage-dates');row.append(dates);
+        if (open) row.append(button('End membership', () => profileEdit({ op: 'end', profile: profile.reference, account: ref, at_ms: Date.now() }, 'Membership ended from now. Earlier history remains.')));
+        else row.append(button('Reactivate',()=>profileEdit({op:'add',profile:profile.reference,account:ref,from_ms:Date.now()},'Active again from now. Earlier history remains.')));
         const remove = button('Remove with its history', () => {
           remove.replaceWith(span('Its earlier requests and windows leave this card too.', 'muted'), button('Remove', () => profileEdit({ op: 'remove', profile: profile.reference, account: ref }, 'Removed from this card.')), button('Keep', renderManage));
         });
@@ -1706,13 +1732,15 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         label.textContent = 'Account ';
         const select = document.createElement('select');
         select.className = 'manage-add-account';
-        for (const a of candidates) select.append(new Option(a.label + ' · ' + plural(a.requests, 'request') + (a.last_ms ? ' · last ' + day(a.last_ms) : ''), a.ref));
+        for (const a of candidates) select.append(new Option(a.label, a.ref));
         label.append(select);
         const when = document.createElement('select');
         when.className = 'manage-add-when';
-        when.append(new Option('with all its earlier requests', 'all'), new Option('from now on', 'now'));
+        when.setAttribute('aria-label','Include usage');
+        when.append(new Option('All recorded history', 'all'), new Option('From now onward', 'now'));
+        const updateWhen=()=>{const previous=profile.accounts.some(m=>m.account===select.value);when.options[0].disabled=previous;when.value=previous?'now':'all'};select.onchange=updateWhen;updateWhen();
         const go = document.createElement('button');
-        go.textContent = 'Add';
+        go.textContent = 'Add account';
         form.append(label, when, go);
         form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'add', profile: profile.reference, account: select.value, from_ms: when.value === 'all' ? 0 : Date.now() }, 'Added to ' + profile.name + '.'); };
         add.append(form);
@@ -1741,10 +1769,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       return;
     }
     const unassignedOnly = manageMode === 'unassigned';
+    if(!unassignedOnly&&manageView==='create'){el('usage-manage-title').textContent='Create profile';body.append(newProfileForm());return}
+    if(!unassignedOnly&&manageView==='profiles'){
+      el('usage-manage-title').textContent='Profiles';
+      body.append(span('Group accounts with the same provider plan. Membership controls which usage belongs to each profile.','manage-intro'));
+      for(const p of profiles){const item=document.createElement('div');item.className='manage-profile-row';const active=[...new Set(p.accounts.filter(m=>!m.to_ms).map(m=>m.account))];const text=document.createElement('div');text.append(span(p.name,'manage-account-name'),span(providerName(p.provider)+' · '+active.length+' active accounts'+(p.archived?' · Archived':''),'usage-meta'));const names=span(active.map(ref=>shortAccount(byRef.get(ref)?.label)).join(', ')||'No active accounts','manage-profile-members');text.append(names);item.append(text,button('Manage',()=>{manageMode=p.reference;renderManage()}));body.append(item)}
+      return;
+    }
     el('usage-manage-title').textContent = unassignedOnly ? 'Accounts in no profile' : 'Accounts & profiles';
     const intro = document.createElement('p');
     intro.className = 'muted';
-    intro.textContent = unassignedOnly ? 'These accounts count on no profile card, so they have no $ per 1%. Add each to the profile of its plan.' : 'Every account Pacer and the import know. A re-login after the provider made you sign in again is the same account: link it to the earlier one so its history continues.';
+    intro.textContent = unassignedOnly ? 'Add these accounts to the profile for their provider plan.' : 'Add separate provider accounts to a profile. Link logins only when they belong to the same provider account.';
     body.append(intro);
     const list = (data.accounts || []).filter(a => !unassignedOnly || accountProfiles(a.ref).length === 0);
     if (!list.length) body.append(span('Every account is in a profile.', 'muted'));
@@ -1763,7 +1798,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       body.append(section);
     }
-    body.append(newProfileForm());
   }
   el('usage-accounts').onclick = () => openManage('');
   el('usage-manage-close').onclick = () => el('usage-manage-dialog').close();
@@ -1799,10 +1833,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     input.focus();
   }
 
-  el('usage-key').onchange = () => loadUsage();
+  el('usage-key').onchange = () => {usageProfileSelection.clear();return loadUsage()};
   function onUsageDateInput() {
     clearTimeout(usageDateTimer);
     usageDateTimer = setTimeout(() => {
+      usageProfileSelection.clear();
       loadUsage();
     }, 250);
   }
@@ -1810,20 +1845,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('usage-from').onchange = onUsageDateInput;
   el('usage-through').oninput = onUsageDateInput;
   el('usage-through').onchange = onUsageDateInput;
-  el('usage-mode-latest').onclick = () => {
-    if (usageMode === 'latest') return;
-    usageMode = 'latest';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-    el('usage-mode-average').setAttribute('aria-pressed', 'false');
-    renderUsage();
-  };
-  el('usage-mode-average').onclick = () => {
-    if (usageMode === 'average') return;
-    usageMode = 'average';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'false');
-    el('usage-mode-average').setAttribute('aria-pressed', 'true');
-    renderUsage();
-  };
   el('usage-inspect-close').onclick = () => el('usage-inspect-dialog').close();
   el('usage-windows-close').onclick = () => el('usage-windows-dialog').close();
   async function refresh(knownState){message('');forwardControls();try{
@@ -1836,9 +1857,16 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   async function connectProxySession(){message('Connecting…');el('reconnect').disabled=true;try{await showWorkspace(await api(root+'/state'))}catch(error){if(!connected)message(error.message,true)}finally{el('reconnect').disabled=false}}
   el('reconnect').onclick=()=>{if(window.parent!==window){allowBridge=true;window.parent.postMessage({type:'pacer:hello',version:1},location.origin)}connectProxySession()};
   function disconnect(){allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected from Pacer. Retry to reconnect through your authenticated session.')}
-  el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
-  el('refresh').onclick=refresh;el('filter').oninput=showModels;
+  el('filter').oninput=showModels;
+  let autoRefreshing=false;
+  async function refreshVisible(){
+    if(!connected||document.hidden||autoRefreshing||document.querySelector('dialog[open]')||document.activeElement?.matches('input:not([type=checkbox]),select,textarea'))return;
+    autoRefreshing=true;
+    try{if(tab==='usage')await loadUsage(true);else await refresh()}finally{autoRefreshing=false}
+  }
+  setInterval(refreshVisible,30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshVisible()});
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
   async function saveModel(reset=false){

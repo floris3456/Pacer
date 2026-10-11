@@ -121,6 +121,66 @@ func TestCompareAverageHonorsExclusions(t *testing.T) {
 	}
 }
 
+func TestCompareWindowSelectionUsesExistingRateRules(t *testing.T) {
+	ctx := context.Background()
+	r := historicalFixture(t)
+	full, err := r.Compare(ctx, CompareQuery{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, p := range full.Profiles {
+		if p.Reference == unassignedReference {
+			continue
+		}
+		list, err := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, All: true}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		ex := Exclusions{p.Reference: {}}
+		for _, w := range list.Windows {
+			ids = append(ids, w.ID)
+			if !w.Latest {
+				ex[p.Reference][w.ID] = "selection control"
+			}
+		}
+		selected, err := r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: {}}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		control, err := r.Compare(ctx, CompareQuery{}, ex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all, err := r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: ids}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, profile := range full.Profiles {
+			for j, pool := range profile.Pools {
+				if selected.Profiles[i].Pools[j].Average.DeltaPP != control.Profiles[i].Pools[j].Average.DeltaPP {
+					t.Fatal("selection differs from established normalization")
+				}
+				if all.Profiles[i].Pools[j].Average.DeltaPP != pool.Average.DeltaPP {
+					t.Fatal("select all changed normalization")
+				}
+				if selected.Profiles[i].Pools[j].Windows != pool.Windows {
+					t.Fatal("selection discarded history")
+				}
+			}
+		}
+		_, err = r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: {"not-a-window"}}}, nil)
+		if !errors.Is(err, ErrInput) {
+			t.Fatal("unknown selection accepted", err)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("missing profile fixture")
+	}
+}
+
 func TestInspectWindowAndAverage(t *testing.T) {
 	ctx := context.Background()
 	r := historicalFixture(t)

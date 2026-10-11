@@ -59,6 +59,26 @@ func reportInputValue(d *json.Decoder, t reflect.Type, depth int) error {
 		return io.ErrUnexpectedEOF
 	}
 	switch t.Kind() {
+	case reflect.Map:
+		if t.Key().Kind() != reflect.String || token != json.Delim('{') {
+			return io.ErrUnexpectedEOF
+		}
+		seen := map[string]bool{}
+		for d.More() {
+			key, e := d.Token()
+			name, ok := key.(string)
+			if e != nil || !ok || seen[name] {
+				return io.ErrUnexpectedEOF
+			}
+			seen[name] = true
+			if e = reportInputValue(d, t.Elem(), depth+1); e != nil {
+				return e
+			}
+		}
+		end, e := d.Token()
+		if e != nil || end != json.Delim('}') {
+			return io.ErrUnexpectedEOF
+		}
 	case reflect.Struct:
 		if token != json.Delim('{') {
 			return io.ErrUnexpectedEOF
