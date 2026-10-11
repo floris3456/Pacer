@@ -108,14 +108,8 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-meter-mini .usage-percent{text-align:right}
 .usage-meter-group+.usage-meter-group{margin-top:14px}
 .usage-window-picker{margin:0;padding:0}
-.usage-window-picker summary{cursor:pointer;font-size:13px;padding:10px 12px;border:1px solid var(--line-strong);background:var(--raised);display:flex;align-items:center;gap:8px;border-radius:3px;list-style:none}
-.usage-window-picker summary::-webkit-details-marker{display:none}
-.usage-window-picker summary:hover{background:var(--hover);border-color:var(--muted)}
-.usage-picker-title{font-weight:600}
-.usage-picker-selection{margin-left:auto;font-size:11px;color:var(--muted)}
-.usage-picker-chevron{font-size:20px;line-height:1;transition:transform .15s}
-.usage-window-picker[open] .usage-picker-chevron{transform:rotate(180deg)}
-.usage-window-options{height:264px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 420ms cubic-bezier(.4,0,.2,1)}
+.usage-window-options{height:129px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 700ms cubic-bezier(.4,0,.2,1);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.usage-window-picker:has(.usage-window-expand[aria-expanded=true]) .usage-window-options{overflow-y:auto}
 .usage-window-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 0}
 .usage-window-controls>button{padding:5px 7px;font-size:11px;white-space:nowrap}
 .usage-window-controls .usage-polling{margin-left:auto;flex-wrap:nowrap;gap:5px}
@@ -123,7 +117,7 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-window-controls .usage-polling input{width:52px}
 .usage-window-expand{display:flex;justify-content:center;align-items:center;width:100%;height:26px;border:0;border-top:1px solid var(--line-strong);background:transparent;padding:0;color:var(--muted);border-radius:0}
 .usage-window-expand:hover{color:var(--text);border-color:var(--muted);background:var(--raised)}
-.usage-window-expand span{display:block;font-size:20px;line-height:1;transition:transform 420ms cubic-bezier(.4,0,.2,1)}
+.usage-window-expand span{display:block;font-size:20px;line-height:1;transition:transform 700ms cubic-bezier(.4,0,.2,1)}
 .usage-window-expand[aria-expanded=true] span{transform:rotate(180deg)}
 @media(prefers-reduced-motion:reduce){.usage-window-options,.usage-window-expand span{transition:none}}
 @media(max-width:560px){.usage-window-controls{gap:4px}.usage-window-controls>button{font-size:10px;padding:4px}.usage-window-controls .usage-polling{gap:3px}.usage-window-controls .usage-polling label{font-size:10px;gap:2px}.usage-window-controls .usage-polling input{width:40px;padding:4px 2px}.usage-window-controls .usage-polling button{font-size:10px;padding:4px}}
@@ -1021,11 +1015,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function profileWindowPicker(profile){
-    const details=document.createElement('details');details.className='usage-window-picker';details.dataset.profile=profile.reference;
+    const details=document.createElement('section');details.className='usage-window-picker';details.dataset.profile=profile.reference;details.setAttribute('aria-label',profile.name+' window selection');
     const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
-    const summary=document.createElement('summary');summary.append(span('Windows in average','usage-picker-title'),span(chosen.size?'Latest + '+chosen.size+' selected':'Latest only','usage-picker-selection'),span('⌄','usage-picker-chevron'));details.append(summary);
     const controls=document.createElement('div');controls.className='usage-window-controls';
-    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true);const picker=[...document.querySelectorAll('.usage-window-picker')].find(p=>p.dataset.profile===profile.reference);if(picker)picker.open=true};
+    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true)};
     controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
     if(profile.polling_seconds)controls.append(profilePollingControl(profile));
     details.append(controls);
@@ -1054,8 +1047,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       list.append(category);
     }
-    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show all windows');list.style.height=expanded?list.scrollHeight+'px':'264px'},'usage-window-expand');
-    expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','Show all windows');expand.append(span('⌄'));
+    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show more windows');if(!expanded)list.scrollTop=0;list.style.height=expanded?'333px':'129px'},'usage-window-expand');
+    expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','Show more windows');expand.append(span('∨'));
     details.append(list,expand);return details;
   }
 
@@ -1191,7 +1184,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function renderUsage() {
-    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.open).map(p=>[p.dataset.profile,p.querySelector('.usage-window-expand')?.getAttribute('aria-expanded')==='true']));
+    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.querySelector('.usage-window-expand')?.getAttribute('aria-expanded')==='true').map(p=>[p.dataset.profile,p.querySelector('.usage-window-options').scrollTop]));
     el('usage-grid').replaceChildren();
     el('usage-asof').textContent = '';
     if (!currentUsageData) return;
@@ -1279,7 +1272,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         archivedGrid.append(card);
       } else el('usage-grid').append(card);
     }
-    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){picker.open=true;if(openPickers.get(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height=list.scrollHeight+'px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows')}}
+    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height='333px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows');list.scrollTop=openPickers.get(picker.dataset.profile)}
   }
 
   async function openInspect(profile, pool, window) {
