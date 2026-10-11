@@ -48,7 +48,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 					t.Fatalf("profile %d current meters %d/%d", i, len(got.Current), len(p.Current))
 				}
 				for _, pool := range got.Pools {
-					// Latest = the original Compare's default pick in this pool.
+					// The default is the newest window, even before it has a rate.
 					var want *Window
 					count := 0
 					for j := range p.Windows {
@@ -57,7 +57,7 @@ func TestCompareMatchesOriginalWorkspace(t *testing.T) {
 							continue
 						}
 						count++
-						if want == nil && w.Normalization != nil && w.Normalization.Status == "available" {
+						if want == nil {
 							want = &p.Windows[j]
 						}
 					}
@@ -185,6 +185,11 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 	}
 	listed := 0
 	for _, p := range view.Profiles {
+		all, err := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, All: true}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
 		for _, pool := range p.Pools {
 			list, e := r.CompareWindows(ctx, CompareWindowsQuery{Profile: p.Reference, Kind: pool.Kind, Scope: pool.Scope}, nil)
 			if e != nil {
@@ -193,12 +198,19 @@ func TestCompareInputsWindowsAndPreparation(t *testing.T) {
 			if len(list.Windows) != pool.Windows {
 				t.Fatalf("list %d/%d", len(list.Windows), pool.Windows)
 			}
+			count += len(list.Windows)
+			if pool.Latest.ID != list.Windows[0].ID {
+				t.Fatal("default skipped the newest window")
+			}
 			for i := 1; i < len(list.Windows); i++ {
 				if list.Windows[i].ResetMS > list.Windows[i-1].ResetMS {
 					t.Fatal("windows not newest first")
 				}
 			}
 			listed += len(list.Windows)
+		}
+		if len(all.Windows) != count {
+			t.Fatal("profile selector omitted pool windows")
 		}
 	}
 	if listed == 0 {

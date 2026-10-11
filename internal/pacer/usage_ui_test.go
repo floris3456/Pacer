@@ -178,7 +178,7 @@ class Element {
     const res = [];
     const walk = el => {
       for (const c of el.children) {
-        if (!c || typeof c !== 'object') continue;
+        if (!c || typeof c !== 'object' || !c.tag) continue;
         if (sel.startsWith('.') && c.className && c.className.split(' ').includes(sel.slice(1))) res.push(c);
         else if (sel.startsWith('#') && c.id === sel.slice(1)) res.push(c);
         else if (sel.includes('[') && sel.endsWith(']')) {
@@ -360,11 +360,12 @@ const ui = sandbox.ui;
 
   // 4. Initial loadUsage: renders all profiles once
   await ui.loadUsage();
-  assert.equal(calls.length, 1, 'Initial load should make exactly 1 request');
+  assert.equal(calls.filter(c=>c.path.endsWith('/usage/profiles')).length, 1, 'Initial load fetches profiles once');
   assert(calls[0].path.endsWith('/usage/profiles'));
   assert.deepEqual(calls[0].body, {});
 
   const profilesData = JSON.parse(fs.readFileSync(process.env.USAGE_PROFILES_DATA, 'utf8'));
+  assert.equal(calls.filter(c=>c.body?.all).length,profilesData.profiles.length,'Each profile gets one window list');
   const grid = el('usage-grid');
   const cards = grid.children.filter(c => c.className === 'usage-card');
   assert.equal(cards.length, profilesData.profiles.length, 'All profiles must be rendered once');
@@ -402,7 +403,7 @@ const ui = sandbox.ui;
   const callsBeforeKey = calls.length;
   el('usage-key').value = keyId;
   await el('usage-key').onchange();
-  assert.equal(calls.length, callsBeforeKey + 1, 'Key change triggers exactly one request');
+  assert.equal(calls.length, callsBeforeKey + 1 + profilesData.profiles.length, 'Key change fetches profiles and their matching window lists');
   assert.equal(calls.at(-1).body.key, keyId);
 
   // Re-select empty key: cached filter sends zero requests
@@ -452,7 +453,7 @@ const ui = sandbox.ui;
   hold = '';
   release();
   await Promise.all([first, second]);
-  assert.equal(calls.length, callsShared, 'Concurrent load of in-flight filter does not send second request');
+  assert.equal(calls.length, callsShared + profilesData.profiles.length, 'Concurrent load shares profiles and fetches each window list once');
   assert.equal(ui.state().currentUsageData.query.key, 'shared-filter');
   el('usage-key').value = '';
   await el('usage-key').onchange();

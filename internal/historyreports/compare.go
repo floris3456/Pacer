@@ -36,6 +36,7 @@ type CompareWindowsQuery struct {
 	Profile string `json:"profile"` // profile reference
 	Kind    string `json:"kind"`    // monthly, weekly or 5h
 	Scope   string `json:"scope"`
+	All     bool   `json:"all,omitempty"` // all pools for a profile's window selector
 }
 
 type CompareTotals struct {
@@ -131,8 +132,7 @@ type ComparePool struct {
 	// limits kept reporting (Codex Spark, for example).
 	Ended   bool `json:"ended"`
 	Windows int  `json:"windows"`
-	// Latest is the newest window with a measured rate (the original Compare's
-	// default); NewestUnmeasured is set when a newer window has no rate yet.
+	// Latest is the newest window, including a newly reset window with no rate yet.
 	Latest           *CompareWindow `json:"latest"`
 	NewestUnmeasured *CompareWindow `json:"newest_unmeasured,omitempty"`
 	Average          CompareRate    `json:"average"`
@@ -320,12 +320,9 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 			if excluded {
 				pool.Excluded++
 			}
-			if pool.Latest == nil && win.Normalization != nil && win.Normalization.Status == "available" {
+			if pool.Latest == nil {
 				cw := r.usageWindow(facts, card, keys, win, ex[ref])
 				pool.Latest = &cw
-			} else if pool.Latest == nil && pool.NewestUnmeasured == nil {
-				cw := r.usageWindow(facts, card, keys, win, ex[ref])
-				pool.NewestUnmeasured = &cw
 			}
 		}
 		for _, g := range p.Rates {
@@ -370,7 +367,7 @@ func (r *Reader) Compare(ctx context.Context, q CompareQuery, ex Exclusions) (Co
 // CompareWindows lists one profile pool's windows (newest first) for picking an
 // older window. It uses the same facts and selection as Compare.
 func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex Exclusions) (CompareWindowList, error) {
-	if !validKind(q.Kind) || q.Scope == "" || len(q.Scope) > 256 || len(q.Profile) > 80 {
+	if (!q.All && (!validKind(q.Kind) || q.Scope == "")) || (q.All && (q.Kind != "" || q.Scope != "")) || len(q.Scope) > 256 || len(q.Profile) > 80 {
 		return CompareWindowList{}, ErrInput
 	}
 	facts, w, e := r.compareWorkspace(ctx, q.CompareQuery, ex)
@@ -385,7 +382,7 @@ func (r *Reader) CompareWindows(ctx context.Context, q CompareWindowsQuery, ex E
 		}
 		out := CompareWindowList{Version: CompareVersion, Query: q.CompareQuery, Profile: q.Profile, Kind: q.Kind, Scope: q.Scope, Windows: []CompareWindow{}}
 		for _, win := range p.Windows {
-			if win.Kind == q.Kind && win.Scope == q.Scope {
+			if q.All || win.Kind == q.Kind && win.Scope == q.Scope {
 				out.Windows = append(out.Windows, r.usageWindow(facts, card, keys, win, ex[q.Profile]))
 			}
 		}

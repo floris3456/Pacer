@@ -58,6 +58,11 @@ func TestRecordCodexCycles(t *testing.T) {
 		codexReading(9, "nc", bStart, h.Add(6*time.Hour), 10, "api"),
 		codexReading(10, "nc", bStart, h.Add(7*time.Hour), 20, "api"),
 	}
+	// Historical headers called the very same allowance premium; API polls
+	// and newer headers call it all. Both must contribute to the same cycles.
+	for _, i := range []int{2, 4, 9} {
+		readings[i].Scope = "limit:premium"
+	}
 	events := []ForwardEvent{}
 	for at := aStart.Add(10 * time.Second); at.Before(h.Add(4 * time.Hour)); at = at.Add(10 * time.Minute) {
 		events = append(events, codexEvent(len(events), "nc", at))

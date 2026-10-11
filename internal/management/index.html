@@ -90,14 +90,21 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
 .usage-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .usage-toggle button+button{border-left:1px solid var(--line-strong)}
-.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}
-.usage-card{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:20px;margin:20px 0}
+.usage-card{border:1px solid var(--line-strong);background:var(--surface);color:var(--text);padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
 .usage-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;background:transparent;color:var(--text);border:0}
 .usage-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
-.usage-profile-name{font-weight:600;font-size:14px}
+.usage-profile-name{font-weight:650;font-size:18px}
 .usage-meta{color:var(--muted);font-size:12px}
-.usage-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px}
+.usage-meters{font-size:13px;color:var(--text);padding:12px;background:var(--field);border:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:20px}
+.usage-window-picker{display:flex;align-items:stretch;flex-direction:column;gap:6px;min-width:0}
+.usage-window-picker select{width:100%;min-width:0}
+.usage-meter{display:flex;flex-direction:column;gap:6px}
+.usage-meter-title{display:flex;justify-content:space-between;gap:12px;font-weight:600}
+.usage-bar{height:5px;background:var(--line);overflow:hidden}
+.usage-bar>span{display:block;height:100%;background:var(--text)}
+.usage-metric-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .usage-pool{display:flex;flex-direction:column;gap:6px}
 .usage-pool-title{font-size:12px;font-weight:650;color:var(--text);margin-top:4px}
 .usage-verified{border-color:#5f8f6a;color:#bfe3c6;cursor:help}
@@ -125,12 +132,12 @@ pre,code,kbd,samp{background:var(--field)}
 .price-cell{font-variant-numeric:tabular-nums;white-space:normal}
 .pill.price-missing{border-color:var(--err);color:var(--err-text)}
 #catalogue td{overflow-wrap:anywhere}
-.usage-col{display:flex;flex-direction:column;gap:4px;min-width:0}
-.usage-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
-.usage-rate-big{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3;color:var(--text)}
+.usage-col{display:flex;flex-direction:column;gap:10px;min-width:0;padding-top:4px}
+.usage-col-header{font-size:15px;font-weight:650;color:var(--text);border-bottom:1px solid var(--line-strong);padding-bottom:8px}
+.usage-rate-big{font-size:23px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.35;color:var(--text)}
 .usage-rate-unavailable{color:var(--muted);font-weight:600}
-.usage-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.usage-model-mix{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.usage-stat{font-size:13px;color:var(--text);overflow-wrap:anywhere;line-height:1.65}
+.usage-model-mix{font-size:13px;color:var(--muted);overflow-wrap:anywhere;line-height:1.65}
 .usage-col-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .usage-col-actions button{min-height:24px;padding:2px 8px;font-size:12px}
 .usage-other-limits{font-size:12px;margin:6px 0;border-top:1px solid var(--line);padding-top:4px}
@@ -178,7 +185,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
 <section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
-<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
+<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Single window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
 <div id="usage-status" role="status" class="status" hidden></div>
 <p id="usage-asof" class="muted"></p>
 <div id="usage-grid" class="usage-grid"></div>
@@ -251,6 +258,8 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
   const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  allowed.add('GET /v8/management/config/access/api-keys');
+  for(const channel of ['claude','codex','gemini','gemini-interactions','antigravity','aistudio','vertex','kimi','kimi-ai','kimi.ai','kimi.com','meta','muse','xai','x-ai','grok','devin'])allowed.add('GET /v8/management/routing/model-definitions/'+channel);
   for(const op of ['profiles','windows','inspect','accounts'])allowed.add('POST '+root+'/usage/'+op);
   for(const op of ['exclusions','links','profile'])allowed.add('PATCH '+root+'/usage/'+op);
   allowed.add('POST '+root+'/models/prices');allowed.add('PATCH '+root+'/models/prices');allowed.add('POST '+root+'/models/prices/refresh');
@@ -289,19 +298,33 @@ function row(target, values){const tr=document.createElement('tr');for(const val
 function hashCell(td,values){td.replaceChildren(...values.map(value=>{const span=document.createElement('span');span.className='hash';span.textContent=value;return span}))}
 function emptyRow(target,columns){const tr=document.createElement('tr');tr.className='empty';const td=document.createElement('td');td.colSpan=columns;td.textContent='None yet';tr.append(td);el(target).append(tr)}
   function date(value){if(!value||String(value).startsWith('0001-'))return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
+  let editingFields = {};
+  async function loadModels(){
+    const ticket=generation;
+    const data=await api('/v8/management/oauth/settings/models');
+    const channels=[...new Set((data.models||[]).map(m=>m.channel))].filter(ch=>allowed.has('GET /v8/management/routing/model-definitions/'+ch));
+    const definitions=new Map(await Promise.all(channels.map(async ch=>[ch,(await api('/v8/management/routing/model-definitions/'+ch)).models||[]])));
+    if(ticket!==generation||!connected)return;
+    models=(data.models||[]).map(model=>{
+      const base=(definitions.get(model.channel)||[]).find(m=>m.id===model.upstream);
+      return {...model,display_name:model.setting?.['display-name']??model.display_name??base?.display_name,context_length:model.setting?.['max-context-length']??model.context_length??base?.context_length,max_completion_tokens:model.setting?.['max-output-tokens']??model.max_completion_tokens??base?.max_completion_tokens,reasoning:model.reasoning??(base?.thinking?{mode:'levels',levels:base.thinking.levels||[]}:undefined)};
+    });
+    thinkingLevels=data['thinking-levels']||[];modelChannels=data['channel-info']||[];renderModelTabs();showModels();loadPrices();
+  }
   function editModel(model){
     editing=model;
     el('model-title').textContent=model.upstream;
     el('model-enabled').checked=model.enabled;
-    el('model-alias').value=model.alias?.name||'';
+    el('model-alias').value=model.alias?.name||model.name||model.upstream;
     el('model-keep').checked=!!model.alias?.['keep-original'];
     el('keep-label').hidden=!model.supports?.['keep-original'];
-    el('model-display').value=model.setting?.['display-name']||'';
-    el('model-context').value=model.setting?.['max-context-length']||'';
-    el('model-output').value=model.setting?.['max-output-tokens']||'';
+    el('model-display').value=model.setting?.['display-name']??model.display_name??'';
+    el('model-context').value=model.setting?.['max-context-length']??model.context_length??'';
+    el('model-output').value=model.setting?.['max-output-tokens']??model.max_completion_tokens??'';
     el('output-label').hidden=!model.supports?.['max-output-tokens'];
-    el('model-thinking').value=(model.setting?.['thinking-levels']||[]).join(', ');
-    el('thinking-help').textContent='Comma-separated levels: '+thinkingLevels.join(', ');
+    el('model-thinking').value=(model.setting?.['thinking-levels']??model.reasoning?.levels??[]).join(', ');
+    el('thinking-help').textContent=model.reasoning?.levels?.length?'CPA model levels: '+model.reasoning.levels.join(', '):'CPA has no named thinking levels for this model.';
+    editingFields=Object.fromEntries(['alias','display','context','output','thinking'].map(id=>[id,String(el('model-'+id).value)]));
     el('model-harness').textContent=JSON.stringify({id:model.id,display_name:model.display_name||undefined,kind:model.kind,context_length:model.context_length,input_length:model.input_length,max_completion_tokens:model.max_completion_tokens,reasoning:model.reasoning,input_modalities:model.input_modalities,output_modalities:model.output_modalities,service_tiers:model.service_tiers},null,2);
     el('model-error').textContent='';el('model-dialog').showModal();
   }
@@ -456,11 +479,23 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     finally { buttons.forEach(b => b.disabled = false); }
   }
   function metadataButtons(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.disabled=!metadata.editable;td.append(button)}tr.append(td)}
+  let configuredKeys = [];
+  async function loadKeys(){
+    const ticket=generation;
+    const values=await api('/v8/management/config/access/api-keys');
+    const keys=await Promise.all(values.map(async(value,index)=>{
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
+      return {hash,label:'API key '+(index+1),masked:'••••'+value.slice(-4)};
+    }));
+    const labels=await api(root+'/keys');
+    if(ticket!==generation||!connected)return;
+    configuredKeys=keys;metadata=labels;showMetadata();
+  }
   function showMetadata(){
-    el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent=metadata.coverage||'';
+    el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent='CPA currently authorizes '+configuredKeys.length+' API key'+(configuredKeys.length===1?'':'s')+'. Keys are read from CPA’s live configuration; only masked endings and fingerprints are displayed.';
     el('add-key').disabled=el('add-group').disabled=!metadata.editable;
-    for(const item of metadata.keys||[]){const tr=row('key-rows',[item.alias||'Unnamed key',item.reference,'']);hashCell(tr.children[1],[item.reference]);hashCell(tr.children[2],item.lineage_hashes||[]);metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]])}
-    if(!(metadata.keys||[]).length)emptyRow('key-rows',4);
+    for(const key of configuredKeys){const item=(metadata.keys||[]).find(k=>k.current_hash===key.hash);const tr=row('key-rows',[item?.alias||key.label,key.masked,'']);hashCell(tr.children[1],[key.masked,'SHA-256: '+key.hash]);hashCell(tr.children[2],item?.lineage_hashes||[]);if(item)metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]]);else tr.append(document.createElement('td'))}
+    if(!configuredKeys.length)emptyRow('key-rows',4);
     for(const group of metadata.groups||[]){const names=(group.key_references||[]).map(ref=>metadata.keys.find(k=>k.reference===ref)?.alias||ref);const tr=row('group-rows',[group.name,names.join(', ')]);metadataButtons(tr,[['Edit group',()=>editMetadata('put-group',group)]])}
     if(!(metadata.groups||[]).length)emptyRow('group-rows',3);
   }
@@ -659,6 +694,9 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   let usageGeneration = 0;
   let usageDateTimer = null;
   const usageSelectedWindows = new Map();
+  const usageWindowLists = new Map();
+  const usageProfileSelection = new Map();
+  let usageWindowsCache = new WeakMap();
   const usageInflight = new Map();
 
   const cleanModelName = name => (name || '').replace(/^(claude|gpt|gemini)-/, '');
@@ -769,6 +807,9 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     usageCache.clear();
     usageInflight.clear();
     usageSelectedWindows.clear();
+    usageWindowLists.clear();
+    usageProfileSelection.clear();
+    usageWindowsCache = new WeakMap();
     currentUsageData = null;
     usageMode = 'latest';
     el('usage-mode-latest').setAttribute('aria-pressed', 'true');
@@ -792,14 +833,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const cacheKey = `${keyVal}|${fromVal}|${throughVal}`;
 
     usageSelectedWindows.clear();
+    usageWindowLists.clear();
+    usageProfileSelection.clear();
 
     const cached = usageCache.get(cacheKey);
     if (cached && refreshing && Date.now() - cached.at > 60000) usageCache.delete(cacheKey);
     else if (cached) {
       currentUsageData = cached.data;
       showUsageError('');
-      renderUsage();
-      return;
+       renderUsage();
+       loadWindowLists(cached.data);
+       return;
     }
 
     showUsageError('');
@@ -824,6 +868,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       currentUsageData = data;
       updateUsageAPIKeys(data.api_keys);
       renderUsage();
+      loadWindowLists(data);
     } catch (error) {
       if (!connected || ticket.generation !== generation || ticket.count !== usageGeneration) return;
       showUsageError(error.message);
@@ -838,12 +883,47 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     return div;
   }
 
+  async function loadWindowLists(data){
+    const ticket=generation;
+    try{
+      let pending=usageWindowsCache.get(data);
+      if(!pending){pending=Promise.all((data.profiles||[]).map(async profile=>[profile.reference,(await api(root+'/usage/windows','POST',{...data.query,profile:profile.reference,all:true})).windows||[]]));usageWindowsCache.set(data,pending)}
+      const lists=await pending;
+      if(ticket!==generation||currentUsageData!==data||!connected)return;
+      for(const [ref,windows] of lists)usageWindowLists.set(ref,windows);
+      renderUsage();
+    }catch(error){usageWindowsCache.delete(data);if(ticket===generation&&currentUsageData===data)showUsageError('Window selection could not be loaded: '+error.message)}
+  }
+
+  function profileWindowPicker(profile){
+    const label=document.createElement('label');label.className='usage-window-picker';
+    label.append(document.createTextNode('Window'));
+    const select=document.createElement('select');select.setAttribute('aria-label',profile.name+' window');
+    const latest=document.createElement('option');latest.value='';latest.textContent='Latest window';select.append(latest);
+    for(const w of usageWindowLists.get(profile.reference)||[]){
+      const option=document.createElement('option');option.value=w.id;
+      const pool=profile.pools.find(p=>p.kind===w.kind&&p.scope===w.scope);
+      option.textContent=(pool?.label?pool.label+' · ':'')+kindTitle(w.kind)+' · '+windowSpan(w)+(profile.credentials>1?' · '+w.label:'');
+      select.append(option);
+    }
+    select.value=usageProfileSelection.get(profile.reference)?.id||'';
+    select.disabled=!usageWindowLists.has(profile.reference);
+    select.onchange=()=>{
+      const chosen=(usageWindowLists.get(profile.reference)||[]).find(w=>w.id===select.value);
+      if(chosen)usageProfileSelection.set(profile.reference,chosen);else usageProfileSelection.delete(profile.reference);
+      for(const pool of profile.pools)usageSelectedWindows.delete(profile.reference+':'+pool.kind+':'+pool.scope);
+      renderUsage();
+    };
+    label.append(select);return label;
+  }
+
   function appendRateDisplay(col, rate) {
     if (!rate || rate.status !== 'available') {
       usageStat(col, 'No rate', 'usage-rate-big usage-rate-unavailable');
       usageStat(col, rate?.reason || rate?.status || 'Unavailable', 'usage-stat muted');
       return;
     }
+    usageStat(col, 'API value per quota point', 'usage-metric-label');
     usageStat(col, formatUSDPerPercent(rate.usd_per_percent), 'usage-rate-big');
     if (rate.equivalent_tokens_per_percent) {
       usageStat(col, formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%' + (rate.reference_name ? ' (' + rate.reference_name + ')' : ''));
@@ -874,7 +954,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
     const activeWindow = usageSelectedWindows.get(overrideKey) || pool.latest;
 
-    if (usageMode === 'average' && !usageSelectedWindows.has(overrideKey)) {
+    if (usageMode === 'average') {
       const rate = pool.average || {};
       appendRateDisplay(col, rate);
       const samples = rate.samples || 0;
@@ -885,11 +965,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     } else if (!activeWindow) {
       usageStat(col, 'No recorded window');
     } else {
+      usageStat(col, activeWindow.used_percent==null?'Usage unavailable':pct1(activeWindow.used_percent)+'% used', 'usage-rate-big');
+      if(activeWindow.used_percent!=null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,activeWindow.used_percent))+'%';bar.append(fill);col.append(bar)}
+      if(activeWindow.start_ms&&activeWindow.end_ms)usageStat(col,windowSpan(activeWindow),'usage-stat muted');
+      usageStat(col,activeWindow.status==='current'?'Current window':'Completed window','usage-metric-label');
       appendRateDisplay(col, activeWindow.rate || {});
       if (activeWindow.verified) col.append(verifiedBadge(activeWindow.verified));
-      if (activeWindow.start_ms && activeWindow.end_ms) {
-        usageStat(col, windowSpan(activeWindow));
-      }
       if (activeWindow.selected) {
         const sel = activeWindow.selected;
         let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
@@ -916,7 +997,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     inspectBtn.className = 'usage-inspect-btn';
     inspectBtn.textContent = 'Inspect';
     inspectBtn.onclick = () => {
-      const win = (usageMode === 'latest' || usageSelectedWindows.has(overrideKey)) ? activeWindow : null;
+      const win = usageMode === 'latest' ? activeWindow : null;
       return openInspect(profile, pool, win);
     };
     const windowsBtn = document.createElement('button');
@@ -1021,8 +1102,9 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       cred.textContent = (profile.credentials || 0) + ' account' + (profile.credentials === 1 ? '' : 's');
       header.append(cred);
       card.append(header);
+      if(usageMode==='latest')card.append(profileWindowPicker(profile));
 
-      if (Array.isArray(profile.current) && profile.current.length > 0) {
+      if (usageMode==='latest'&&!usageProfileSelection.has(profile.reference)&&Array.isArray(profile.current) && profile.current.length > 0) {
         const metersDiv = document.createElement('div');
         metersDiv.className = 'usage-meters';
         const kinds = profile.current.map(m => m.kind + '|' + m.scope);
@@ -1037,26 +1119,28 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
           const parts = [kindLbl + ' ' + usedStr];
           if (rstStr) parts.push(rstStr);
           if (meter.stale) parts.push('stale');
-          mLine.textContent = parts.join(' · ');
+          mLine.className='usage-meter';
+          const title=document.createElement('div');title.className='usage-meter-title';title.append(span(kindLbl),span(usedStr));
+          mLine.append(title);
+          if(rstStr||meter.stale)mLine.append(span([rstStr,meter.stale?'Reading is stale':''].filter(Boolean).join(' · '),'muted'));
           metersDiv.append(mLine);
         }
         card.append(metersDiv);
       }
 
-      const pools = profile.pools || [];
-      const groups = poolGroups(pools.filter(p => !p.ended));
+      const selected=usageProfileSelection.get(profile.reference);
+      const pools = (profile.pools || []).flatMap(pool=>{
+        if(usageMode==='average')return [pool];
+        if(!selected)return pool.ended?[]:[pool];
+        const windows=(usageWindowLists.get(profile.reference)||[]).filter(w=>w.kind===pool.kind&&w.scope===pool.scope&&w.start_ms<selected.end_ms&&w.end_ms>selected.start_ms);
+        const chosen=windows.find(w=>w.id===selected.id)||windows[0];
+        if(!chosen)return [];
+        usageSelectedWindows.set(profile.reference+':'+pool.kind+':'+pool.scope,chosen);
+        return [{...pool,latest:chosen}];
+      });
+      const groups = poolGroups(pools);
       if (!groups.length) usageStat(card, 'No recorded window yet');
       for (const g of groups) card.append(renderPoolGroup(profile, g));
-      const ended = poolGroups(pools.filter(p => p.ended));
-      if (ended.length > 0) {
-        const details = document.createElement('details');
-        details.className = 'usage-other-limits';
-        const summary = document.createElement('summary');
-        summary.textContent = 'Ended limits: ' + ended.map(g => g.label || 'main').join(', ');
-        details.append(summary);
-        for (const g of ended) details.append(renderPoolGroup(profile, g));
-        card.append(details);
-      }
 
       const actions = document.createElement('div');
       actions.className = 'usage-card-actions';
@@ -1372,6 +1456,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         cardBtn.className = 'usage-window-card-btn';
         cardBtn.textContent = 'Show on card';
         cardBtn.onclick = () => {
+          usageProfileSelection.set(profile.reference,w);
           usageSelectedWindows.set(overrideKey, w);
           if (usageMode !== 'latest') {
             usageMode = 'latest';
@@ -1706,8 +1791,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('usage-inspect-close').onclick = () => el('usage-inspect-dialog').close();
   el('usage-windows-close').onclick = () => el('usage-windows-dialog').close();
   async function refresh(knownState){message('');forwardControls();try{
-    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];modelChannels=data['channel-info']||[];renderModelTabs();showModels();loadPrices()}
-    else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
+    if(tab==='models'){await loadModels()}
+    else if(tab==='keys'){await loadKeys()}
     else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
@@ -1725,16 +1810,18 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     try{
       const alias=el('model-alias').value.trim(), setting={};
       if(!reset){
-        const display=el('model-display').value.trim();if(display)setting['display-name']=display;
+        for(const field of ['display-name','max-context-length','max-output-tokens','thinking-levels'])if(editing.setting?.[field]!==undefined)setting[field]=editing.setting[field];
+        const display=el('model-display').value.trim();if(display!==editingFields.display){if(display)setting['display-name']=display;else delete setting['display-name']}
         for(const [id,field,supported] of [['model-context','max-context-length',true],['model-output','max-output-tokens',editing.supports?.['max-output-tokens']]]){
-          if(!supported||!el(id).value)continue;const value=Number(el(id).value);
+          if(!supported||String(el(id).value)===editingFields[id.slice(6)])continue;
+          if(!el(id).value){delete setting[field];continue}const value=Number(el(id).value);
           if(!Number.isSafeInteger(value)||value<1)throw Error('Token limits must be positive whole numbers');setting[field]=value;
         }
         const levels=[...new Set(el('model-thinking').value.split(',').map(v=>v.trim().toLowerCase()).filter(Boolean))];
         if(levels.some(v=>!thinkingLevels.includes(v)))throw Error('Choose thinking levels from the supported list');
-        if(levels.length)setting['thinking-levels']=levels;
+        if(el('model-thinking').value!==editingFields.thinking){if(levels.length)setting['thinking-levels']=levels;else delete setting['thinking-levels']}
       }
-      await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,...(!reset?{enabled:el('model-enabled').checked}:{}),alias:!reset&&alias?{name:alias,'keep-original':!!editing.supports?.['keep-original']&&el('model-keep').checked}:null,setting:Object.keys(setting).length?setting:null});
+      await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,...(!reset?{enabled:el('model-enabled').checked}:{}),alias:!reset&&alias&&alias!==editing.upstream?{name:alias,'keep-original':!!editing.supports?.['keep-original']&&el('model-keep').checked}:null,setting:Object.keys(setting).length?setting:null});
       el('model-dialog').close();await refresh();message('Model configuration saved in CPA.');
     }catch(error){el('model-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
   }
