@@ -117,6 +117,9 @@ projection exactly. It removes only markers proved to have come from these corre
 preserving markers for genuine cycle changes and unexplained markers. Audit history is
 unchanged; the next live observation supplies the new balance. The repair and its completion
 record are committed in the same startup transaction, and repeated opens are idempotent.
+Creating the migration marker table checks the existing measurement feed schema generation
+first and advances it only for that exact additive DDL in the same transaction. Unrecognized
+prior schema changes remain refused; the feed identity and sequence are preserved.
 
 ### Verified parser coverage
 

@@ -152,14 +152,15 @@ type usageLinkEdit struct {
 }
 
 type usageProfileEdit struct {
-	Revision int64  `json:"revision"`
-	Op       string `json:"op"`
-	Profile  string `json:"profile,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	Account  string `json:"account,omitempty"`
-	FromMS   int64  `json:"from_ms,omitempty"`
-	AtMS     int64  `json:"at_ms,omitempty"`
+	Revision int64    `json:"revision"`
+	Op       string   `json:"op"`
+	Profile  string   `json:"profile,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Provider string   `json:"provider,omitempty"`
+	Account  string   `json:"account,omitempty"`
+	Accounts []string `json:"accounts,omitempty"` // initial members, create only
+	FromMS   int64    `json:"from_ms,omitempty"`
+	AtMS     int64    `json:"at_ms,omitempty"`
 }
 
 func newProfileID() string {
@@ -255,6 +256,7 @@ func (p *Plugin) editUsageProfile(ctx context.Context, e usageProfileEdit) plugi
 		return reportError(err)
 	}
 	var revision int64
+	var savedProfile string
 	err = p.withForwardStore(ctx, func(c context.Context, s *historyreports.ForwardStore) error {
 		forward, err := s.LatestProfiles(c)
 		if err != nil {
@@ -275,6 +277,21 @@ func (p *Plugin) editUsageProfile(ctx context.Context, e usageProfileEdit) plugi
 			return historyreports.ErrInput
 		}
 		members := ix.members(e.Account)
+		if e.Op == "create" {
+			provider = e.Provider
+		}
+		if len(e.Accounts) > 256 || (len(e.Accounts) > 0 && (e.Op != "create" || e.Account != "")) {
+			return historyreports.ErrInput
+		}
+		seen := map[string]bool{}
+		for _, ref := range e.Accounts {
+			a, ok := ix.byRef[ref]
+			if !ok || a.Provider != e.Provider || seen[ref] {
+				return historyreports.ErrInput
+			}
+			seen[ref] = true
+			members = append(members, ix.members(ref)...)
+		}
 		if e.Account != "" {
 			if a := ix.byRef[e.Account]; len(members) == 0 || provider != "" && a.Provider != provider {
 				return historyreports.ErrInput
@@ -286,13 +303,14 @@ func (p *Plugin) editUsageProfile(ctx context.Context, e usageProfileEdit) plugi
 			return err
 		}
 		revision, err = s.EditProfilesKnown(c, forward.Revision, historyreports.ForwardProfileEdit{Profile: prof}, ix.known)
+		savedProfile = profileReference(prof.ID)
 		return err
 	})
 	if err != nil {
 		return editError(err, "Profile edits")
 	}
 	p.wakeUsageLive()
-	return resource(200, map[string]any{"revision": revision})
+	return resource(200, map[string]any{"revision": revision, "profile": savedProfile})
 }
 
 // historyreportsHash is the profile reference digest (sha256 hex).

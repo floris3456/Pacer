@@ -21,7 +21,7 @@ import (
 
 // PoolsVersion changes whenever the mapping below changes; it is part of every
 // sealed record key, so a new mapping re-derives the affected windows.
-const PoolsVersion = "pools-v2" // v2: Codex twins joined, early ends closed (codexCycles)
+const PoolsVersion = "pools-v3" // v3: historical Codex premium headers share the main allowance
 
 const (
 	sparkScope = "model:gpt-5.3-codex-spark"
@@ -46,7 +46,7 @@ func canonicalScope(provider, scope string) string {
 		}
 	case "codex":
 		switch s {
-		case "all", "codex-main", "codex_main", "codex":
+		case "all", "codex-main", "codex_main", "codex", "limit:premium", "premium":
 			return "codex-main"
 		case "spark", "codex_bengalfox", "bengalfox", sparkScope:
 			return sparkScope

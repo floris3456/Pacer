@@ -70,7 +70,11 @@ clients. Configuration changes require an idle reload.
 ## Management, observation and history
 
 - Public shell: `/v0/resource/plugins/pacer/index.html` (no credentials in its URL).
-- CPA management key stays in browser memory; inference keys cannot administer it.
+- The page connects through the authenticated reverse-proxy session; the proxy keeps
+  the CPA management key server-side. There is no browser management-key prompt.
+  Apply the same SSO gate and server-side key injection to both `/v0/management/*`
+  and `/v8/management/*` (including their bare prefix paths). The latter serves
+  model settings and forward reports. Never inject the key into inference routes.
 - CPAMP embedding uses the restricted same-origin frame bridge. No administrator
   credential is posted into the frame. The existing management API owns model settings
   through `/v8/management/oauth/settings/models` and `/v8/management/models/config`.

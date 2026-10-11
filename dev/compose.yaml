@@ -1,0 +1,40 @@
+name: pacer-preview
+services:
+  cpa:
+    image: ${CPA_IMAGE:?snapshot image required}
+    entrypoint: ["/CLIProxyAPI/CLIProxyAPI"]
+    command: ["--config", "/preview/runtime/config.yaml", "--local-model"]
+    user: "1000:1000"
+    restart: unless-stopped
+    environment:
+      SSL_CERT_FILE: /preview/tls/cert.pem
+    volumes:
+      - ${RUNTIME:?runtime required}:/preview/runtime
+      - ${ROOT}/tls:/preview/tls:ro
+    networks: [offline]
+    depends_on: [providers]
+  providers:
+    image: python:3.12-slim
+    command: ["python3", "/source/dev/serve.py", "providers"]
+    restart: unless-stopped
+    volumes:
+      - ${ROOT}/source:/source:ro
+      - ${RUNTIME}/fixtures.json:/fixtures.json:ro
+      - ${ROOT}/tls:/tls:ro
+    networks:
+      offline:
+        aliases: [api.anthropic.com, chatgpt.com, cloudcode-pa.googleapis.com, opencode.ai]
+  web:
+    image: python:3.12-slim
+    command: ["python3", "/source/dev/serve.py", "web"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:18319:8080"]
+    volumes:
+      - ${ROOT}/source:/source:ro
+      - ${RUNTIME}/manifest.json:/manifest.json:ro
+    networks: [offline, frontend]
+    depends_on: [cpa]
+networks:
+  offline:
+    internal: true
+  frontend: {}

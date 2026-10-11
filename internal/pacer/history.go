@@ -16,7 +16,7 @@ func (p *Plugin) keysView() pluginapi.ManagementResponse {
 	store := p.history
 	p.mu.Unlock()
 	if store == nil {
-		return resource(200, map[string]any{"revision": 0, "keys": []any{}, "groups": []any{}, "coverage": "No Pacer history archive is configured. CPAMP remains the source of key aliases, lineage and dated account profiles."})
+		return resource(200, map[string]any{"revision": 0, "keys": []any{}, "groups": []any{}, "coverage": "CPA owns the live API-key configuration. No additional Pacer display metadata has been saved."})
 	}
 	data, err := store.Keys(context.Background())
 	if err != nil {

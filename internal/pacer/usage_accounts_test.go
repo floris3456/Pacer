@@ -232,6 +232,41 @@ func TestUsageSettingsRoutes(t *testing.T) {
 	if !found {
 		t.Fatal("the new profile has no card with the account's requests")
 	}
+	// Creating with accounts is one revision, including every linked login.
+	before := view.ProfilesRevision
+	for _, bad := range [][]string{{"unknown-account"}, {claude[0].Ref, claude[0].Ref}} {
+		body, _ = json.Marshal(usageProfileEdit{Revision: before, Op: "create", Name: "Refused", Provider: "claude", Accounts: bad})
+		if got := call("PATCH", "usage/profile", string(body)); got.StatusCode != 400 {
+			t.Fatal("invalid initial membership accepted", got.StatusCode)
+		}
+	}
+	body, _ = json.Marshal(usageProfileEdit{Revision: before, Op: "create", Name: "Atomic profile", Provider: "claude", Accounts: []string{claude[0].Ref}})
+	r = call("PATCH", "usage/profile", string(body))
+	if r.StatusCode != 200 {
+		t.Fatal(r.StatusCode, string(r.Body))
+	}
+	if got := call("PATCH", "usage/profile", string(body)); got.StatusCode != 409 {
+		t.Fatal("stale create accepted", got.StatusCode)
+	}
+	if err := p.refreshUsageLive(ctx); err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(call("POST", "usage/accounts", `{}`).Body, &view)
+	if view.ProfilesRevision != before+1 {
+		t.Fatal("create was not atomic", before, view.ProfilesRevision)
+	}
+	created := false
+	for _, prof := range view.Profiles {
+		if prof.Name == "Atomic profile" {
+			created = true
+			if len(prof.Accounts) != 1 || prof.Accounts[0].Account != claude[0].Ref {
+				t.Fatal("initial membership missing", prof)
+			}
+		}
+	}
+	if !created {
+		t.Fatal("created profile missing")
+	}
 	// Prices: the imported price is used; a manual price replaces it.
 	var prices modelPricesView
 	r = call("POST", "models/prices", `{"models":[{"provider":"claude","model":"claude-opus-5-5"},{"provider":"claude","model":"claude-new-9"}]}`)

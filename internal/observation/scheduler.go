@@ -161,6 +161,10 @@ func putBudget(c *sql.Conn, kind, key string, b budget) error {
 // served after that read asks for one more read ActivityQuiet after the last
 // such request. Unknown adapters are never claimed complete.
 func coverage(windows []Window, now, activity time.Time) (bool, time.Time, string) {
+	return coverageInterval(windows, now, activity, IdleInterval)
+}
+
+func coverageInterval(windows []Window, now, activity time.Time, interval time.Duration) (bool, time.Time, string) {
 	if len(windows) == 0 {
 		return false, time.Time{}, ReasonPartial
 	}
@@ -168,10 +172,10 @@ func coverage(windows []Window, now, activity time.Time) (bool, time.Time, strin
 	var next, read time.Time
 	reason := ReasonIdle
 	for _, w := range windows {
-		fresh := w.FreshComplete(now, IdleInterval)
+		fresh := w.FreshComplete(now, interval)
 		if !fresh && directOnly(w.Provider) {
 			// A bucket with no running window may carry a balance and no reset.
-			fresh = w.State(now) == "partial" && w.Remaining != nil && w.Reset.IsZero() && !w.Usage.At.After(now) && now.Sub(w.Usage.At) < IdleInterval
+			fresh = w.State(now) == "partial" && w.Remaining != nil && w.Reset.IsZero() && !w.Usage.At.After(now) && now.Sub(w.Usage.At) < interval
 		}
 		if !fresh {
 			return false, time.Time{}, ReasonPartial
@@ -194,7 +198,7 @@ func coverage(windows []Window, now, activity time.Time) (bool, time.Time, strin
 		if at.After(read) {
 			read = at
 		}
-		candidate := at.Add(IdleInterval)
+		candidate := at.Add(interval)
 		if next.IsZero() || candidate.Before(next) {
 			next = candidate
 			reason = ReasonIdle
@@ -226,7 +230,11 @@ func (s *Store) reconcileJob(c *sql.Conn, account string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	complete, next, reason := coverage(windows, now, j.Activity)
+	interval, err := pollingInterval(c, account)
+	if err != nil {
+		return err
+	}
+	complete, next, reason := coverageInterval(windows, now, j.Activity, interval)
 	if complete {
 		cancelled := j.Cancelled
 		if j.State == "queued" {

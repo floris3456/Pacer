@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -14,6 +15,9 @@ import (
 // rewritten or refreshed: the next live observation supplies the new balance.
 func migrateCodexResetDrift(c *sql.Conn) error {
 	ctx := context.Background()
+	if err := openResetDriftSchema(c); err != nil {
+		return err
+	}
 	const id = "codex-reset-drift-v1"
 	var done int
 	if err := c.QueryRowContext(ctx, "SELECT count(*) FROM observation_migrations WHERE id=?", id).Scan(&done); err != nil || done != 0 {
@@ -122,4 +126,35 @@ func migrateCodexResetDrift(c *sql.Conn) error {
 	}
 	_, err = c.ExecContext(ctx, "INSERT INTO observation_migrations(id) VALUES(?)", id)
 	return err
+}
+
+// The shared report feed guards the SQLite schema cookie. Admit only this
+// additive DDL, after checking the incumbent generation, in Open's transaction.
+func openResetDriftSchema(c *sql.Conn) error {
+	ctx := context.Background()
+	var exists, feed int
+	if err := c.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='observation_migrations'").Scan(&exists); err != nil || exists != 0 {
+		return err
+	}
+	if err := c.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='measurement_report_meta'").Scan(&feed); err != nil {
+		return err
+	}
+	if feed != 0 {
+		var version int
+		var saved, current int64
+		if err := c.QueryRowContext(ctx, "SELECT version,schema_cookie,(SELECT schema_version FROM pragma_schema_version) FROM measurement_report_meta WHERE id=1").Scan(&version, &saved, &current); err != nil {
+			return err
+		}
+		if version != 2 || saved != current {
+			return errors.New("observation: pre-existing report feed schema change")
+		}
+	}
+	if _, err := c.ExecContext(ctx, "CREATE TABLE observation_migrations (id TEXT PRIMARY KEY)"); err != nil {
+		return err
+	}
+	if feed != 0 {
+		_, err := c.ExecContext(ctx, "UPDATE measurement_report_meta SET schema_cookie=(SELECT schema_version FROM pragma_schema_version) WHERE id=1 AND version=2")
+		return err
+	}
+	return nil
 }

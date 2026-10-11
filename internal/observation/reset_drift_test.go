@@ -1,11 +1,68 @@
 package observation
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 )
+
+func TestResetDriftMigrationPreservesGuardedFeed(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		name := "valid-feed"
+		if corrupt {
+			name = "unrecognized-DDL"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, c, _ := testStore(t)
+			if _, err := s.db.Exec("DROP TABLE observation_migrations"); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			feed, err := measurement.Open(ctx, s.db, measurement.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := feed.ReportFeedHead(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if corrupt {
+				if _, err := s.db.Exec("CREATE TABLE unrelated_schema_change(id INTEGER)"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = Open(s.db, c.Now)
+			if corrupt {
+				if err == nil {
+					t.Fatal("migration blessed unrecognized DDL")
+				}
+				var exists int
+				if err := s.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='observation_migrations'").Scan(&exists); err != nil || exists != 0 {
+					t.Fatal("failed migration changed schema", exists, err)
+				}
+				if _, err := feed.ReportFeedHead(ctx); !errors.Is(err, measurement.ErrReportFeedIntegrity) {
+					t.Fatal("feed guard weakened", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := feed.ReportFeedHead(ctx)
+			if err != nil || before != after {
+				t.Fatal("feed identity/head changed", before, after, err)
+			}
+			if _, err := measurement.Open(ctx, s.db, measurement.Options{}); err != nil {
+				t.Fatal("feed restart failed", err)
+			}
+		})
+	}
+}
 
 func TestCodexResetCorrectionKeepsLiveBalance(t *testing.T) {
 	s, c, path := testStore(t)
