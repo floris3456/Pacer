@@ -108,7 +108,7 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-meter-mini .usage-percent{text-align:right}
 .usage-meter-group+.usage-meter-group{margin-top:14px}
 .usage-window-picker{margin:0;padding:0}
-.usage-window-options{height:129px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 700ms cubic-bezier(.4,0,.2,1);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.usage-window-options{height:95px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 700ms cubic-bezier(.4,0,.2,1);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
 .usage-window-picker:has(.usage-window-expand[aria-expanded=true]) .usage-window-options{overflow-y:auto}
 .usage-window-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 0}
 .usage-window-controls>button{padding:5px 7px;font-size:11px;white-space:nowrap}
@@ -124,10 +124,10 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-window-category{min-width:0}
 .usage-window-category h4{display:flex;flex-direction:column;justify-content:end;min-height:46px;margin:0 0 6px;padding:4px;font-size:11px;border-bottom:1px solid var(--line-strong)}
 .usage-window-category h4 span:first-child{color:var(--muted);font-weight:400}
-.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:start;height:68px;padding:7px 3px;font-size:11px;line-height:1.5;border-bottom:1px solid var(--line);margin:0}
+.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:center;height:34px;padding:1px 3px;font-size:10px;line-height:10px;border-bottom:1px solid var(--line);margin:0}
 .usage-window-option:has(input:checked){background:#27352c}
 .usage-window-option:hover{background:var(--hover)}
-.usage-window-text{display:grid;min-width:0;gap:2px}
+.usage-window-text{display:grid;min-width:0;gap:0}
 .usage-window-account{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .usage-window-dates{font-size:10px}
 .usage-window-change{display:flex;align-items:center;white-space:nowrap;color:var(--text);font-variant-numeric:tabular-nums;font-size:10px;letter-spacing:-.2px}
@@ -1047,7 +1047,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       list.append(category);
     }
-    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show more windows');if(!expanded)list.scrollTop=0;list.style.height=expanded?'333px':'129px'},'usage-window-expand');
+    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show more windows');if(!expanded)list.scrollTop=0;list.style.height=expanded?'197px':'95px'},'usage-window-expand');
     expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','Show more windows');expand.append(span('∨'));
     details.append(list,expand);return details;
   }
@@ -1272,7 +1272,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         archivedGrid.append(card);
       } else el('usage-grid').append(card);
     }
-    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height='333px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows');list.scrollTop=openPickers.get(picker.dataset.profile)}
+    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height='197px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows');list.scrollTop=openPickers.get(picker.dataset.profile)}
   }
 
   async function openInspect(profile, pool, window) {
