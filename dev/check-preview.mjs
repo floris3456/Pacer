@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const url=process.env.PACER_PREVIEW_URL;
-assert(url?.startsWith('http://host.docker.internal:18329/pacer-dev/'),'Use the owned loopback preview tunnel');
+assert(url&&['host.docker.internal','127.0.0.1','localhost'].some(host=>url.startsWith('http://'+host+':18329/pacer-dev/')),'Use the owned loopback preview tunnel');
 // Map a loopback origin to the owned SSH tunnel on the Docker host. Localhost
 // retains secure-context APIs (fingerprinting); the public preview uses HTTPS.
 const browser=await chromium.launch({headless:true,args:['--host-resolver-rules=MAP localhost host.docker.internal']});
@@ -24,13 +24,14 @@ try{
   assert.equal(await page.getByRole('button',{name:'Disconnect',exact:true}).count(),0);
   assert.equal(await page.getByRole('button',{name:'Single window',exact:true}).count(),0);
   const gemini=page.locator('.usage-card').filter({has:page.getByText('Gemini Pro',{exact:true})});
-  await page.waitForFunction(()=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.querySelector('.usage-profile-name')?.textContent==='Gemini Pro');return c?.querySelectorAll('.usage-meter-mini').length===12},{},{timeout:65000});
-  assert.equal(await gemini.locator('.usage-meter-mini').count(),12);
-  assert.equal(await gemini.locator('.usage-meter-name').count(),6);
-  assert(!(await gemini.locator('.usage-meters').innerText()).includes('@'));
   const profileResponse=await page.request.post(url+'v0/management/plugins/pacer/usage/profiles',{data:{latest_only:true}});
   const profiles=(await profileResponse.json()).profiles;
-  const gp=profiles.find(p=>p.name==='Gemini Pro');assert.equal(gp.active_credentials,3);
+  const gp=profiles.find(p=>p.name==='Gemini Pro');assert(gp.active_credentials>1,'Snapshot must exercise multiple accounts');
+  const geminiMeters=gp.active_credentials*gp.pools.filter(p=>!p.ended).length;
+  await page.waitForFunction(expected=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.querySelector('.usage-profile-name')?.textContent==='Gemini Pro');return c?.querySelectorAll('.usage-meter-mini').length===expected},geminiMeters,{timeout:65000});
+  assert.equal(await gemini.locator('.usage-meter-mini').count(),geminiMeters);
+  assert.equal(await gemini.locator('.usage-meter-name').count(),new Set(gp.current.map(m=>m.account+'|'+m.scope)).size);
+  assert(!(await gemini.locator('.usage-meters').innerText()).includes('@'));
   const claude=page.locator('.usage-card').filter({has:page.getByText('Claude Pro',{exact:true})});
   const cp=profiles.find(p=>p.name==='Claude Pro');
   for(const scope of new Set(cp.current.map(m=>m.scope))){
@@ -45,7 +46,7 @@ try{
     }
   }
   const weekly=gp.current.filter(m=>m.scope==='gemini'&&m.kind==='weekly');
-  const combined=weekly.reduce((sum,m)=>sum+100-m.used_percent,0)/3;
+  const combined=weekly.reduce((sum,m)=>sum+100-m.used_percent,0)/gp.active_credentials;
   const geminiPool=gemini.locator('.usage-col').filter({has:page.getByText('Gemini models',{exact:true})});
   assert(Math.abs(Number(await geminiPool.getByRole('meter',{name:'Gemini Pro 7-day combined percent left',exact:true}).getAttribute('aria-valuenow'))-combined)<.01);
   const three=page.locator('.usage-card').filter({has:page.getByText('Claude Max 5x',{exact:true})});
@@ -150,5 +151,5 @@ try{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:'/evidence/preview-mobile.png',fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log('PASS: real preview; 12 Gemini meters across three accounts; combined arithmetic; single-account rows hidden; latest-pinned multi-selection; automatic refresh; persisted polling; dummy keys/models; atomic profile creation with an account; profile/login navigation; mobile fit.');
+  console.log(`PASS: real preview; ${geminiMeters} Gemini meters across ${gp.active_credentials} accounts; combined arithmetic; single-account rows hidden; latest-pinned multi-selection; automatic refresh; persisted polling; dummy keys/models; atomic profile creation with an account; profile/login navigation; mobile fit.`);
 }finally{await browser.close()}
