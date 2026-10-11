@@ -60,7 +60,10 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 		if _, err := c.ExecContext(context.Background(), schema); err != nil {
 			return err
 		}
-		return addActivityColumn(c)
+		if err := addActivityColumn(c); err != nil {
+			return err
+		}
+		return migrateCodexPremium(c)
 	}); err != nil {
 		return nil, fmt.Errorf("observation schema: %w", err)
 	}
@@ -176,6 +179,9 @@ func (s *Store) Observe(account, provider string, samples []Window) error {
 				return errors.New("observation: provider mismatch")
 			}
 			sample.Provider = provider
+			if provider == "codex" && sample.Scope == "limit:premium" {
+				sample.Scope = "all"
+			}
 			if !sample.Valid() {
 				return errors.New("observation: invalid sample")
 			}

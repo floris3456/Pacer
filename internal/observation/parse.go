@@ -116,7 +116,9 @@ func window(provider, scope string, seconds int64, used, reset, after string, fr
 func limitScope(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
-	case "", "codex", "codex_main", "codex-main", "all":
+	case "", "codex", "codex_main", "codex-main", "all", "premium":
+		// Codex labels its ordinary primary allowance "premium" in response
+		// headers, while wham/usage leaves the same allowance unnamed.
 		return "all"
 	case "bengalfox", "codex_bengalfox", "codex-bengalfox", "spark", "gpt-5.3-codex-spark":
 		return "spark"
