@@ -1712,8 +1712,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   async function showWorkspace(data){connected=true;allowBridge=false;el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
-  async function connectProxySession(){message('Connecting…');el('reconnect').disabled=true;try{await showWorkspace(await api(root+'/state'))}catch(error){message(error.message,true)}finally{el('reconnect').disabled=false}}
-  el('reconnect').onclick=()=>{if(window.parent!==window){allowBridge=true;window.parent.postMessage({type:'pacer:hello',version:1},location.origin)}else connectProxySession()};
+  async function connectProxySession(){message('Connecting…');el('reconnect').disabled=true;try{await showWorkspace(await api(root+'/state'))}catch(error){if(!connected)message(error.message,true)}finally{el('reconnect').disabled=false}}
+  el('reconnect').onclick=()=>{if(window.parent!==window){allowBridge=true;window.parent.postMessage({type:'pacer:hello',version:1},location.origin)}connectProxySession()};
   function disconnect(){allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected from Pacer. Retry to reconnect through your authenticated session.')}
   el('disconnect').onclick=disconnect;
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
@@ -1747,6 +1747,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('add-key').onclick=()=>editMetadata('add-key');el('add-group').onclick=()=>editMetadata('put-group');
   el('metadata-form').onsubmit=event=>{event.preventDefault();saveMetadata()};el('metadata-delete').onclick=()=>saveMetadata(true);el('metadata-cancel').onclick=()=>el('metadata-dialog').close();
   if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
-  else connectProxySession();
+  connectProxySession();
 })();
 </script></body></html>

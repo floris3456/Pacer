@@ -45,7 +45,7 @@ async function scenario(status, action){
     querySelector(){return {}},querySelectorAll(){return []}});
   for(const m of html.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g))nodes.set(m[1],{...element(),hidden:/\bhidden\b/.test(m[0])});
   const el=id=>{assert(nodes.has(id),id);return nodes.get(id)};
-  let release;
+  let release, onMessage;
   const sandbox={console,setTimeout,clearTimeout,location:{origin:'https://fixture.invalid'},
     document:{getElementById:el,querySelectorAll:()=>[],createElement:element},
     fetch:async(path,opts)=>{
@@ -54,19 +54,24 @@ async function scenario(status, action){
       assert.equal(opts.redirect,'error');assert.equal(opts.cache,'no-store');
       assert.equal(opts.credentials,'same-origin');
       assert.equal(opts.headers.Authorization,undefined);
-      if(calls.length===1&&action==='disconnect')await new Promise(r=>release=r);
+      if(calls.length===1&&(action==='disconnect'||action==='bridge'))await new Promise(r=>release=r);
       const code=calls.length===1?status:200;
       return {ok:code===200,status:code,json:async()=>({routing:{mode:'dry-run',can_activate:false},accounts:[]})};
     }};
-  sandbox.window={addEventListener(){}};
-  sandbox.window.parent=action==='iframe'?{postMessage:m=>messages.push(m)}:sandbox.window;
+  sandbox.window={addEventListener(type,fn){if(type==='message')onMessage=fn}};
+  sandbox.window.parent=action==='iframe'||action==='bridge'?{postMessage:m=>{
+    messages.push(m);
+    if(m.type==='pacer:request')setImmediate(()=>onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:response',version:1,id:m.id,ok:true,data:{routing:{mode:'dry-run',can_activate:false},accounts:[]}}}));
+  }}:sandbox.window;
   for(const k of ['localStorage','sessionStorage'])Object.defineProperty(sandbox,k,{get(){throw Error('credential persistence forbidden')}});
   vm.runInNewContext(script,sandbox,{timeout:5000});
   if(action==='disconnect'){assert(release);el('disconnect').onclick();release()}
-  await settle();
-  if(action==='iframe'){
-    assert.equal(calls.length,0);assert.equal(messages[0].type,'pacer:hello');return;
+  if(action==='bridge'){
+    assert(release);onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:bridge-ready',version:1}});release();
   }
+  await settle();
+  if(action==='iframe'||action==='bridge')assert.equal(messages[0].type,'pacer:hello');
+  if(action==='bridge'){assert.equal(el('workspace').hidden,false);assert.equal(el('message').hidden,true);assert(messages.some(m=>m.type==='pacer:request'));return}
   assert.equal(calls.length,1,'exactly one automatic probe, no polling or duplicate state fetch');
   const authorized=status===200&&action!=='disconnect';
   assert.equal(el('login').hidden,authorized);assert.equal(el('workspace').hidden,!authorized);
@@ -79,5 +84,5 @@ async function scenario(status, action){
     assert.equal(el('login').hidden,true);assert.equal(el('workspace').hidden,false);
   }
 }
-(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'disconnect');await scenario(200,'iframe');console.log('PASS: proxy login, refusals, session retry, disconnect race, iframe bridge')})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'disconnect');await scenario(200,'iframe');await scenario(401,'iframe');await scenario(401,'bridge');console.log('PASS: proxy login, refusals, session retry, disconnect race, embedded proxy login and retry, legacy bridge race')})().catch(e=>{console.error(e);process.exitCode=1});
 `
