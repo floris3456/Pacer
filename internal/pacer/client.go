@@ -164,7 +164,7 @@ func (p *Plugin) servedCredential(auth string) (credential, bool) {
 
 // clientDiscovery tells a client which declarations and views Pacer supports.
 func clientDiscovery() map[string]any {
-	return map[string]any{"version": clientVersion, "request_header": clientHeader, "caps": []string{"quota"}, "quota_header": quotaReplyHeader, "views": []string{"usage", "prices"}}
+	return map[string]any{"version": clientVersion, "request_header": clientHeader, "caps": []string{"quota"}, "quota_header": quotaReplyHeader, "views": []string{"usage", "prices", "usage-watch"}}
 }
 
 // modelList asks CPA's own model list with the client's key. accepted is false

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,6 +113,20 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		return resource(200, map[string]any{"protocol": 1, "mode": "off", "primary_used": binding.PrimaryUsed, "consumed": binding.Consumed, "cursor": 0, "generation": binding.Generation, "alias": binding.Alias, "intent": "", "available": true, "windows": windows, "events": []any{}})
 	}
+	// Authenticate before waiting. Capture the cursor before reading windows:
+	// changes concurrent with this snapshot then wake the next subscription.
+	var wait time.Duration
+	if raw := req.Query.Get("wait_ms"); raw != "" {
+		ms, err := strconv.Atoi(raw)
+		if err != nil || ms < 0 || ms > 20000 || len(req.Query.Get("cursor")) > 128 || req.Query.Get("v") != "1" {
+			return resource(400, map[string]string{"error": "invalid_usage_wait"})
+		}
+		wait = time.Duration(ms) * time.Millisecond
+	}
+	cursor, ok := p.usageChanges.wait(req.Query.Get("cursor"), wait, p.workerDone)
+	if !ok {
+		return resource(503, map[string]string{"error": "usage_watch_unavailable"})
+	}
 	p.mu.Lock()
 	creds := make([]credential, 0, len(p.creds)+len(p.usageCreds))
 	for _, c := range p.creds {
@@ -168,7 +183,8 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	if !binding.LastUsed.IsZero() {
 		last = binding.LastUsed.Unix()
 	}
-	view := map[string]any{"protocol": 1, "view": "usage", "now": p.now().Unix(), "max_age_seconds": 3600, "all": all == "true", "provider": binding.Provider, "model": binding.Model, "current": binding.Auth, "active": active, "last_used": last, "credentials": rows}
+	now := p.now()
+	view := map[string]any{"protocol": 1, "view": "usage", "now": now.Unix(), "now_ms": now.UnixMilli(), "cursor": cursor, "max_age_seconds": 3600, "all": all == "true", "provider": binding.Provider, "model": binding.Model, "current": binding.Auth, "active": active, "last_used": last, "credentials": rows}
 	if binding.Key != "" && req.Query.Get("v") == "1" {
 		view["next_use"] = p.nextUse(binding)
 	}

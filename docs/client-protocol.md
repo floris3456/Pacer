@@ -12,7 +12,7 @@ and the new account builds its cache from scratch.
 ```json
 {"protocol":1,"pacer":true,
  "client":{"version":1,"request_header":"X-Pacer-Client","caps":["quota"],
-           "quota_header":"X-Pacer-Quota","views":["usage","prices"]}}
+            "quota_header":"X-Pacer-Quota","views":["usage","prices","usage-watch"]}}
 ```
 
 Behind an SSO proxy, this exact GET path has to reach CPA without SSO, like the older quota-handoff path
@@ -77,6 +77,30 @@ Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a
 
   `cache_write` is the 5-minute write price; `context_tiers` and `fast` appear when the model has them. Models without
   a price are left out.
+
+### Shared credential change subscription
+
+The usage view includes `now_ms` (millisecond snapshot time) and an opaque
+`cursor`. To subscribe, repeat the authenticated usage GET with
+`&cursor=<last cursor>&wait_ms=20000`. Pacer returns immediately when any caller's
+response headers or a scheduled provider read updates its stored observations.
+No model request from the viewer is needed, and the caller contributing headers
+does not need to declare `X-Pacer-Client`. Primary/last-used identity stays local
+to the viewer's chat; shared quota changes do not change it.
+
+Native resource responses are finite JSON, so this is a bounded long poll, not
+SSE. An initial/mismatched cursor returns a full snapshot immediately. An
+unchanged cursor returns a heartbeat snapshot after at most 20 seconds. Cursors
+are instance-specific, so restart/reconnect cannot silently lose updates.
+Capture the returned cursor and rearm the request; coalesced changes are covered
+by the next full snapshot. Do not run overlapping waits. Retry failures with
+backoff; older servers without a cursor require ordinary cached-view polling.
+
+Notifications occur after storing observations, before the rest of measurement
+processing. They never block on viewers, perform provider requests, or run on
+payload chunks. Authentication still uses CPA's local model-list boundary.
+The native ABI cannot cancel a held call on HTTP disconnect; held calls therefore
+have the 20-second lifetime and a global limit of 256 concurrent waiters.
 
 ## How often Pacer reads meters
 

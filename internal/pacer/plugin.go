@@ -113,6 +113,7 @@ type Plugin struct {
 	measurementErrors  int64
 	measurementSource  string
 	usageLive          usageLive
+	usageChanges       usageChanges
 	mu                 sync.Mutex
 	Host               Host
 	now                func() time.Time

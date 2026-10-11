@@ -237,6 +237,7 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 		p.metricError(err)
 		return
 	}
+	p.usageChanges.notify()
 	if usageOnlyProvider(c.Provider) {
 		return // usage page only: no measurement report, no routing evidence
 	}
