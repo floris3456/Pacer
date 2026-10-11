@@ -108,9 +108,25 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-meter-mini .usage-percent{text-align:right}
 .usage-meter-group+.usage-meter-group{margin-top:14px}
 .usage-window-picker{margin:0;padding:0}
-.usage-window-picker summary{cursor:pointer;font-size:13px;padding:8px 0}
-.usage-window-options{max-height:250px;overflow:auto;display:grid;gap:3px;border-top:1px solid var(--line);padding-top:8px}
-.usage-window-option{display:grid;grid-template-columns:18px 1fr;gap:8px;align-items:start;padding:6px;font-size:12px;line-height:1.5}
+.usage-window-picker summary{cursor:pointer;font-size:13px;padding:10px 12px;border:1px solid var(--line-strong);background:var(--raised);display:flex;align-items:center;gap:8px;border-radius:3px;list-style:none}
+.usage-window-picker summary::-webkit-details-marker{display:none}
+.usage-window-picker summary:hover{background:var(--hover);border-color:var(--muted)}
+.usage-picker-title{font-weight:600}
+.usage-picker-selection{margin-left:auto;font-size:11px;color:var(--muted)}
+.usage-picker-chevron{font-size:20px;line-height:1;transition:transform .15s}
+.usage-window-picker[open] .usage-picker-chevron{transform:rotate(180deg)}
+.usage-window-options{max-height:330px;overflow:auto;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start}
+.usage-window-category{min-width:0}
+.usage-window-category h4{display:flex;flex-direction:column;justify-content:end;min-height:46px;margin:0 0 6px;padding:4px;font-size:11px;border-bottom:1px solid var(--line-strong)}
+.usage-window-category h4 span:first-child{color:var(--muted);font-weight:400}
+.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:start;padding:7px 3px;font-size:11px;line-height:1.5;border-bottom:1px solid var(--line)}
+.usage-window-option:has(input:checked){background:#27352c}
+.usage-window-option:hover{background:var(--hover)}
+.usage-window-text{display:grid;min-width:0;gap:2px}
+.usage-window-account{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.usage-window-dates{font-size:10px}
+.usage-window-change{color:var(--text);font-variant-numeric:tabular-nums;font-size:11px}
+.usage-window-badge{color:#99cbaa;font-size:9px}
 .usage-window-option input{margin:3px 0;width:auto}
 .usage-window-option small{display:block;color:var(--muted)}
 .usage-summary-note{font-size:12px;color:var(--muted)}
@@ -122,7 +138,11 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-polling{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .usage-polling input{width:76px;padding:4px 6px}
 .usage-polling button{padding:4px 8px}
-.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(120px,100%),1fr));gap:14px}
+.usage-columns{display:grid;grid-template-columns:repeat(var(--summary-columns,2),minmax(0,1fr));gap:18px 12px}
+.usage-col-family{font-size:11px;color:var(--muted);font-weight:400}
+.usage-average{display:grid;gap:4px;padding-top:7px;border-top:1px solid var(--line);font-size:11px;line-height:1.45}
+.usage-average-count{color:var(--text);font-weight:500}
+.usage-average-tokens,.usage-average-delta,.usage-average-models{color:var(--muted);overflow-wrap:anywhere}
 .usage-window-picker{display:flex;align-items:stretch;flex-direction:column;gap:6px;min-width:0}
 .usage-window-picker select{width:100%;min-width:0}
 .usage-meter{display:flex;flex-direction:column;gap:6px}
@@ -180,9 +200,9 @@ pre,code,kbd,samp{background:var(--field)}
 .price-cell{font-variant-numeric:tabular-nums;white-space:normal}
 .pill.price-missing{border-color:var(--err);color:var(--err-text)}
 #catalogue td{overflow-wrap:anywhere}
-.usage-col{display:flex;flex-direction:column;gap:10px;min-width:0;padding-top:4px}
-.usage-col-header{font-size:15px;font-weight:650;color:var(--text);border-bottom:1px solid var(--line-strong);padding-bottom:8px}
-.usage-rate-big{font-size:23px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.35;color:var(--text)}
+.usage-col{display:flex;flex-direction:column;gap:7px;min-width:0;padding-top:4px}
+.usage-col-header{display:flex;flex-direction:column;justify-content:end;min-height:42px;font-size:14px;font-weight:650;color:var(--text);border-bottom:1px solid var(--line-strong);padding-bottom:6px}
+.usage-rate-big{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.35;color:var(--text)}
 .usage-rate-unavailable{color:var(--muted);font-weight:600}
 .usage-stat{font-size:13px;color:var(--text);overflow-wrap:anywhere;line-height:1.65}
 .usage-model-mix{font-size:13px;color:var(--muted);overflow-wrap:anywhere;line-height:1.65}
@@ -991,21 +1011,34 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   function profileWindowPicker(profile){
     const details=document.createElement('details');details.className='usage-window-picker';details.dataset.profile=profile.reference;
     const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
-    const summary=document.createElement('summary');summary.textContent='Windows in average · latest'+(chosen.size?' + '+chosen.size+' selected':' only');details.append(summary);
+    const summary=document.createElement('summary');summary.append(span('Windows in average','usage-picker-title'),span(chosen.size?'Latest + '+chosen.size+' selected':'Latest only','usage-picker-selection'),span('⌄','usage-picker-chevron'));details.append(summary);
     const controls=document.createElement('div');controls.className='toolbar';
     const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true);const picker=[...document.querySelectorAll('.usage-window-picker')].find(p=>p.dataset.profile===profile.reference);if(picker)picker.open=true};
     controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
     details.append(controls);
     const list=document.createElement('div');list.className='usage-window-options';
     if(!usageWindowLists.has(profile.reference))list.append(span('Loading windows…','muted'));
-    for(const w of windows){
+    const categories=poolGroups(profile.pools||[]).flatMap(g=>g.pools).filter(p=>windows.some(w=>w.kind===p.kind&&w.scope===p.scope));
+    list.style.setProperty('--window-categories',Math.max(1,categories.length));
+    for(const pool of categories){
+      const category=document.createElement('section');category.className='usage-window-category';
+      const heading=document.createElement('h4');heading.append(span(pool.label||'All models'),span(kindTitle(pool.kind)));category.append(heading);
+      for(const w of windows.filter(w=>w.kind===pool.kind&&w.scope===pool.scope)){
       const label=document.createElement('label');label.className='usage-window-option';
+      label.title=shortAccount(w.label)+' · '+windowSpan(w)+(w.excluded?' · excluded from rates':'');
       const cb=document.createElement('input');cb.type='checkbox';cb.checked=w.latest||chosen.has(w.id);cb.disabled=w.latest;
-      const pool=profile.pools.find(p=>p.kind===w.kind&&p.scope===w.scope);
-      const text=span((pool?.label?pool.label+' · ':'')+kindTitle(w.kind)+' · '+shortAccount(w.label)+(w.latest?' · Latest':''));
-      const dates=document.createElement('small');dates.textContent=windowSpan(w)+(w.excluded?' · excluded from rates':'');text.append(dates);
+      cb.setAttribute('aria-label',label.title+(w.latest?' · Latest':''));
+      const text=span('','usage-window-text');
+      if(profile.credentials>1)text.append(span(shortAccount(w.label),'usage-window-account'));
+      const simpleDate=ms=>ms?new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'}):'—';
+      text.append(span(simpleDate(w.start_ms)+' → '+simpleDate(w.end_ms),'usage-window-dates'));
+      const start=w.rate?.start_percent,end=w.rate?.end_percent??w.used_percent;
+      text.append(span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change'));
+      if(w.latest||w.excluded)text.append(span(w.latest?'Latest · included':'Excluded','usage-window-badge'));
       cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
-      label.append(cb,text);list.append(label);
+      label.append(cb,text);category.append(label);
+      }
+      list.append(category);
     }
     details.append(list);return details;
   }
@@ -1041,7 +1074,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
     const colH = document.createElement('div');
     colH.className = 'usage-col-header';
-    colH.textContent = colTitle;
+    if(pool.label)colH.append(span(pool.label,'usage-col-family'));
+    colH.append(span(colTitle));
     col.append(colH);
 
     const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
@@ -1060,11 +1094,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       else usageStat(col,'Rate not measured yet','usage-summary-note');
       const samples = rate.samples || 0;
       const excluded = pool.excluded || 0;
-      const details=document.createElement('details');details.className='usage-details';const summary=document.createElement('summary');summary.textContent=`Average · ${samples} measured window${samples === 1 ? '' : 's'}`;details.append(summary);
-      appendRateDisplay(details,rate);
-      if(excluded)usageStat(details,excluded+' windows excluded');
+      const details=document.createElement('div');details.className='usage-average';
+      usageStat(details,`Average · ${samples} measured window${samples === 1 ? '' : 's'}`,'usage-average-count');
+      if(rate.status==='available'){
+        const tokens=rate.equivalent_tokens_per_percent;
+        if(tokens){const text=compactNum(tokens.low)+(Math.abs(tokens.high-tokens.low)>=1?'–'+compactNum(tokens.high):'')+' tokens / 1%';const line=usageStat(details,text,'usage-average-tokens');line.title=(rate.reference_name||'Reference model')+' · '+formatTokens(tokens)+' / 1%'}
+        if(rate.start_percent!=null&&rate.end_percent!=null)usageStat(details,pct1(100-rate.start_percent)+'% → '+pct1(100-rate.end_percent)+'% left','usage-average-delta');
+        else if(rate.delta_pp!=null)usageStat(details,pct1(rate.delta_pp)+' quota points measured','usage-average-delta');
+      }else if(rate.reason)details.title=rate.reason;
+      if(excluded)usageStat(details,excluded+' excluded','usage-average-delta');
       const mix = formatModelMix(pool.average_models);
-      if (mix) usageStat(details, mix, 'usage-model-mix');
+      if (mix) usageStat(details, mix, 'usage-average-models');
       col.append(details);
     }
 
@@ -1194,7 +1234,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const pools = (profile.pools || []).filter(pool=>!pool.ended||(usageWindowLists.get(profile.reference)||[]).some(w=>selected.has(w.id)&&w.kind===pool.kind&&w.scope===pool.scope));
       const groups = poolGroups(pools);
       if (!groups.length) usageStat(card, 'No recorded window yet');
-      for (const g of groups) card.append(renderPoolGroup(profile, g));
+      const columns=document.createElement('div');columns.className='usage-columns';
+      const ordered=groups.flatMap(g=>g.pools);
+      columns.style.setProperty('--summary-columns',ordered.length<=3?Math.max(1,ordered.length):ordered.length<=6?Math.ceil(ordered.length/2):3);
+      for(const pool of ordered)columns.append(renderUsageCol(profile,pool,kindTitle(pool.kind)));
+      card.append(columns);
 
       const actions = document.createElement('div');
       actions.className = 'usage-card-actions';
