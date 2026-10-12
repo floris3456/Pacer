@@ -214,6 +214,13 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if err != nil {
 		return
 	}
+	if c.Provider == "codex" {
+		changed, err := p.observer.ObserveCredits(c.Account, observation.CodexCredits(response.Body, at))
+		p.metricError(err)
+		if changed {
+			p.usageChanges.notify()
+		}
+	}
 	p.storeObservations(c, windows)
 	if routed {
 		p.capacitySample(sandwich, at, windows)

@@ -24,6 +24,9 @@ type Account struct {
 	WarmBurn         float64 // dollars/hour from compatible, observed warm stretches
 	RunwayUnknown    bool    // measured capacity exists, but outstanding warm load is unbounded
 	KeyWarm          bool
+	// Subscription exhaustion alone cannot prove account exhaustion when
+	// separate credits are available or their status is unknown/stale.
+	QuotaExhaustionUncertain bool
 }
 
 type Chat struct {
@@ -58,6 +61,7 @@ type score struct {
 	Account
 	pace, room               float64
 	known, hard, fit, runway bool
+	quotaUncertain           bool
 }
 
 func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
@@ -72,6 +76,12 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 		}
 	}
 	forced := chat.Account != "" && (current == nil || current.hard)
+	// Keep an offered current account when only its subscription is depleted.
+	// Separate credit capacity has no comparable pace; abstention here would
+	// let CPA's fallback silently rotate a still-usable account.
+	if current != nil && current.quotaUncertain {
+		return chosen(*current, "credit_status_unscored", false)
+	}
 	// Missing telemetry never evicts a healthy warm/protected binding. Unknown
 	// legacy TTL cannot authorize a cold move at five minutes.
 	if current != nil && !current.hard && (chat.InFlight || chat.UnknownWarmth || now.Before(chat.ProtectedUntil)) {
@@ -224,6 +234,10 @@ func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
 	if math.IsInf(s.pace, 1) {
 		s.known = false
 		s.pace = 0
+	}
+	if s.hard && a.QuotaExhaustionUncertain {
+		s.quotaUncertain = true
+		s.hard, s.known = false, false
 	}
 	return s
 }

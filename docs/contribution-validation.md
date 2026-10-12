@@ -107,3 +107,16 @@ and reopened capability lookups.
 This is local automated validation with synthetic credentials. It does not assert
 live provider behavior or identify a deployed CPA binary. No deployment or
 routing-mode change is included.
+# Codex credit status follow-up
+
+The additive credit snapshot is tested separately from subscription windows:
+weekly zero with available credits, missing/malformed flags, expiry, restart,
+equal-time conflicts, source ordering, account-grant isolation, header transport,
+and credit-only usage-watch notifications. Quota placement retains an offered
+current Codex account unless empty-credit and quota evidence together confirm
+the subscription floor; mixed source timestamps cannot force a move.
+
+Affected observation/routing/Pacer suites pass with the Go race detector and vet.
+The associated client passes 292 tests (1,649 assertions), typecheck and standalone
+SDK build, including actual OpenTUI rendering at 37 columns. Existing quota
+scheduling is unchanged. This follow-up adds no paid inference test requests.

@@ -212,7 +212,15 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 				shared = append(shared, other.ID)
 			}
 		}
-		rows = append(rows, map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "shared_with": shared, "windows": windows})
+		row := map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "shared_with": shared, "windows": windows}
+		if c.Provider == "codex" {
+			credits, err := p.observer.ReadCredits(c.Account)
+			if err != nil {
+				return resource(503, map[string]string{"error": "quota_state_unavailable"})
+			}
+			row["credits"] = credits.At(p.now())
+		}
+		rows = append(rows, row)
 	}
 	active := []string{}
 	if binding.Key != "" {

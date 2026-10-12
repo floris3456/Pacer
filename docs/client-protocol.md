@@ -77,6 +77,42 @@ padding) of:
   included; their windows come from Pacer's meter reads (`source: api`).
 - Upstreams cannot set this header: CPA removes any upstream `X-Pacer-Quota` before Pacer adds its own.
 
+### Codex credits
+
+Codex replies and usage credentials also carry an optional, separate `credits`:
+
+```json
+{"state":"available","read_ms":1791806400000,"expires_ms":1791810000000,"source":"api"}
+```
+
+States are `available`, `empty`, `unlimited`, `unknown`, and `stale`. These are
+provider credit flags, not a dollar amount, quota percentage, reset countdown,
+or a guarantee that a particular inference request will succeed. Subscription
+windows remain unchanged: **0% weekly quota can coexist with available credits**.
+`unlimited` refers only to credits, never to every account or model limit.
+
+The existing scheduled Codex usage read supplies this field; UI reads, quota
+headers and watch requests make no additional provider calls. Missing/malformed
+credit flags in a successful reading become `unknown`. Before any reading,
+`unknown` has no timestamps. Otherwise `read_ms` is the original observation and
+`expires_ms` is its one-hour freshness boundary. Clients must age it locally,
+including across persistence/reconnects, and must not substitute the envelope's
+`at_ms`/`now_ms`. Passive quota headers can postpone a direct usage read; credits
+then become visibly stale until the next scheduled read, rather than causing
+additional polling. Source freshness does not reserve credits against other users.
+
+Merge credit evidence by `read_ms` independently from quota-window envelopes;
+an absent field on an older server/header must not refresh or erase evidence.
+Retain account-grant filtering for aliases and persisted data. Display credits
+as their own status line, without changing the subscription bars' percentages.
+
+Quota-based routing retains an already-bound, currently offered Codex account
+when a subscription floor is reached unless credits are explicitly fresh-empty.
+The advisory reason is `credit_status_unscored`: Pacer cannot convert credits
+into comparable placement capacity. Removed, cooling, disabled, or ungranted
+accounts remain ineligible. New placements receive no invented credit score.
+This does not enable active routing or change provider error handling.
+
 ## Views (`Authorization: Bearer <CPA API key>`, `auth=api-key`)
 
 Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a provider.

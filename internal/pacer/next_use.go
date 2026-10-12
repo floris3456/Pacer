@@ -71,6 +71,18 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) (
 			continue
 		}
 		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now)}
+		if c.Provider == "codex" {
+			credits, err := p.observer.ReadCredits(c.Account)
+			account.QuotaExhaustionUncertain = err != nil || credits.At(now).State != "empty"
+			// A successful meter read writes credits before its windows. New
+			// empty credits must not combine with an older exhausted window
+			// while that same read is replenishing the subscription allowance.
+			for _, w := range windows {
+				if w.Applies(input.Model) && !w.NotApplicable && w.Usage.At.UnixMilli() < credits.ReadMS {
+					account.QuotaExhaustionUncertain = true
+				}
+			}
+		}
 		if report, ok := p.measurements[c.Account]; ok && now.Sub(report.AsOf) < time.Minute {
 			selection := input.Selection
 			if input.Managed {

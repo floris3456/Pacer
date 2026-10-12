@@ -95,12 +95,13 @@ type quotaWindow struct {
 }
 
 type quotaReply struct {
-	V        int           `json:"v"`
-	Provider string        `json:"provider"`
-	Auth     string        `json:"auth"`
-	Alias    string        `json:"alias,omitempty"`
-	AtMS     int64         `json:"at_ms"`
-	Windows  []quotaWindow `json:"windows"`
+	V        int                  `json:"v"`
+	Provider string               `json:"provider"`
+	Auth     string               `json:"auth"`
+	Alias    string               `json:"alias,omitempty"`
+	AtMS     int64                `json:"at_ms"`
+	Windows  []quotaWindow        `json:"windows"`
+	Credits  *observation.Credits `json:"credits,omitempty"`
 }
 
 func ms(t time.Time) int64 {
@@ -144,7 +145,16 @@ func (p *Plugin) quotaReplyValue(observer *observation.Store, c credential, mode
 		return "", false
 	}
 	now := p.now()
-	raw, err := json.Marshal(quotaReply{V: clientVersion, Provider: c.Provider, Auth: c.ID, Alias: c.Alias, AtMS: now.UnixMilli(), Windows: clientWindows(windows, model, now)})
+	reply := quotaReply{V: clientVersion, Provider: c.Provider, Auth: c.ID, Alias: c.Alias, AtMS: now.UnixMilli(), Windows: clientWindows(windows, model, now)}
+	if c.Provider == "codex" {
+		credits, err := observer.ReadCredits(c.Account)
+		if err != nil {
+			return "", false
+		}
+		credits = credits.At(now)
+		reply.Credits = &credits
+	}
+	raw, err := json.Marshal(reply)
 	if err != nil || len(raw) > 6<<10 {
 		return "", false
 	}

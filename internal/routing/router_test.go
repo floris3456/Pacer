@@ -23,6 +23,28 @@ func TestPacePreservesWeeklyCapacityAndSpendsExpiringBudget(t *testing.T) {
 	}
 }
 
+func TestCreditUncertaintyKeepsOnlyAnOfferedCurrentAccount(t *testing.T) {
+	a, b := account("a", 0, 4), account("b", 80, 4)
+	a.QuotaExhaustionUncertain = true
+	for _, candidates := range [][]Account{{a}, {a, b}} {
+		for _, chat := range []Chat{{Account: "a"}, {Account: "a", InFlight: true}, {Account: "a", ProtectedUntil: instant.Add(time.Hour)}} {
+			if d := Pick(Default(), instant, chat, candidates); !d.Handled || d.Auth != "a" || d.Forced || d.Reason != "credit_status_unscored" {
+				t.Fatal("subscription floor evicted a potentially usable account", d)
+			}
+		}
+	}
+	if d := Pick(Default(), instant, Chat{Account: "a"}, []Account{b}); d.Auth != "b" || !d.Forced {
+		t.Fatal("retained unavailable account", d)
+	}
+	if d := Pick(Default(), instant, Chat{}, []Account{a}); d.Handled {
+		t.Fatal("invented credit capacity", d)
+	}
+	a.QuotaExhaustionUncertain = false
+	if d := Pick(Default(), instant, Chat{Account: "a"}, []Account{a, b}); d.Auth != "b" || !d.Forced {
+		t.Fatal("fresh empty credits stopped ordinary routing", d)
+	}
+}
+
 func TestWarmAndUnknownContextsStayColdMovesNeedMargin(t *testing.T) {
 	a, b := account("a", 30, 4), account("b", 80, 4)
 	for _, chat := range []Chat{{Account: "a", ProtectedUntil: instant.Add(time.Hour)}, {Account: "a", UnknownWarmth: true}, {Account: "a", InFlight: true}} {
