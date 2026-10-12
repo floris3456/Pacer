@@ -2,10 +2,77 @@ package observation
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCreditBalancePreservesBoundedProviderDecimals(t *testing.T) {
+	at := instant("2026-10-12T12:00:00Z")
+	for _, tc := range []struct{ raw, want string }{
+		{`"50157.8642475000"`, "50157.8642475"}, {`0`, "0"}, {`"001.200"`, "1.2"},
+		{`"0.0001"`, "0.0001"}, {`"999999999999999999"`, "999999999999999999"},
+		{`null`, ""}, {`true`, ""}, {`{}`, ""}, {`-1`, ""}, {`"NaN"`, ""},
+		{`"1e9"`, ""}, {`"9999999999999999999"`, ""}, {`"1\u001b"`, ""},
+	} {
+		c := CodexCredits([]byte(fmt.Sprintf(`{"credits":{"has_credits":true,"unlimited":false,"balance":%s}}`, tc.raw)), at)
+		if c.State != "available" || c.Balance != tc.want {
+			t.Fatalf("%s: %+v", tc.raw, c)
+		}
+	}
+}
+
+func TestCreditBalanceMigrationPersistenceAndConflicts(t *testing.T) {
+	_, clock, path := testStore(t)
+	db, err := sql.Open("sqlite3", path+".credits.sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	_, err = db.Exec(`CREATE TABLE observation_credits (account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO observation_credits VALUES ('account','available',?)`, clock.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenCredits(db, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ReadCredits("account"); err != nil || got.State != "available" || got.Balance != "" {
+		t.Fatal(got, err)
+	}
+	clock.Add(time.Second)
+	sample := Credits{State: "available", ReadMS: clock.Now().UnixMilli(), Source: APISource, Balance: "12.34"}
+	if changed, err := s.ObserveCredits("account", sample); !changed || err != nil {
+		t.Fatal(changed, err)
+	}
+	reopened, err := OpenCredits(db, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.ReadCredits("account"); err != nil || got.Balance != "12.34" {
+		t.Fatal(got, err)
+	}
+	sample.Balance = "56.78"
+	if changed, err := s.ObserveCredits("account", sample); !changed || err != nil {
+		t.Fatal(changed, err)
+	}
+	if got, _ := s.ReadCredits("account"); got.State != "unknown" || got.Balance != "" {
+		t.Fatal("conflict", got)
+	}
+	clock.Add(time.Second)
+	sample.ReadMS, sample.Balance = clock.Now().UnixMilli(), ""
+	if _, err := s.ObserveCredits("account", sample); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ReadCredits("account"); got.State != "available" || got.Balance != "" {
+		t.Fatal("missing balance revived old amount", got)
+	}
+}
 
 func openTestCredits(t *testing.T, path string, clock *fakeClock) *CreditStore {
 	t.Helper()

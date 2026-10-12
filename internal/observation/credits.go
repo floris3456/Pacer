@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -24,7 +26,31 @@ func OpenCredits(db *sql.DB, clock func() time.Time) (*CreditStore, error) {
 	s := &Store{db: db, clock: clock}
 	err := s.write(func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS observation_credits (
- account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL)`)
+ account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL, balance TEXT NOT NULL DEFAULT '')`)
+		if err != nil {
+			return err
+		}
+		rows, err := conn.QueryContext(context.Background(), `PRAGMA table_info(observation_credits)`)
+		if err != nil {
+			return err
+		}
+		found := false
+		for rows.Next() {
+			var id, notNull, primary int
+			var name, kind string
+			var defaultValue any
+			if err := rows.Scan(&id, &name, &kind, &notNull, &defaultValue, &primary); err != nil {
+				rows.Close()
+				return err
+			}
+			found = found || name == "balance"
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil || found {
+			return err
+		}
+		_, err = conn.ExecContext(context.Background(), `ALTER TABLE observation_credits ADD COLUMN balance TEXT NOT NULL DEFAULT ''`)
 		return err
 	})
 	if err != nil {
@@ -40,17 +66,39 @@ type Credits struct {
 	ReadMS    int64  `json:"read_ms,omitempty"`
 	ExpiresMS int64  `json:"expires_ms,omitempty"`
 	Source    string `json:"source"`
+	// Provider-reported credits, preserved as decimal text without currency conversion.
+	Balance string `json:"balance,omitempty"`
+}
+
+var creditDecimal = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]{1,18})?$`)
+
+func creditBalance(raw string) string {
+	if !creditDecimal.MatchString(raw) {
+		return ""
+	}
+	parts := strings.SplitN(raw, ".", 2)
+	whole := strings.TrimLeft(parts[0], "0")
+	if whole == "" {
+		whole = "0"
+	}
+	if len(parts) == 2 {
+		if fraction := strings.TrimRight(parts[1], "0"); fraction != "" {
+			return whole + "." + fraction
+		}
+	}
+	return whole
 }
 
 // CodexCredits consumes the same successful wham/usage read as API. A missing
 // or malformed field replaces earlier certainty with unknown, never with zero.
-// Balance units are not part of this contract; only provider flags are used.
+// Routing continues to use provider flags, independently of the optional balance.
 func CodexCredits(body []byte, at time.Time) Credits {
 	c := Credits{State: "unknown", ReadMS: at.UnixMilli(), ExpiresMS: at.Add(CreditMaxAge).UnixMilli(), Source: APISource}
 	var v struct {
 		Credits *struct {
-			Has       *bool `json:"has_credits"`
-			Unlimited *bool `json:"unlimited"`
+			Has       *bool           `json:"has_credits"`
+			Unlimited *bool           `json:"unlimited"`
+			Balance   json.RawMessage `json:"balance"`
 		} `json:"credits"`
 	}
 	if json.Unmarshal(body, &v) != nil || v.Credits == nil || v.Credits.Has == nil || v.Credits.Unlimited == nil {
@@ -63,6 +111,15 @@ func CodexCredits(body []byte, at time.Time) Credits {
 		c.State = "available"
 	default:
 		c.State = "empty"
+	}
+	if c.State != "unlimited" {
+		raw := string(v.Credits.Balance)
+		if len(raw) > 0 && raw[0] == '"' {
+			if json.Unmarshal(v.Credits.Balance, &raw) != nil {
+				return c
+			}
+		}
+		c.Balance = creditBalance(raw)
 	}
 	return c
 }
@@ -87,14 +144,22 @@ func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, erro
 	default:
 		return false, errors.New("observation: invalid credit state")
 	}
+	if sample.Balance != "" && creditBalance(sample.Balance) != sample.Balance {
+		return false, errors.New("observation: invalid credit balance")
+	}
+	if sample.State == "unknown" || sample.State == "unlimited" {
+		sample.Balance = ""
+	}
 	changed := false
 	err := s.store.write(func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(context.Background(), `INSERT INTO observation_credits(account,state,observed) VALUES(?,?,?)
+		result, err := conn.ExecContext(context.Background(), `INSERT INTO observation_credits(account,state,observed,balance) VALUES(?,?,?,?)
  ON CONFLICT(account) DO UPDATE SET
  state=CASE WHEN excluded.observed=observation_credits.observed THEN 'unknown' ELSE excluded.state END,
+ balance=CASE WHEN excluded.observed=observation_credits.observed THEN '' ELSE excluded.balance END,
  observed=excluded.observed
  WHERE excluded.observed > observation_credits.observed OR
- (excluded.observed=observation_credits.observed AND observation_credits.state!='unknown' AND excluded.state!=observation_credits.state)`, account, sample.State, sample.ReadMS)
+ (excluded.observed=observation_credits.observed AND observation_credits.state!='unknown' AND
+ (excluded.state!=observation_credits.state OR excluded.balance!=observation_credits.balance))`, account, sample.State, sample.ReadMS, sample.Balance)
 		if err == nil {
 			n, e := result.RowsAffected()
 			changed, err = n > 0, e
@@ -106,7 +171,7 @@ func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, erro
 
 func (s *CreditStore) ReadCredits(account string) (Credits, error) {
 	c := Credits{State: "unknown", Source: APISource}
-	err := s.store.db.QueryRow("SELECT state,observed FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS)
+	err := s.store.db.QueryRow("SELECT state,observed,balance FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS, &c.Balance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, nil
 	}

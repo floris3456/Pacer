@@ -82,7 +82,7 @@ padding) of:
 Codex replies and usage credentials also carry an optional, separate `credits`:
 
 ```json
-{"state":"available","read_ms":1791806400000,"expires_ms":1791810000000,"source":"api"}
+{"state":"available","balance":"50157.8642475","read_ms":1791806400000,"expires_ms":1791810000000,"source":"api"}
 ```
 
 States are `available`, `empty`, `unlimited`, `unknown`, and `stale`. These are
@@ -90,6 +90,13 @@ provider credit flags, not a dollar amount, quota percentage, reset countdown,
 or a guarantee that a particular inference request will succeed. Subscription
 windows remain unchanged: **0% weekly quota can coexist with available credits**.
 `unlimited` refers only to credits, never to every account or model limit.
+
+`balance` is optional provider-reported credit units, retained as a nonnegative
+decimal string (at most 18 integer and 18 fractional digits). It is not money.
+Missing or malformed amounts are omitted without overriding valid credit flags;
+absence never means zero. Show amounts only while the credit observation is
+fresh, and label any rounded display as an estimate. Equal-time conflicting
+balances become unknown. Routing uses the flags, not arithmetic on the balance.
 
 The existing scheduled Codex usage read supplies this field; UI reads, quota
 headers and watch requests make no additional provider calls. Missing/malformed

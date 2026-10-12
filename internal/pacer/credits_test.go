@@ -186,6 +186,9 @@ func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *tes
 		}
 	}
 	checkHeader("available")
+	if got := p.readCredits(c.Account); got.Balance != "50157.8642475" {
+		t.Fatal("provider balance did not reach the existing quota observation", got)
+	}
 	// A credit-only successful refresh must wake readers even without windows.
 	f.clock.Add(int64(31 * time.Minute))
 	job, err = p.observer.Acquire(c.Account)
