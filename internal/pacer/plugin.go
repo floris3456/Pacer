@@ -723,6 +723,11 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			return pluginapi.SchedulerPickResponse{}
 		}
 	}
+	if cfg.Enabled && tracked && provider == "claude" && (t.Claim == nil || t.Claim.Kind == "primary") && (!managed || selection.Kind == "primary") {
+		if safety := p.pickClaudeQuota(req, t); safety.Handled {
+			return safety
+		}
+	}
 	enabled := false
 	for _, v := range cfg.Routing.Providers {
 		if v == provider {
@@ -829,6 +834,11 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		}
 	}
 	if ok && known {
+		if !managedAux && (t.Claim == nil || t.Claim.Kind == "primary") {
+			if refusal := p.exhaustedClaude(c, req.Model); refusal.Terminate {
+				return refusal
+			}
+		}
 		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
 			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
 		}

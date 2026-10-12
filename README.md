@@ -7,6 +7,16 @@ gates. Per-chat Claude cache policy is independent of routing mode and requires
 the schema-7 CPA boundary, explicit durable-store initialization and a compatible
 client. Missing policy state never means empty history.
 
+Claude availability checks are enforced independently of the experimental routing
+mode: fresh, applicable empty quota windows exclude an account from a primary
+request when another host-eligible account is available. A usable existing binding
+is retained; replacements honor host priority. The selected account is checked
+again before admission, so exhaustion cannot trigger compaction or consume a
+checkpoint. Unknown or stale evidence is not treated as zero. A final HTTP 429
+also requires fresh evidence that Claude extra usage is unavailable; enabled or
+unknown paid capacity is never blocked on subscription percentages alone. Codex
+credits retain their separate availability rules.
+
 - [Pacer installation and trust boundary](docs/pacer-installation.md)
 - [Generic client API and small harness bridges](docs/independent-clients.md)
 - [Durable cache-policy contract](docs/cache-policy-contract.md)

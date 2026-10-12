@@ -26,7 +26,7 @@ func OpenCredits(db *sql.DB, clock func() time.Time) (*CreditStore, error) {
 	s := &Store{db: db, clock: clock}
 	err := s.write(func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS observation_credits (
- account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL, balance TEXT NOT NULL DEFAULT '')`)
+ account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL, balance TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'api')`)
 		if err != nil {
 			return err
 		}
@@ -34,7 +34,7 @@ func OpenCredits(db *sql.DB, clock func() time.Time) (*CreditStore, error) {
 		if err != nil {
 			return err
 		}
-		found := false
+		balance, source := false, false
 		for rows.Next() {
 			var id, notNull, primary int
 			var name, kind string
@@ -43,14 +43,22 @@ func OpenCredits(db *sql.DB, clock func() time.Time) (*CreditStore, error) {
 				rows.Close()
 				return err
 			}
-			found = found || name == "balance"
+			balance = balance || name == "balance"
+			source = source || name == "source"
 		}
 		err = rows.Err()
 		rows.Close()
-		if err != nil || found {
+		if err != nil {
 			return err
 		}
-		_, err = conn.ExecContext(context.Background(), `ALTER TABLE observation_credits ADD COLUMN balance TEXT NOT NULL DEFAULT ''`)
+		if !balance {
+			if _, err = conn.ExecContext(context.Background(), `ALTER TABLE observation_credits ADD COLUMN balance TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+		}
+		if !source {
+			_, err = conn.ExecContext(context.Background(), `ALTER TABLE observation_credits ADD COLUMN source TEXT NOT NULL DEFAULT 'api'`)
+		}
 		return err
 	})
 	if err != nil {
@@ -136,7 +144,7 @@ func (c Credits) At(now time.Time) Credits {
 // account identity, just like quota windows. Conflicting equal-time readings
 // become unknown; neither arrival order can turn them into confirmed capacity.
 func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, error) {
-	if account == "" || sample.ReadMS <= 0 || sample.ReadMS > s.store.clock().UnixMilli() || sample.Source != APISource {
+	if account == "" || sample.ReadMS <= 0 || sample.ReadMS > s.store.clock().UnixMilli() || (sample.Source != APISource && sample.Source != HeaderSource) {
 		return false, errors.New("observation: invalid credit observation")
 	}
 	switch sample.State {
@@ -152,14 +160,14 @@ func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, erro
 	}
 	changed := false
 	err := s.store.write(func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(context.Background(), `INSERT INTO observation_credits(account,state,observed,balance) VALUES(?,?,?,?)
+		result, err := conn.ExecContext(context.Background(), `INSERT INTO observation_credits(account,state,observed,balance,source) VALUES(?,?,?,?,?)
  ON CONFLICT(account) DO UPDATE SET
  state=CASE WHEN excluded.observed=observation_credits.observed THEN 'unknown' ELSE excluded.state END,
  balance=CASE WHEN excluded.observed=observation_credits.observed THEN '' ELSE excluded.balance END,
- observed=excluded.observed
+ observed=excluded.observed, source=excluded.source
  WHERE excluded.observed > observation_credits.observed OR
  (excluded.observed=observation_credits.observed AND observation_credits.state!='unknown' AND
- (excluded.state!=observation_credits.state OR excluded.balance!=observation_credits.balance))`, account, sample.State, sample.ReadMS, sample.Balance)
+ (excluded.state!=observation_credits.state OR excluded.balance!=observation_credits.balance))`, account, sample.State, sample.ReadMS, sample.Balance, sample.Source)
 		if err == nil {
 			n, e := result.RowsAffected()
 			changed, err = n > 0, e
@@ -171,7 +179,7 @@ func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, erro
 
 func (s *CreditStore) ReadCredits(account string) (Credits, error) {
 	c := Credits{State: "unknown", Source: APISource}
-	err := s.store.db.QueryRow("SELECT state,observed,balance FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS, &c.Balance)
+	err := s.store.db.QueryRow("SELECT state,observed,balance,source FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS, &c.Balance, &c.Source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, nil
 	}

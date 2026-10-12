@@ -59,6 +59,7 @@ func (p *Plugin) observeAuth(auth string, headers http.Header, at time.Time) {
 	if !ok || observer == nil {
 		return
 	}
+	p.observeClaudeExtra(c, headers, at)
 	samples := observation.Headers(c.Provider, headers, at)
 	if len(samples) > 0 {
 		p.storeObservations(c, samples)
@@ -73,6 +74,7 @@ func (p *Plugin) observeCaptured(auth string, headers http.Header, captured map[
 	if !ok || observer == nil {
 		return
 	}
+	p.observeClaudeExtraCaptured(c, headers, captured)
 	samples := observation.HeadersCaptured(c.Provider, headers, captured)
 	if len(samples) > 0 {
 		p.storeObservations(c, samples)
@@ -214,8 +216,12 @@ func (p *Plugin) retrieve(c credential, job observation.Job) {
 	if err != nil {
 		return
 	}
-	if c.Provider == "codex" && p.credits != nil {
-		changed, err := p.credits.ObserveCredits(c.Account, observation.CodexCredits(response.Body, at))
+	if (c.Provider == "codex" || c.Provider == "claude") && p.credits != nil {
+		credits := observation.CodexCredits(response.Body, at)
+		if c.Provider == "claude" {
+			credits = observation.ClaudeExtraUsage(response.Body, at)
+		}
+		changed, err := p.credits.ObserveCredits(c.Account, credits)
 		p.metricError(err)
 		if changed {
 			p.usageChanges.notify()

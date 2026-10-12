@@ -205,8 +205,10 @@ func (p *Plugin) observeUsageCaptured(c credential, headers http.Header, clocks 
 	}
 	var samples []observation.Window
 	if len(clocks) > 0 {
+		p.observeClaudeExtraCaptured(c, headers, clocks)
 		samples = observation.HeadersCaptured(c.Provider, headers, clocks)
 	} else if !requested.IsZero() {
+		p.observeClaudeExtra(c, headers, requested)
 		samples = observation.Headers(c.Provider, headers, requested)
 	}
 	if len(samples) > 0 {
