@@ -4,6 +4,8 @@
 Usage: native-managed-client.py CPA_BINARY PACER_SO SDK_JS [PACER_STATE_BINARY]
 Every credential is dummy. This starts no containers and contacts no provider.
 Logs, durable client state, and final-wire evidence are retained under /tmp.
+Set PACER_LAB_OAUTH_MIRROR to the mirror script to also exercise live credential
+rotation through its watcher and CPA, without changing the managed checkpoint.
 """
 
 import hashlib
@@ -131,17 +133,19 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if self.path.split("?", 1)[0] != "/v1/messages":
             return self.reply(404, {"error": "not_found"})
         key = self.headers.get("X-Api-Key") or self.headers.get("Authorization", "").removeprefix("Bearer ")
-        if key not in PROVIDERS:
+        rotated = PROVIDERS[0] + "-rotated"
+        if key not in PROVIDERS and key != rotated:
             return self.reply(401, {"error": {"type": "authentication_error", "message": "fixture key required"}})
-        account = PROVIDERS.index(key)
+        account = 0 if key == rotated else PROVIDERS.index(key)
         encoded = json.dumps(body)
-        mode = next((marker for marker in ("STOP", "FAIL", "CONCURRENT")
+        mode = next((marker for marker in ("STOP", "FAIL", "CONCURRENT", "ROTATE", "REVOKED")
                      if "PACER_LAB_" + marker in encoded), "OK")
         hold = threading.Event()
         with self.server.lock:
             number = len(self.server.attempts)
             self.server.attempts.append({
                 "number": number, "account": account, "mode": mode, "body": body,
+                "credential_rotated": key == rotated,
                 "headers": dict(self.headers),  # Only this fixture's literal dummy credentials exist.
                 "coordination_leaked": any(name.lower().startswith(("x-pacer-", "x-quota-"))
                                            for name in self.headers),
@@ -151,6 +155,19 @@ class FixtureHandler(BaseHTTPRequestHandler):
             if mode == "STOP":
                 self.server.holds[number] = hold
         try:
+            if mode == "ROTATE" and key == PROVIDERS[0]:
+                # The upstream invalidates the old token before returning 401.
+                # Only the source is changed: the real mirror and auth watcher
+                # must propagate it while CPA awaits same-account recovery.
+                source = self.server.rotation_source
+                value = json.loads(source.read_text())
+                value["access_token"] = rotated
+                pending = source.with_suffix(".pending")
+                pending.write_text(json.dumps(value) + "\n")
+                pending.replace(source)
+                return self.reply(401, {"error": {"type": "authentication_error", "message": "OAuth access token has been revoked."}})
+            if mode == "REVOKED":
+                return self.reply(401, {"error": {"type": "authentication_error", "message": "OAuth access token has been revoked."}})
             if mode == "CONCURRENT":
                 try:
                     self.server.parallel.wait(timeout=15)
@@ -178,8 +195,9 @@ def main():
     if len(sys.argv) not in (4, 5):
         raise SystemExit(__doc__)
     binary, plugin, sdk = (pathlib.Path(p).resolve() for p in sys.argv[1:4])
+    mirror = pathlib.Path(os.environ["PACER_LAB_OAUTH_MIRROR"]).resolve() if os.environ.get("PACER_LAB_OAUTH_MIRROR") else None
     initializer = pathlib.Path(sys.argv[4]).resolve() if len(sys.argv) == 5 else plugin.parent / "pacer-state"
-    for path in (binary, plugin, sdk, initializer):
+    for path in (binary, plugin, sdk, initializer, *((mirror,) if mirror else ())):
         if not path.is_file():
             raise SystemExit(f"Missing artifact: {path}")
     root = pathlib.Path(tempfile.mkdtemp(prefix="pacer-native-managed-"))
@@ -188,9 +206,13 @@ def main():
                  "sdk_entrypoint": str(sdk),
                  "sdk_modules": {str(path.relative_to(sdk.parent)): file_sha256(path)
                                  for path in sorted(sdk.parent.rglob("*.js"))}}
+    if mirror:
+        artifacts["oauth_mirror"] = {"path": str(mirror), "sha256": file_sha256(mirror)}
     (root / "artifacts.json").write_text(json.dumps(artifacts, indent=2) + "\n")
     (root / "plugins").mkdir()
     (root / "auths").mkdir()
+    source_auths = root / "source-auths" if mirror else root / "auths"
+    source_auths.mkdir(exist_ok=True)
     shutil.copyfile(plugin, root / "plugins" / plugin.name)
     env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(root),
            "XDG_CONFIG_HOME": str(root / "config"), "XDG_CACHE_HOME": str(root / "cache"),
@@ -220,16 +242,21 @@ def main():
     base = f"http://127.0.0.1:{port}"
     auth_ids = [f"local-account-{i}.json" for i in range(len(PROVIDERS))]
     for i, key in enumerate(PROVIDERS):
-        (root / "auths" / auth_ids[i]).write_text(json.dumps({
+        (source_auths / auth_ids[i]).write_text(json.dumps({
             "type": "claude", "access_token": key, "expired": "2099-01-01T00:00:00Z",
             "account_uuid": f"00000000-0000-0000-0000-{i + 1:012d}",
             "email": f"local-account-{i}@example.invalid", "proxy_url": fixture.base,
             "claude_device_ids": [hashlib.sha256(key.encode()).hexdigest()], "cloak_mode": "never",
         }) + "\n")
+    if mirror:
+        subprocess.run([sys.executable, str(mirror), str(source_auths), str(root / "auths")],
+                       check=True, timeout=10, env=env, stdout=subprocess.DEVNULL)
+        fixture.rotation_source = source_auths / auth_ids[0]
     config = {
         "config-version": 8, "server": {"host": "127.0.0.1", "port": port},
         "management": {"disable-control-panel": True}, "oauth": {"auth-dir": str(root / "auths")},
         "access": {"api-keys": CALLERS + ["local-caller-no-grant"]},
+        "requests": {"proxy-url": fixture.base},
         "routing": {"strategy": "fill-first", "retry": {"request-retry": 0},
                     "cooldown": {"disable-cooling": True}},
         "plugins": {
@@ -247,11 +274,14 @@ def main():
     }
     (root / "config.yaml").write_text(json.dumps(config, indent=2) + "\n")
     manifest = {"base": base, "upstream": fixture.base, "sdk": str(sdk), "model": MODEL,
-                "route": ROUTE, "installation": INSTALLATION, "callers": CALLERS, "authIDs": auth_ids}
+                "route": ROUTE, "installation": INSTALLATION, "callers": CALLERS, "authIDs": auth_ids,
+                "oauthRotation": mirror is not None}
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     process = None
     log = None
+    mirror_process = None
+    mirror_log = None
 
     def stop():
         nonlocal process, log
@@ -320,6 +350,16 @@ def main():
         (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 
     try:
+        if mirror:
+            mirror_log = (root / "mirror.log").open("w")
+            mirror_process = subprocess.Popen([sys.executable, str(mirror), "--watch", str(source_auths), str(root / "auths")],
+                                              cwd=root, env=env, stdout=mirror_log, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + 10
+            while not (root / "mirror.log").read_text().strip():
+                if mirror_process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError("Credential watcher did not become ready")
+                threading.Event().wait(0.05)
+            json.loads((root / "mirror.log").read_text().splitlines()[0])
         script = pathlib.Path(__file__).with_suffix(".mjs")
         for phase in ("initial", "restart"):
             start(phase)
@@ -330,12 +370,25 @@ def main():
                 raise RuntimeError(f"SDK {phase} phase failed ({result.returncode}):\n"
                                    + (root / f"client-{phase}.log").read_text()[-7000:])
             if phase == "restart":
+                if mirror:
+                    assert mirror_process.poll() is None, "credential watcher exited"
+                    for auth_file in (root / "auths").glob("*.json"):
+                        assert "refresh_token" not in json.loads(auth_file.read_text())
                 check_native_usage()
             stop()
         print((root / "result.json").read_text(), end="")
     finally:
         fixture.release()
         stop()
+        if mirror_process is not None:
+            mirror_process.terminate()
+            try:
+                mirror_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                mirror_process.kill()
+                mirror_process.wait(timeout=5)
+        if mirror_log is not None:
+            mirror_log.close()
         fixture.shutdown()
         fixture.server_close()
         (root / "upstream-attempts.json").write_text(json.dumps(fixture.attempts, indent=2) + "\n")
