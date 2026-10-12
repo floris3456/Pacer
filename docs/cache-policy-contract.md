@@ -346,6 +346,11 @@ twice**. The host owns physical dispatch deduplication. Snapshot values are inde
 Auxiliary snapshots carry `managed:false` and omit TTL, remain allowed while pending, never mark
 primary history used/warm and never block primary commit. This package does not schedule warming.
 
+The schema-7 adapter exposes these snapshots only on hosts advertising policy contract revision 3
+with an auxiliary no-cache executor guarantee. See [policy-adapter-contract.md](policy-adapter-contract.md)
+for the resolved `kind:"auxiliary",ttl:""` wire, required physical settlement, and helper/checkpoint
+correlation. This extension does not change this store's revision-2 receipt or database contract.
+
 ## Compatibility with the first protocol-1 implementation
 
 Host capability discovery must advertise/use `cachepolicy.ContractRevision` **2** before enabling

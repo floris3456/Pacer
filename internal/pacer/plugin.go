@@ -125,6 +125,7 @@ type Plugin struct {
 	cfg                Config
 	hostSchema         int
 	hostGuard          requiredInterceptors
+	hostCachePolicy    hostCachePolicySupport
 	creds              map[string]credential
 	usageCreds         map[string]credential // usage page only (see usage_accounts.go)
 	recordStore        *historyreports.RecordStore
@@ -160,7 +161,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		ConfigYAML       []byte `json:"config_yaml"`
 		SchemaVersion    int    `json:"schema_version"`
 		HostCapabilities struct {
-			RequiredInterceptors requiredInterceptors `json:"required_interceptors"`
+			RequiredInterceptors requiredInterceptors   `json:"required_interceptors"`
+			CachePolicy          hostCachePolicySupport `json:"cache_policy"`
 		} `json:"host_capabilities"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
@@ -184,8 +186,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if cfg.ClientAccess != nil && !cfg.Enabled {
 		return nil, errors.New("client_access requires an enabled plugin")
 	}
-	if cfg.ClientAccess != nil && !request.HostCapabilities.RequiredInterceptors.enforced() {
-		return nil, errors.New("client_access requires CPA required-interceptor enforcement for pacer")
+	if cfg.ClientAccess != nil && !request.HostCapabilities.RequiredInterceptors.accountPoolEnforced() {
+		return nil, errors.New("client_access requires CPA required-interceptor enforcement and auth-pool filtering for pacer")
 	}
 	if cfg.CachePolicy.RequireManaged && (!cfg.CachePolicy.Enabled || !request.HostCapabilities.RequiredInterceptors.enforced()) {
 		return nil, errors.New("require_managed needs enabled cache policy and CPA required-interceptor enforcement for pacer")
@@ -197,6 +199,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	if cfg.CachePolicy.Enabled && request.SchemaVersion < 7 {
 		return nil, errors.New("managed cache policy requires CPA schema 7")
 	}
+	policyOpts.AuxiliaryNoCache = request.HostCapabilities.CachePolicy.auxiliarySupported(request.SchemaVersion)
 	usageURL, err := validateUsageURL(cfg.UsageAuthURL)
 	if err != nil {
 		return nil, err
@@ -234,6 +237,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		if !reflect.DeepEqual(p.cfg.CachePolicy, cfg.CachePolicy) {
 			return nil, errors.New("cache_policy changes require an idle reload")
 		}
+		if p.policy != nil && p.hostCachePolicy != request.HostCapabilities.CachePolicy {
+			return nil, errors.New("cache policy host capabilities changes require an idle reload")
+		}
 		if p.cfg.HistoryPath != cfg.HistoryPath {
 			return nil, errors.New("history_path change requires idle reload")
 		}
@@ -248,6 +254,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		p.cfg = cfg
 		p.hostSchema = request.SchemaVersion
 		p.hostGuard = request.HostCapabilities.RequiredInterceptors
+		p.hostCachePolicy = request.HostCapabilities.CachePolicy
 		p.dryRunMarkLocked()
 		return registration(p.policy != nil), nil
 	}
@@ -355,6 +362,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.db, p.chats, p.cfg = db, chats, cfg
 	p.hostSchema = request.SchemaVersion
 	p.hostGuard = request.HostCapabilities.RequiredInterceptors
+	p.hostCachePolicy = request.HostCapabilities.CachePolicy
 	p.observer = observer
 	p.policy = policy
 	p.forward = forward
@@ -549,9 +557,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			p.mu.Unlock()
 			return refusal, nil
 		}
-		allowed := p.clientAllowedLocked(caller, "")
+		pool := p.clientPoolLocked(caller)
 		p.mu.Unlock()
-		if !allowed {
+		if pool != nil && len(pool.AuthIDs) == 0 {
 			return denyClientAccess(), nil
 		}
 		if q != nil && caller == "" {
@@ -560,7 +568,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Lock()
 		p.requests[req.RequestID] = attempt{Claim: q, Caller: caller, Session: session(req.Headers, req.Metadata), Headers: req.Headers, Client: clientDeclaration(req.Headers)}
 		p.mu.Unlock()
-		return pluginapi.RequestInterceptResponse{Headers: http.Header{requestHeader: {req.RequestID}}}, nil
+		return pluginapi.RequestInterceptResponse{Headers: http.Header{requestHeader: {req.RequestID}}, AuthPool: pool}, nil
 	case pluginabi.MethodSchedulerPick:
 		var req pluginapi.SchedulerPickRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -841,7 +849,11 @@ func quotaAckHeaders() []string {
 }
 
 func refuse(code, message string) pluginapi.RequestInterceptResponse {
-	raw, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": message, "type": "quota_handoff"}})
+	problem := map[string]any{"code": code, "message": message, "type": "quota_handoff"}
+	if code == "quota_provider_switch_forbidden" {
+		problem["action"], problem["retryable"] = "select_same_provider", false
+	}
+	raw, _ := json.Marshal(map[string]any{"error": problem})
 	return pluginapi.RequestInterceptResponse{Terminate: true, StatusCode: 409, ResponseHeaders: http.Header{"Content-Type": {"application/json"}, "X-Quota-Protocol": {"1"}}, ResponseBody: raw}
 }
 

@@ -1153,8 +1153,21 @@ type RequestInterceptRequest struct {
 	Metadata map[string]any
 }
 
+// AuthPool restricts credential selection to operator-authorized IDs. A present
+// pool with no IDs denies selection; an absent pool retains the shared default.
+// The host intersects it with existing provider/model eligibility.
+type AuthPool struct {
+	Version int      `json:"version"`
+	AuthIDs []string `json:"auth_ids"`
+}
+
 // RequestInterceptResponse returns request modifications.
 type RequestInterceptResponse struct {
+	// AuthPool applies before credential selection and is not a request header.
+	AuthPool *AuthPool `json:"auth_pool,omitempty"`
+	// AuthPoolValidate is host-only and verifies the captured restriction is
+	// still current before selection/retry. It is never serialized by a plugin.
+	AuthPoolValidate func() error `json:"-"`
 	// Path optionally overrides the target request path (e.g. "/v1/images/generations").
 	Path string `json:"path,omitempty"`
 	// Headers replaces matching current request headers and preserves headers not mentioned here.

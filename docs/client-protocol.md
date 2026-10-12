@@ -39,6 +39,20 @@ Compacting before an account switch is separate: only a client that can compact 
 `X-Quota-Handoff` claim with `compact_on_switch` (OpenCodePlus). Pacer answers `409 quota_compact_required` only to
 such requests.
 
+Automatic primary claims stay within their previously bound provider, even when
+CPA's alias can route to several providers and the caller is granted accounts on
+all of them. A cross-provider selection returns
+`409 quota_provider_switch_forbidden`, with `action: select_same_provider` and
+`retryable: false`. The client must surface that refusal; compaction or automatic
+replay cannot resolve it. Same-provider model and account switches keep the
+existing checkpoint rules. An intentional provider change needs an explicit
+manual choice or a new route; a claim with historical bindings on both providers
+cannot resume automatic routing. Caller, installation, session and route define
+this boundary independently of the private capability.
+Claimed bindings currently support Claude and Codex credentials. Other provider
+inventory is for usage display only; a claimed fallback to one of those
+credentials is refused before dispatch with `quota_state_unavailable`.
+
 ## Quota on replies: `X-Pacer-Quota`
 
 For a declared request, the reply (or the first chunk of a stream) carries the serving account's quota windows. Pacer

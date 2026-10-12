@@ -25,7 +25,7 @@ does not relabel the original snapshot's provenance or change C ABI 1.
 
 `V8-PROVENANCE.json` separately records the exact replacement of
 `sdk/pluginapi/types.go` from CPA `9af81ead` to obtain the optional
-`PluginManagementBasePath` advertisement. The unchanged upstream file also
+`PluginManagementBasePath` advertisement. The imported upstream file also
 includes existing Path fields and cooldown-reset **type declarations** relative
 to the previous vendored file; this import adds no implementation or invocation
 of those operations. No active-mode or cooldown-clear call is authorized by this
@@ -35,3 +35,11 @@ The retained `sdk/pluginabi/types.go` still declares its historical SchemaVersio
 constant as 6. The V8 supplement's schema 7 names the upstream host contract, not
 a replacement of that constant. Pacer's runtime registration decides its schema;
 the v8 host requires actual schema >=7 registration before advertising the prefix.
+
+`AUTH-POOL-PROVENANCE.json` records the subsequent local additive `AuthPool`,
+`RequestInterceptResponse.AuthPool`, and host-only `AuthPoolValidate` declarations.
+Its hash describes the current `sdk/pluginapi/types.go`; the V8 manifest retains
+the original upstream hash. The matching CPA-host contribution enforces this
+optional JSON field before credential selection. This patch changes neither the
+native C ABI nor the registration schema; required filtering is separately
+attested by the host. It is not an unchanged upstream file.

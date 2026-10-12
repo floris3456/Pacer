@@ -24,19 +24,27 @@ type clientAPI struct {
 	Features     map[string]clientFeature `json:"features"`
 	Access       map[string]string        `json:"access"`
 	Requirements struct {
-		ManagedCacheModels []string `json:"managed_cache_models"`
-		ManagedKinds       []string `json:"managed_kinds"`
+		ManagedCacheModels []string           `json:"managed_cache_models"`
+		ManagedKinds       []string           `json:"managed_kinds"`
+		CacheRoutes        []clientCacheRoute `json:"cache_routes"`
 	} `json:"requirements"`
 }
 
 // Caller holds p.mu. Public discovery describes availability, not authorization
 // to another user's accounts, sessions, or checkpoint operations.
 func (p *Plugin) clientAPILocked() clientAPI {
-	policy := clientFeature{Supported: p.hostSchema >= 7, Enabled: p.policy != nil, ContractRevision: 2}
+	policy := clientFeature{Supported: p.hostSchema >= 7, Enabled: p.hostSchema >= 7 && p.policy != nil, ContractRevision: p.cachePolicyContractRevisionLocked()}
 	if !policy.Supported {
 		policy.Reason = "host_integration_required"
 	} else if !policy.Enabled {
 		policy.Reason = "not_configured"
+	}
+	auxiliary := clientFeature{Supported: p.hostCachePolicy.auxiliarySupported(p.hostSchema), ContractRevision: 1}
+	auxiliary.Enabled = auxiliary.Supported && policy.Enabled
+	if !auxiliary.Supported {
+		auxiliary.Reason = "host_integration_required"
+	} else if !auxiliary.Enabled {
+		auxiliary.Reason = "not_configured"
 	}
 	switching := clientFeature{Supported: true, Enabled: p.cfg.CompactOnSwitch}
 	if !switching.Enabled {
@@ -56,9 +64,10 @@ func (p *Plugin) clientAPILocked() clientAPI {
 			"quota":                 {Supported: true, Enabled: true},
 			"watch":                 {Supported: true, Enabled: true},
 			"account_switch":        switching,
-			"account_access":        {Supported: p.hostGuard.enforced(), Enabled: p.cfg.ClientAccess != nil && p.hostGuard.enforced()},
+			"account_access":        {Supported: p.hostGuard.accountPoolEnforced(), Enabled: p.cfg.ClientAccess != nil && p.hostGuard.accountPoolEnforced()},
 			"required_cache_policy": {Supported: p.hostGuard.enforced() && policy.Supported, Enabled: p.cfg.CachePolicy.RequireManaged && p.hostGuard.enforced() && policy.Enabled},
 			"cache_policy":          policy,
+			"managed_auxiliary":     auxiliary,
 			"keepalive":             {Reason: "host_integration_required"},
 			"native_compaction":     {Reason: "host_integration_required"},
 		},
@@ -66,6 +75,10 @@ func (p *Plugin) clientAPILocked() clientAPI {
 	}
 	api.Requirements.ManagedCacheModels = p.requiredModelsLocked()
 	api.Requirements.ManagedKinds = []string{"primary", "warming"}
+	if auxiliary.Enabled {
+		api.Requirements.ManagedKinds = append(api.Requirements.ManagedKinds, "auxiliary")
+	}
+	api.Requirements.CacheRoutes = p.cacheRoutesLocked()
 	return api
 }
 

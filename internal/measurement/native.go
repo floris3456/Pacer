@@ -383,9 +383,9 @@ func FromNative(rawJSON []byte, credential NativeCredential, sourceID string) (R
 			if n.SessionID != "" && n.SessionID != selected.Scope.SessionID {
 				m.Diagnostics = append(m.Diagnostics, "native_session_differs_from_selected_scope")
 			}
-			if r.Kind == "other" {
+			if r.Kind == "other" && selected.Kind != "auxiliary" {
 				r.Kind = selected.Kind
-			} else {
+			} else if r.Kind != "other" && selected.Kind != "auxiliary" {
 				m.Diagnostics = append(m.Diagnostics, "auxiliary_kind_conflicts_with_selected")
 			}
 		}
@@ -436,7 +436,10 @@ func nativeSHA(s string) bool {
 	return err == nil
 }
 func validNativePolicy(p nativeSelectedPolicy) bool {
-	return p.Protocol == 1 && p.Revision > 0 && nativeSHA(p.Scope.CallerScope) && nativeID(p.Scope.InstallationID) && nativeID(p.Scope.SessionID) && nativeID(p.Scope.ProviderRoute) && nativeID(p.ContextEpoch) && (p.TTL == "5m" || p.TTL == "1h") && (p.Kind == "primary" || p.Kind == "warming")
+	if p.Protocol != 1 || p.Revision < 1 || !nativeSHA(p.Scope.CallerScope) || !nativeID(p.Scope.InstallationID) || !nativeID(p.Scope.SessionID) || !nativeID(p.Scope.ProviderRoute) || !nativeID(p.ContextEpoch) {
+		return false
+	}
+	return p.Kind == "auxiliary" && p.TTL == "" || (p.Kind == "primary" || p.Kind == "warming") && (p.TTL == "5m" || p.TTL == "1h")
 }
 
 func nativeUsage(n nativeEnvelope, m *NativeMetadata) Usage {

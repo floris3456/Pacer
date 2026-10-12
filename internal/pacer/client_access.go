@@ -31,10 +31,15 @@ type requiredInterceptors struct {
 	RequestInterceptors     bool   `json:"request_interceptors"`
 	NestedModelInterceptors bool   `json:"nested_model_interceptors"`
 	RetryInterceptors       bool   `json:"retry_interceptors"`
+	AuthPoolFiltering       bool   `json:"auth_pool_filtering"`
 }
 
 func (r requiredInterceptors) enforced() bool {
 	return r.Version == 1 && r.PluginID == "pacer" && r.Required && r.RequestInterceptors && r.NestedModelInterceptors && r.RetryInterceptors
+}
+
+func (r requiredInterceptors) accountPoolEnforced() bool {
+	return r.enforced() && r.AuthPoolFiltering
 }
 
 // Policy RPC scopes come from CPA's authenticated principal. Authorization is
@@ -103,6 +108,24 @@ func unavailableClientAccess() pluginapi.RequestInterceptResponse {
 	response := refuse("pacer_account_access_unavailable", "Account access could not be verified")
 	response.StatusCode = 503
 	return response
+}
+
+// Caller holds p.mu. Only operator grants and the host-authenticated caller may
+// constrain selection. Copy IDs so the in-flight response cannot track later
+// grant edits. A missing restriction is shared mode; an explicit empty pool
+// grants no credentials. Provider/model eligibility remains the host's job.
+func (p *Plugin) clientPoolLocked(caller string) *pluginapi.AuthPool {
+	if p.cfg.ClientAccess == nil {
+		return nil
+	}
+	pool := &pluginapi.AuthPool{Version: 1, AuthIDs: []string{}}
+	for _, grant := range p.cfg.ClientAccess.Grants {
+		if grant.CallerScope == caller {
+			pool.AuthIDs = append(pool.AuthIDs, grant.AuthIDs...)
+			break
+		}
+	}
+	return pool
 }
 
 // Caller holds p.mu. auth == "" checks membership without enumerating accounts.

@@ -22,6 +22,44 @@ registration/state) before inference tests or delegating an exclusive client win
 The isolated CPAMP server uses a separate pure-Go SQLite implementation and may
 still be built with CGO disabled; these are different artifact requirements.
 
+## Standalone managed-client acceptance
+
+`native-managed-client.py` is a self-contained localhost alternative for the
+managed session contract. It starts an isolated native CPA binary, Pacer `.so`,
+and a fake Claude provider behind a localhost TLS proxy; all four caller keys and
+all three provider OAuth tokens are literal dummy values. The proxy terminates
+`api.anthropic.com` locally and rejects every other tunnel; it never forwards
+traffic. It creates and initializes its own SQLite database,
+uses the supplied standalone SDK, and restarts both CPA and the SDK process.
+No Docker environment, production directory, or real provider is used.
+
+```sh
+python3 tests/lab/native-managed-client.py \
+  /path/to/native-cpa \
+  /path/to/pacer.so \
+  /path/to/client/dist/index.js \
+  /path/to/pacer-state
+```
+
+The fourth argument defaults to `pacer-state` beside the `.so`. Python 3.9+,
+Node 20.3+, and OpenSSL are required. The candidate host must attest required interceptors,
+preselection account filtering, and managed auxiliary no-cache enforcement.
+The SDK must export `ManagedCacheController`.
+
+The runner verifies three concurrent callers with disjoint grants, primary TTL
+enforcement on the final provider body, removal of auxiliary cache markers,
+existing-history enrollment, stable control-operation replay after lost
+responses, durable checkpoint recovery after a full restart, failed helpers,
+and Stop invalidating an uncooperative helper's late completion. The SDK never
+dispatches inference; the fixture harness does. Its durable local host records
+attest checkpoint completion for this test and do not prove any editor's own
+history-commit behavior. That still requires the corresponding client lab.
+
+Each run prints a retained `/tmp/pacer-native-managed-*` evidence directory with
+server/client logs, discovery, final provider request bodies, control commands,
+and a `result.json` on success. `independent-client.py` remains the smaller
+zero-inference native discovery and SDK smoke.
+
 The Usage Quota page (`/usage/profiles|windows|inspect`, `PATCH /usage/exclusions`)
 is checked by the manager repository's browser runner with `PACER_FOCUS=usage`
 and `PACER_USAGE_READY=1`. It needs the prepared usage history (quota facts v2)

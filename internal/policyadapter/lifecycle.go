@@ -16,7 +16,7 @@ func selection(s cachepolicy.Snapshot, caller string) pluginapi.CachePolicy {
 func snapshot(req pluginapi.CachePolicyAttemptRequest) cachepolicy.Snapshot {
 	p := req.Policy
 	return cachepolicy.Snapshot{Protocol: p.Protocol, Scope: scope(p.Scope), ContextEpoch: p.ContextEpoch, Revision: p.Revision,
-		TTL: cachepolicy.TTL(p.TTL), Kind: cachepolicy.Kind(p.Kind), RequestID: req.RequestID, AttemptID: req.AttemptID, Managed: true, StartedAt: req.StartedAt.UTC()}
+		TTL: cachepolicy.TTL(p.TTL), Kind: cachepolicy.Kind(p.Kind), RequestID: req.RequestID, AttemptID: req.AttemptID, Managed: p.Kind == "primary" || p.Kind == "warming", StartedAt: req.StartedAt.UTC()}
 }
 
 func sameSnapshot(a, b cachepolicy.Snapshot) bool {
@@ -31,8 +31,8 @@ func (a *Adapter) ResolveCachePolicy(ctx context.Context, req pluginapi.CachePol
 	if req.Protocol != cachepolicy.Protocol || !id(req.ContextEpoch) || req.Revision < 1 || !id(req.RequestID) {
 		return pluginapi.CachePolicy{}, reject(400, "invalid", "A complete protocol-1 lifecycle policy reference is required.")
 	}
-	if (req.Kind != "primary" && req.Kind != "warming") || (req.SourceFormat != "claude" && req.SourceFormat != "openai-response") || !a.models[req.Scope.ProviderRoute][req.Model] {
-		return pluginapi.CachePolicy{}, reject(422, "unsupported", "Only configured built-in Claude models, supported HTTP formats and primary/warming requests are managed.")
+	if (req.Kind != "primary" && req.Kind != "warming" && !(req.Kind == "auxiliary" && a.auxiliary)) || (req.SourceFormat != "claude" && req.SourceFormat != "openai-response") || !a.models[req.Scope.ProviderRoute][req.Model] {
+		return pluginapi.CachePolicy{}, reject(422, "unsupported", "The model, transport or request kind is not supported by this host's cache policy integration.")
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -79,7 +79,7 @@ func (a *Adapter) ResolveCachePolicy(ctx context.Context, req pluginapi.CachePol
 	}
 	ttl := state.Active.TTL
 	if owned != nil {
-		ttl = cachepolicy.TTL(owned.policy.TTL)
+		ttl = owned.referenceTTL
 	}
 	s, err := a.store.BeginRequest(ctx, auth, cachepolicy.Request{Reference: cachepolicy.Reference{Scope: scope(req.Scope), ContextEpoch: req.ContextEpoch, Revision: req.Revision, TTL: ttl}, RequestID: req.RequestID, Kind: cachepolicy.Kind(req.Kind)})
 	if err != nil {
@@ -87,7 +87,7 @@ func (a *Adapter) ResolveCachePolicy(ctx context.Context, req pluginapi.CachePol
 	}
 	p := selection(s, req.Scope.CallerScope)
 	if owned == nil {
-		a.requests[req.RequestID] = &logical{auth: auth, resolve: clean, policy: p, attempts: make(map[string]*physical)}
+		a.requests[req.RequestID] = &logical{auth: auth, resolve: clean, policy: p, referenceTTL: ttl, attempts: make(map[string]*physical)}
 	}
 	return p, nil
 }

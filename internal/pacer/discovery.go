@@ -50,7 +50,7 @@ func (p *Plugin) discover(force ...bool) {
 		if provider == "" {
 			provider = file.Type
 		}
-		if file.Disabled || (provider != "claude" && provider != "codex") {
+		if file.Disabled || !tracker.SupportsClaimProvider(provider) {
 			continue
 		}
 		// A compatible executor label is not proof of a subscription quota

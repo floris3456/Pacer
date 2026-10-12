@@ -10,7 +10,7 @@ import (
 )
 
 func TestExplicitClientGrantsRequireHostEnforcement(t *testing.T) {
-	guard := requiredInterceptors{Version: 1, PluginID: "pacer", Required: true, RequestInterceptors: true, NestedModelInterceptors: true, RetryInterceptors: true}
+	guard := requiredInterceptors{Version: 1, PluginID: "pacer", Required: true, RequestInterceptors: true, NestedModelInterceptors: true, RetryInterceptors: true, AuthPoolFiltering: true}
 	for _, test := range []struct {
 		name string
 		edit func(*requiredInterceptors)
@@ -24,6 +24,7 @@ func TestExplicitClientGrantsRequireHostEnforcement(t *testing.T) {
 		{"no-request-guard", func(g *requiredInterceptors) { g.RequestInterceptors = false }, false},
 		{"nested-bypass", func(g *requiredInterceptors) { g.NestedModelInterceptors = false }, false},
 		{"retry-bypass", func(g *requiredInterceptors) { g.RetryInterceptors = false }, false},
+		{"no-pool-filter", func(g *requiredInterceptors) { g.AuthPoolFiltering = false }, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			p := New(testHost)

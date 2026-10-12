@@ -39,6 +39,7 @@ type Options struct {
 	Clock             func() time.Time
 	Routes            []Route
 	NewEmptyAuthority NewEmptyAuthority // nil denies new-empty enrollment
+	AuxiliaryNoCache  bool              // trusted host removes/rejects auxiliary cache-write instructions
 }
 
 type Adapter struct {
@@ -46,17 +47,19 @@ type Adapter struct {
 	store     *cachepolicy.Store
 	models    map[string]map[string]bool
 	authority NewEmptyAuthority
+	auxiliary bool
 	requests  map[string]*logical
 	completed map[string]cachepolicy.Outcome // no private credentials retained after completion
 }
 
 type logical struct {
-	auth     cachepolicy.Credentials
-	resolve  pluginapi.CachePolicyResolveRequest // Capability cleared; auth holds it privately
-	policy   pluginapi.CachePolicy
-	attempts map[string]*physical
-	closing  cachepolicy.Outcome
-	stopped  bool // a canceled physical attempt cannot be retried in this logical request
+	auth         cachepolicy.Credentials
+	resolve      pluginapi.CachePolicyResolveRequest // Capability cleared; auth holds it privately
+	policy       pluginapi.CachePolicy
+	referenceTTL cachepolicy.TTL // admission reference; auxiliary selections intentionally carry no TTL
+	attempts     map[string]*physical
+	closing      cachepolicy.Outcome
+	stopped      bool // a canceled physical attempt cannot be retried in this logical request
 }
 
 type physical struct {
@@ -109,7 +112,7 @@ func Open(ctx context.Context, db *sql.DB, opts Options) (*Adapter, error) {
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	a := &Adapter{store: store, models: make(map[string]map[string]bool), authority: opts.NewEmptyAuthority, requests: make(map[string]*logical), completed: make(map[string]cachepolicy.Outcome)}
+	a := &Adapter{store: store, models: make(map[string]map[string]bool), authority: opts.NewEmptyAuthority, auxiliary: opts.AuxiliaryNoCache, requests: make(map[string]*logical), completed: make(map[string]cachepolicy.Outcome)}
 	for _, route := range opts.Routes {
 		a.models[route.ProviderRoute] = make(map[string]bool)
 		for _, model := range route.Models {

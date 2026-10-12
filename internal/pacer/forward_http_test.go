@@ -214,7 +214,21 @@ func TestForwardHTTPAdvertisementSDKProvenanceAndNoImplicitRegistration(t *testi
 	if provenance.Commit != "9af81eadc59475eba69de16f586b4fb555791515" || len(provenance.Files) != 1 || len(provenance.Preserved) != 2 || provenance.Files["sdk/pluginapi/types.go"] != "1c72f5459f04d9d9f81c25686999e7022b7d9935731259f4cb2e9ada2d5ac2de" {
 		t.Fatal("incorrect SDK source attestation")
 	}
-	for path, want := range provenance.Files {
+	var patch struct {
+		BaseManifest string            `json:"base_manifest"`
+		Files        map[string]string `json:"files"`
+	}
+	raw, err = os.ReadFile(filepath.Join(root, "AUTH-POOL-PROVENANCE.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(raw, &patch); err != nil {
+		t.Fatal(err)
+	}
+	if patch.BaseManifest != "V8-PROVENANCE.json" || len(patch.Files) != 1 || patch.Files["sdk/pluginapi/types.go"] != "eed742662382f5c5e356b5129874ce596c1eaf9d2440c8f7ff596f6d12e1c29f" {
+		t.Fatal("incorrect local SDK patch attestation")
+	}
+	for path, want := range patch.Files {
 		data, e := os.ReadFile(filepath.Join(root, path))
 		if e != nil {
 			t.Fatal(e)

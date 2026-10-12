@@ -18,15 +18,28 @@
     "host_schema": {"type": "integer", "minimum": 0},
     "features": {
       "type": "object",
-      "required": ["quota", "watch", "account_switch", "account_access", "cache_policy", "required_cache_policy", "keepalive", "native_compaction"],
+      "required": ["quota", "watch", "account_switch", "account_access", "cache_policy", "required_cache_policy", "managed_auxiliary", "keepalive", "native_compaction"],
       "additionalProperties": {"$ref": "#/$defs/feature"}
     },
     "requirements": {
       "type": "object",
-      "required": ["managed_cache_models", "managed_kinds"],
+      "required": ["managed_cache_models", "managed_kinds", "cache_routes"],
       "properties": {
         "managed_cache_models": {"type": "array", "maxItems": 1024, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
-        "managed_kinds": {"type": "array", "uniqueItems": true, "items": {"enum": ["primary", "warming"]}}
+        "managed_kinds": {"type": "array", "uniqueItems": true, "items": {"enum": ["primary", "warming", "auxiliary"]}},
+        "cache_routes": {
+          "type": "array",
+          "description": "Configured enrollment routes, sorted by provider_route; empty unless cache policy is supported and enabled. A model may occur on several routes, requiring explicit client selection.",
+          "items": {
+            "type": "object",
+            "required": ["provider_route", "models", "ttls"],
+            "properties": {
+              "provider_route": {"type": "string", "minLength": 1, "maxLength": 256},
+              "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+              "ttls": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["5m", "1h"]}}
+            }
+          }
+        }
       }
     },
     "access": {

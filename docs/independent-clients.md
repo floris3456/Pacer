@@ -27,7 +27,8 @@ and absent host guarantees must not be treated as support.
 | `features.*.enabled` | The operation is configured; session authorization is still required. |
 | `access` | Shared/granted account mode and optional/required interceptor enforcement. |
 | `requirements.managed_cache_models` | Exact model IDs requiring admitted cache policy. |
-| `requirements.managed_kinds` | Currently `primary` and `warming`; not auxiliary summaries. |
+| `requirements.managed_kinds` | `primary` and `warming`, plus `auxiliary` only when the host supports and enables its no-cache lifecycle. |
+| `requirements.cache_routes` | Configured `{provider_route,models,ttls}` mappings for enrollment; empty when cache policy is unavailable. |
 
 Keepalive and native compaction remain explicitly unavailable in this API.
 Ordinary inference and its stream stay with the harness. The library does not
@@ -39,6 +40,13 @@ Quota, prices, watches and per-chat previews retain the existing
 [revision-2 contract](cache-policy-contract.md). They use private, random
 per-session capabilities, operation IDs, revisions and transition-bound receipts.
 Discovery never grants authority to create those receipts.
+
+`features.managed_auxiliary` revision 1 enables same-model compaction helpers only
+when `supported` and `enabled` are true. It requires the host's policy contract
+revision 3 no-cache executor guarantee; older hosts continue to advertise revision 2.
+`requirements.cache_routes` is sorted by route ID with sorted unique exact model IDs.
+If a model belongs to more than one route, require an explicit choice; do not guess
+a policy scope. These public route names do not expose account IDs or private capabilities.
 
 ## Account grants and the host boundary
 
@@ -69,16 +77,26 @@ Grants filter credential rows, shared aliases, current/active identities and
 next-use previews, and gate prices, policy controls and actual selected accounts.
 The server reauthenticates ordinary-key watches after waiting. Capability reads
 recheck their persisted owner; old ownerless bindings are unavailable in granted
-mode until a new primary request establishes ownership. Changing grants requires
-an idle plugin reload. Grants are admission constraints, not a replacement account
-scheduler: if CPA selects an ungranted credential, the request is rejected before
-dispatch. Configure the CPA pool accordingly.
+mode until a new primary request establishes ownership. Before account selection,
+Pacer supplies the authenticated caller's granted IDs through the native
+`auth_pool` response. CPA intersects those IDs with the existing provider, model,
+availability and retry constraints before any scheduler or affinity choice.
+An authorized account for another provider cannot widen the route or add a
+cross-provider fallback. Shared mode omits the restriction; an explicit empty
+grant configuration denies every caller. Client headers cannot supply or expand
+the pool. Pacer also rechecks the actual selected account before each dispatch.
+
+Changing grants requires an idle plugin reload. In-flight pool restrictions are
+bound to the host configuration that produced them; a reload refuses a stale
+retry instead of allowing it to reuse revoked membership.
 
 Explicit grants require a host-generated
-`host_capabilities.required_interceptors` registration guarantee. The local CPA
-patch rejects missing, disabled, fused, failed or skipped required interceptors,
-including nested execution and retries. A plugin cannot provide this guarantee
-by itself. Older hosts continue to work in shared mode but cannot enable grants.
+`host_capabilities.required_interceptors` registration guarantee with
+`auth_pool_filtering: true`. The local CPA patch rejects missing, disabled, fused,
+failed or skipped required interceptors, including nested execution and retries,
+and enforces the pool independently of request headers and metadata. A plugin
+cannot provide this guarantee by itself. Older hosts continue to work in shared
+mode but cannot enable grants.
 An operator or another trusted native plugin remains inside the server trust
 boundary; this is not a sandbox against server administrators.
 
@@ -107,18 +125,20 @@ prerequisite before issuing a new request; replaying the same request cannot hel
 New capability/access errors also include stable `code`, `action` and `retryable`
 fields. Existing quota and cache errors retain their established wire format.
 
-This option defaults to false. Stock OpenCode and the passive Pi example do not
-automatically enroll managed cache sessions. Enable it only for a bridge that
-implements the durable revision-2 contract. Keep a separate helper model outside
-the required list: managed summaries/title requests are not supported yet, and
-there is deliberately no header-only auxiliary exemption. Same-model compaction
-will be refused. A false declaration must not bypass admission.
+This option defaults to false. Enable it only for a bridge that implements the
+durable checkpoint contract. A bridge using same-model compaction must also require
+enabled `managed_auxiliary`, send kind `auxiliary` with the prepared scope/old epoch/
+current revision/private capability, and receive a real resolved selection before
+dispatch. There is no header-only auxiliary exemption. Legacy hosts need a separate
+helper model outside the required list or must leave the operation unavailable.
 
-The host explicit-cache fix honors `prompt_cache_options.mode: explicit` for
-auxiliary requests: no automatic breakpoints are added. The caller must remove
-its own cache markers. This constrains outgoing cache instructions; it does not
-claim to control provider-side billing or guarantee a cache hit. Warmth estimates
-and guesses about the cheapest compaction moment are not hard refusal rules.
+An admitted auxiliary selection has no TTL. The revision-3 host removes cache-write
+markers and adds no automatic breakpoints at its final supported Claude HTTP boundary;
+normal account authorization, physical attempt validation and durable settlement still
+apply. The bridge waits for helper shutdown and settlement before committing its own
+checkpoint and sending Pacer the receipt. Failure/Stop cannot publish a new checkpoint
+or policy. These rules constrain outgoing cache instructions, not provider billing or
+cache hits. Pacer records helper costs without treating the request as cache warmth.
 
 ## A harness bridge
 

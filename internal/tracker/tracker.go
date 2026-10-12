@@ -47,6 +47,19 @@ func Key(caller, provider string, c Claim) string {
 	return Digest(caller + "\x00" + c.Installation + "\x00" + c.Session + "\x00" + provider + "\x00" + c.Route)
 }
 
+var claimProviders = [...]string{"claude", "codex"}
+
+// SupportsClaimProvider is shared with Pacer's binding inventory so admission
+// checks every provider whose credentials can acquire a claimed binding.
+func SupportsClaimProvider(provider string) bool {
+	for _, supported := range claimProviders {
+		if provider == supported {
+			return true
+		}
+	}
+	return false
+}
+
 type Binding struct {
 	Key            string    `json:"key"`
 	Caller         string    `json:"caller_scope,omitempty"`
@@ -172,6 +185,11 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 		s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Started: s.now()}
 		return b, nil
 	}
+	if q != nil && q.Auto && c.Caller != "" {
+		if err := s.automaticProviderLocked(c, *q); err != nil {
+			return b, err
+		}
+	}
 	moved := b.Account != "" && b.Account != c.Account
 	if moved && c.Forced && gate && q != nil && q.CompactOnSwitch && !q.Fresh && q.Auto && (q.Checkpoint == "" || q.Checkpoint == b.Consumed) {
 		return b, &Refusal{"quota_compact_required", fmt.Sprintf("CPA moves this chat from %s to %s.", b.Alias, c.Alias)}
@@ -208,6 +226,36 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 		return Binding{}, err
 	}
 	return b, nil
+}
+
+// Caller holds s.mu across this check and admission. Pacer's supported provider
+// identities come from host credential metadata, never the client's route label.
+// Looking up the exact claim key for each supported provider also finds bindings
+// written before this guard, without conflating reused capabilities or sessions.
+func (s *Store) automaticProviderLocked(c Selection, q Claim) error {
+	if !SupportsClaimProvider(c.Provider) {
+		return nil // Unsupported credentials are refused by Pacer before admission.
+	}
+	for _, provider := range claimProviders {
+		if provider == c.Provider {
+			continue
+		}
+		prior, err := s.read(Key(c.Caller, provider, q))
+		if err != nil {
+			return err
+		}
+		if !prior.PrimaryUsed || prior.Capability == "" {
+			continue
+		}
+		if prior.Caller != "" && prior.Caller != c.Caller {
+			return &Refusal{"quota_identity_conflict", "Session owner differs"}
+		}
+		if prior.Capability != q.Capability {
+			return &Refusal{"quota_capability_conflict", "Session capability differs"}
+		}
+		return &Refusal{"quota_provider_switch_forbidden", "Automatic account switches must stay on this chat's provider. Select a model on the existing provider or start a new route."}
+	}
+	return nil
 }
 
 // CacheActivityForAuth is for asynchronous usage: the logical request may have

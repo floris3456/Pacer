@@ -1,7 +1,8 @@
 # CPA → durable Pacer policy adapter
 
 `internal/policyadapter` bridges CPA native **schema 7**, client protocol **1**, policy contract
-revision **2** to `internal/cachepolicy`. It implements `pluginapi.CachePolicyProvider` and
+revision **2**, plus the opt-in host revision **3** auxiliary extension, to `internal/cachepolicy`.
+The durable store/receipt contract remains revision 2. It implements `pluginapi.CachePolicyProvider` and
 `pluginapi.RequestLifecyclePlugin`. This package does not register the parent plugin, authenticate
 HTTP requests, dispatch upstream requests, poll providers, or create a database on request failure.
 
@@ -30,6 +31,7 @@ type Options struct {
     Clock func() time.Time
     Routes []Route
     NewEmptyAuthority NewEmptyAuthority
+    AuxiliaryNoCache bool // trusted host's final executor guarantee; default false
 }
 
 PolicyOptions(Options) (cachepolicy.Options, error)
@@ -80,6 +82,14 @@ Register plugin ID `pacer` with `schema_version:7`, `capabilities.cache_policy:t
 `request_lifecycle_plugin:true`, and `usage_plugin:true`. Keep policy handling active independently
 of quota routing mode. Do not advertise working selection on schema 6 or when `Open` failed.
 
+Auxiliary helpers additionally require trusted registration
+`host_capabilities.cache_policy:{contract_revision:3,auxiliary_no_cache:true}`.
+The parent sets `Options.AuxiliaryNoCache` only from that native host guarantee;
+YAML, request headers and client RPC bodies cannot enable it. New discovery advertises
+`features.managed_auxiliary` revision 1 and policy contract revision 3 only with this
+guarantee. Older hosts retain policy revision 2 and refuse auxiliary resolution.
+Changing the guarantee on an existing adapter requires a fresh plugin instance.
+
 The parent's existing dispatcher should forward:
 
 ```go
@@ -122,9 +132,11 @@ The parent plugin's existing registration implementation is not changed by this 
   Domain errors return explicit HTTP status and `{"error":{"code":"pacer_cache_...","message":"..."}}`.
 * `cache_policy.resolve`: `CachePolicyResolveRequest` → frozen `CachePolicy`. Both `claude` and
   `openai-response`, streaming/non-streaming, are supported for configured models and kinds
-  `primary|warming`. Auxiliary summary/title/helper calls are not managed by this boundary; CPA
-  sends them separately without a primary policy. There is no client TTL field. The adapter gets
-  the active TTL, then Store atomically checks the supplied epoch/revision when beginning a request.
+  `primary|warming`, plus `auxiliary` when the trusted host guarantee is enabled. There is no client
+  TTL field. The adapter gets the active admission TTL, then Store atomically checks the supplied
+  epoch/revision when beginning a request. Auxiliary selections carry `kind:"auxiliary",ttl:""`;
+  the private original admission TTL remains pinned for identical resolve retries. Auxiliary
+  guards/attempts have `managed:false` and cannot select or inherit a cache-write TTL.
 * `cache_policy.attempt`: `CachePolicyAttemptRequest`. `begin` returns
   `CachePolicyAttemptResponse{policy,started_at}`. Native `validate` and `finish` return `{}`.
   Direct typed methods return the SDK's zero response on those operations. Attempts use fresh
@@ -205,6 +217,28 @@ Capabilities are cleared from the retained resolve DTO and never enter snapshots
 Settlement uses `context.WithoutCancel(ctx)` so a canceled client context cannot suppress a trusted
 transport-stopped callback. This does not infer that transport stopped. Physical usage is separate,
 asynchronous evidence and never settles guards; `usage.handle` is not an adapter dispatch method.
+
+### Auxiliary compaction during a pending transition
+
+After `prepare(enrollment:"existing_history")`, primary and warming remain blocked.
+A capable client may request an auxiliary helper on a configured route/model using the returned
+old epoch and current revision. It still needs its private scope capability and a real native
+resolve, then begin/validate/finish for each physical dispatch and logical completion. A header
+or helper-shaped body without that resolved lifecycle does not bypass mandatory admission.
+
+The host removes cache-write markers at the final supported Claude HTTP boundary and records
+the frozen auxiliary selection with empty effective TTL and zero breakpoints. Pacer retains token
+costs, account/scope attribution and physical start/outcome without projecting primary-prefix
+warmth or selected-TTL evidence. This describes outgoing instructions, not provider billing guarantees.
+
+The client waits for helper transport shutdown and durable settlement, commits the new checkpoint
+to its own history, then sends the transition-bound checkpoint receipt to Pacer. Failure/Stop
+settles `failed`/`canceled` and cancels or retains the pending transition; neither publishes a TTL
+or checkpoint. Retry after cancellation uses a fresh transition and helper lifecycle ID. Orphaned
+helpers after host restart require explicit stopped-dispatch recovery before new admission.
+The store's existing rule remains: unrelated auxiliary work does not block a separately proven
+checkpoint commit, because it neither warms nor mutates primary context. The client remains
+responsible for correlating the particular helper result with its durable checkpoint receipt.
 
 ## Restart and explicit stopped-dispatch recovery
 

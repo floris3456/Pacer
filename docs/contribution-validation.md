@@ -31,10 +31,46 @@ python3 tests/lab/independent-client.py \
 
 That smoke passes with zero inference calls. All keys, directories and state are
 synthetic and temporary. Stock OpenCode/Pi checks and SDK package isolation are
-recorded in the client repository. These checks do not establish live provider
-billing or complete managed auxiliary support; neither production service was
-changed. The recovered host's original build provenance remains bounded by the
+recorded in the client repository. This discovery smoke does not establish live
+provider billing. Neither production service was changed. The recovered host's
+original build provenance remains bounded by the
 [inspection receipt](live-build-2026-10-12.md).
+
+## Managed sessions and account selection
+
+The next layer adds host-attested account-pool filtering before scheduling,
+preserving priority, affinity, model eligibility and cooldowns. After-selection
+checks remain in place, and configuration generations invalidate stale pools.
+Claimed automatic handoffs cannot cross the original provider, including a
+multi-provider alias, a retry, concurrent first admissions or a server restart.
+
+Managed auxiliary requests share authenticated session/CAS guards while carrying
+no selected cache TTL. Final Claude wire enforcement removes real cache markers
+after translation, cloaking and payload rules, including nested provider tool
+content. Application data is preserved. Auxiliary usage retains its scope but
+cannot establish primary cache warmth. Unsupported hosts cannot advertise this
+feature or enable explicit account grants without their required guarantees.
+
+The native managed lab uses three dummy OAuth accounts and an entirely local TLS
+provider fixture. It exercises parallel disjoint caller pools, durable enrollment,
+lost prepare/commit replies, process restart, compaction failure, Stop, final-wire
+cache instructions and credential/header isolation. It uses the independently
+packed client SDK and records artifact hashes alongside its results:
+
+```sh
+python3 tests/lab/native-managed-client.py \
+  /path/to/patched-CPA /path/to/pacer.so /path/to/sdk/dist/index.js \
+  /path/to/pacer-state
+```
+
+All 14 checks pass, with nine local fake-provider requests and one full
+server/client restart. No request reaches a real model provider.
+
+The host supports these managed operations on built-in Claude HTTP routes.
+Home/direct-plugin paths without equivalent enforcement fail closed; native
+provider billing and cache-retention guarantees are not inferred from fixtures.
+The vendored additive auth-pool types have a separate
+`third_party/cpa-sdk/AUTH-POOL-PROVENANCE.json`; upstream source receipts are retained.
 
 ## Earlier consistency changes
 
@@ -69,6 +105,5 @@ saturation, transactional failures and three overlapping caller views.
 and reopened capability lookups.
 
 This is local automated validation with synthetic credentials. It does not assert
-live provider behavior, identify a deployed CPA binary, or establish the schema-7
-host capability required by the separate managed cache policy. No deployment or
+live provider behavior or identify a deployed CPA binary. No deployment or
 routing-mode change is included.

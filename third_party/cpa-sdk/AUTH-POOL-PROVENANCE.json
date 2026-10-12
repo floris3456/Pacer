@@ -1,0 +1,9 @@
+{
+  "base_manifest": "V8-PROVENANCE.json",
+  "scope": "Local additive auth-pool request-interceptor types, mirrored by the CPA-host contribution; not an upstream snapshot",
+  "abi": 1,
+  "schema": 7,
+  "files": {
+    "sdk/pluginapi/types.go": "eed742662382f5c5e356b5129874ce596c1eaf9d2440c8f7ff596f6d12e1c29f"
+  }
+}
