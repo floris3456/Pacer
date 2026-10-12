@@ -164,7 +164,7 @@ func (p *Plugin) servedCredential(auth string) (credential, bool) {
 
 // clientDiscovery tells a client which declarations and views Pacer supports.
 func clientDiscovery() map[string]any {
-	return map[string]any{"version": clientVersion, "request_header": clientHeader, "caps": []string{"quota"}, "quota_header": quotaReplyHeader, "views": []string{"usage", "prices", "usage-watch"}}
+	return map[string]any{"version": clientVersion, "request_header": clientHeader, "caps": []string{"quota"}, "quota_header": quotaReplyHeader, "views": []string{"usage", "prices", "usage-watch", "capabilities"}}
 }
 
 // modelList asks CPA's own model list with the client's key. accepted is false
@@ -229,6 +229,12 @@ func (p *Plugin) clientPrices(token string) pluginapi.ManagementResponse {
 	}
 	if !accepted {
 		return resource(401, map[string]string{"error": "unauthorized"})
+	}
+	p.mu.Lock()
+	allowed := p.clientAllowedLocked(clientCaller(token), "")
+	p.mu.Unlock()
+	if !allowed {
+		return clientError(403, "account_access_denied", "contact_operator")
 	}
 	var list struct {
 		Data []struct {

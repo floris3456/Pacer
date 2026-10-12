@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pacer client API capabilities v1",
+  "description": "The api member of anonymous discovery, or the whole authenticated capabilities response. Unknown fields and features are additive.",
+  "type": "object",
+  "required": ["version", "build", "host_schema", "features", "access", "requirements"],
+  "properties": {
+    "version": {"const": 1},
+    "build": {
+      "type": "object",
+      "required": ["version", "revision", "dirty"],
+      "properties": {
+        "version": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1},
+        "dirty": {"type": ["boolean", "null"]}
+      }
+    },
+    "host_schema": {"type": "integer", "minimum": 0},
+    "features": {
+      "type": "object",
+      "required": ["quota", "watch", "account_switch", "account_access", "cache_policy", "required_cache_policy", "keepalive", "native_compaction"],
+      "additionalProperties": {"$ref": "#/$defs/feature"}
+    },
+    "requirements": {
+      "type": "object",
+      "required": ["managed_cache_models", "managed_kinds"],
+      "properties": {
+        "managed_cache_models": {"type": "array", "maxItems": 1024, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+        "managed_kinds": {"type": "array", "uniqueItems": true, "items": {"enum": ["primary", "warming"]}}
+      }
+    },
+    "access": {
+      "type": "object",
+      "required": ["mode", "enforcement"],
+      "properties": {
+        "mode": {"enum": ["shared", "granted"]},
+        "enforcement": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "feature": {
+      "type": "object",
+      "required": ["supported", "enabled"],
+      "properties": {
+        "supported": {"type": "boolean"},
+        "enabled": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "contract_revision": {"type": "integer", "minimum": 1}
+      },
+      "if": {"properties": {"enabled": {"const": true}}},
+      "then": {"properties": {"supported": {"const": true}}}
+    },
+    "error": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "action", "retryable"],
+          "properties": {
+            "code": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "minLength": 1},
+            "retryable": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  }
+}

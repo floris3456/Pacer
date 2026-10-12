@@ -5,6 +5,10 @@ OpenCodePlus) declares on each request what it handles, and Pacer only asks a cl
 without the plugin gets CPA's ordinary behaviour: when its chat moves to another account it simply continues there
 and the new account builds its cache from scratch.
 
+This describes the default shared mode. Optional account grants and mandatory
+cache admission can restrict requests. See [Independent clients](independent-clients.md)
+for the generic API, host guarantees and bridge responsibilities.
+
 ## Discovery
 
 `GET /v0/resource/plugins/pacer/events` without `Authorization` answers, among the older fields:
@@ -12,7 +16,7 @@ and the new account builds its cache from scratch.
 ```json
 {"protocol":1,"pacer":true,
  "client":{"version":1,"request_header":"X-Pacer-Client","caps":["quota"],
-            "quota_header":"X-Pacer-Quota","views":["usage","prices","usage-watch"]}}
+            "quota_header":"X-Pacer-Quota","views":["usage","prices","usage-watch","capabilities"]}}
 ```
 
 Behind an SSO proxy, this exact GET path has to reach CPA without SSO, like the older quota-handoff path
@@ -66,7 +70,8 @@ Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a
 - `?view=usage&auth=api-key&all=true&v=1`: every account with a meter (Claude, Codex, Antigravity, OpenCode Go), with
   IDs, aliases and windows in the `X-Pacer-Quota` format (all states, including stale and not-yet-reset windows).
   Without `v=1` the windows use the older format, which leaves out windows without a fresh balance and reset. This is
-  a shared-pool view, not per-tenant.
+  a shared-pool view by default. With `client_access`, only granted accounts and
+  their aliases are included.
 - `?view=prices&auth=api-key`: Pacer's price for every model the key can use, as on Model Settings (manual, else the
   imported book, else models.dev), so a client's cost display matches Pacer's usage page:
 

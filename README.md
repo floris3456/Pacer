@@ -8,6 +8,7 @@ the schema-7 CPA boundary, explicit durable-store initialization and a compatibl
 client. Missing policy state never means empty history.
 
 - [Pacer installation and trust boundary](docs/pacer-installation.md)
+- [Generic client API and small harness bridges](docs/independent-clients.md)
 - [Durable cache-policy contract](docs/cache-policy-contract.md)
 - [Native host adapter](docs/policy-adapter-contract.md)
 - [Passive observation](docs/observation-contract.md)

@@ -1,0 +1,97 @@
+package pacer
+
+import (
+	"net/http"
+
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/buildinfo"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+)
+
+// This is a client contract version, independent of the CPA ABI/schema and the
+// existing quota wire version. Additive fields do not require a coordinated
+// client/server release. Unavailable operations are never simulated by a client.
+type clientFeature struct {
+	Supported        bool   `json:"supported"`
+	Enabled          bool   `json:"enabled"`
+	Reason           string `json:"reason,omitempty"`
+	ContractRevision int    `json:"contract_revision,omitempty"`
+}
+
+type clientAPI struct {
+	Version      int                      `json:"version"`
+	Build        buildinfo.Info           `json:"build"`
+	HostSchema   int                      `json:"host_schema"`
+	Features     map[string]clientFeature `json:"features"`
+	Access       map[string]string        `json:"access"`
+	Requirements struct {
+		ManagedCacheModels []string `json:"managed_cache_models"`
+		ManagedKinds       []string `json:"managed_kinds"`
+	} `json:"requirements"`
+}
+
+// Caller holds p.mu. Public discovery describes availability, not authorization
+// to another user's accounts, sessions, or checkpoint operations.
+func (p *Plugin) clientAPILocked() clientAPI {
+	policy := clientFeature{Supported: p.hostSchema >= 7, Enabled: p.policy != nil, ContractRevision: 2}
+	if !policy.Supported {
+		policy.Reason = "host_integration_required"
+	} else if !policy.Enabled {
+		policy.Reason = "not_configured"
+	}
+	switching := clientFeature{Supported: true, Enabled: p.cfg.CompactOnSwitch}
+	if !switching.Enabled {
+		switching.Reason = "not_configured"
+	}
+	access := "shared"
+	if p.cfg.ClientAccess != nil {
+		access = "granted"
+	}
+	enforcement := "optional-interceptors"
+	if p.hostGuard.enforced() {
+		enforcement = "required-interceptors"
+	}
+	api := clientAPI{
+		Version: 1, Build: buildinfo.Current(), HostSchema: p.hostSchema,
+		Features: map[string]clientFeature{
+			"quota":                 {Supported: true, Enabled: true},
+			"watch":                 {Supported: true, Enabled: true},
+			"account_switch":        switching,
+			"account_access":        {Supported: p.hostGuard.enforced(), Enabled: p.cfg.ClientAccess != nil && p.hostGuard.enforced()},
+			"required_cache_policy": {Supported: p.hostGuard.enforced() && policy.Supported, Enabled: p.cfg.CachePolicy.RequireManaged && p.hostGuard.enforced() && policy.Enabled},
+			"cache_policy":          policy,
+			"keepalive":             {Reason: "host_integration_required"},
+			"native_compaction":     {Reason: "host_integration_required"},
+		},
+		Access: map[string]string{"mode": access, "enforcement": enforcement},
+	}
+	api.Requirements.ManagedCacheModels = p.requiredModelsLocked()
+	api.Requirements.ManagedKinds = []string{"primary", "warming"}
+	return api
+}
+
+func clientError(status int, code, action string) pluginapi.ManagementResponse {
+	return resource(status, map[string]any{"error": map[string]any{
+		"code": code, "action": action, "retryable": status == http.StatusServiceUnavailable,
+	}})
+}
+
+// Capability discovery with a key reuses the ordinary CPA authentication
+// boundary. It is read-only and never creates a policy or sends inference.
+func (p *Plugin) clientCapabilities(token string) pluginapi.ManagementResponse {
+	p.mu.Lock()
+	endpoint := p.cfg.UsageAuthURL
+	p.mu.Unlock()
+	accepted, err := authenticateUsage(endpoint, token)
+	if err != nil {
+		return clientError(503, "authentication_unavailable", "wait")
+	}
+	if !accepted {
+		return clientError(401, "unauthorized", "authenticate")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.clientAllowedLocked(clientCaller(token), "") {
+		return clientError(403, "account_access_denied", "contact_operator")
+	}
+	return resource(200, p.clientAPILocked())
+}

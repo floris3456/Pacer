@@ -68,7 +68,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			}
 			policy = map[string]any{"protocol": 1, "contract_revision": 2, "endpoint": "/v1/plugins/pacer/cache-policy", "ttls": []string{"5m", "1h"}, "provider_routes": routes, "transports": []string{"http"}, "formats": []string{"claude", "openai-response"}, "enforced": true}
 		}
-		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy, "auxiliary_ack": map[string]any{"version": 1, "kinds": []string{"compaction", "title", "generate"}}, "client": clientDiscovery()})
+		return resource(200, map[string]any{"protocol": 1, "mode": "off", "pacer": true, "cache_policy": policy, "auxiliary_ack": map[string]any{"version": 1, "kinds": []string{"compaction", "title", "generate"}}, "client": clientDiscovery(), "api": p.clientAPILocked()})
 	}
 	token := strings.TrimPrefix(authorization, "Bearer ")
 	if token == authorization || len(token) == 0 || len(token) > 8192 {
@@ -79,6 +79,13 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		return resource(400, map[string]string{"error": "invalid_usage_scope"})
 	}
 	var binding tracker.Binding
+	caller := ""
+	if req.Query.Get("auth") == "api-key" && req.Query.Get("view") == "capabilities" {
+		if req.Query.Get("v") != "1" {
+			return clientError(422, "unsupported_version", "upgrade")
+		}
+		return p.clientCapabilities(token)
+	}
 	if req.Query.Get("auth") == "api-key" && req.Query.Get("view") == "prices" {
 		return p.clientPrices(token)
 	}
@@ -96,6 +103,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		if !accepted {
 			return resource(401, map[string]string{"error": "unauthorized"})
 		}
+		caller = clientCaller(token)
 	} else {
 		if req.Query.Get("auth") != "" || len(token) < 40 || len(token) > 128 {
 			return resource(401, map[string]string{"error": "unauthorized"})
@@ -105,6 +113,13 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		if err != nil {
 			return resource(401, map[string]string{"error": "unauthorized"})
 		}
+		caller = binding.Caller
+	}
+	p.mu.Lock()
+	allowed := p.clientAllowedLocked(caller, "") && (binding.Auth == "" || p.clientAllowedLocked(caller, binding.Auth))
+	p.mu.Unlock()
+	if !allowed {
+		return clientError(403, "account_access_denied", "contact_operator")
 	}
 	if req.Query.Get("view") != "usage" {
 		windows, err := p.legacyWindows(binding.Account, binding.Model, false)
@@ -127,6 +142,19 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	if !ok {
 		return resource(503, map[string]string{"error": "usage_watch_unavailable"})
 	}
+	if wait > 0 && req.Query.Get("auth") == "api-key" {
+		// Ordinary API-key revocation must also take effect while a read waits.
+		p.mu.Lock()
+		endpoint := p.cfg.UsageAuthURL
+		p.mu.Unlock()
+		accepted, err := authenticateUsage(endpoint, token)
+		if err != nil {
+			return clientError(503, "authentication_unavailable", "wait")
+		}
+		if !accepted {
+			return clientError(401, "unauthorized", "authenticate")
+		}
+	}
 	if req.Query.Get("auth") != "api-key" {
 		// The chat may have switched accounts or lost its capability while held.
 		// Keep this request scoped to the same caller's binding even if the
@@ -136,15 +164,22 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			return resource(401, map[string]string{"error": "unauthorized"})
 		}
 		binding = current
+		caller = current.Caller
 	}
 	p.mu.Lock()
+	if !p.clientAllowedLocked(caller, "") || binding.Auth != "" && !p.clientAllowedLocked(caller, binding.Auth) {
+		p.mu.Unlock()
+		return clientError(403, "account_access_denied", "contact_operator")
+	}
 	creds := make([]credential, 0, len(p.creds)+len(p.usageCreds))
 	for _, c := range p.creds {
-		creds = append(creds, c)
+		if p.clientAllowedLocked(caller, c.ID) {
+			creds = append(creds, c)
+		}
 	}
 	// Usage-only providers (Antigravity, OpenCode Go) have meters too.
 	for _, c := range p.usageCreds {
-		if observation.Endpoint(c.Provider) != "" {
+		if observation.Endpoint(c.Provider) != "" && p.clientAllowedLocked(caller, c.ID) {
 			creds = append(creds, c)
 		}
 	}
@@ -183,7 +218,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	if binding.Key != "" {
 		p.mu.Lock()
 		for _, t := range p.requests {
-			if t.Key == binding.Key && t.Auth != "" && (t.Claim == nil || t.Claim.Kind == "primary") {
+			if t.Key == binding.Key && t.Auth != "" && p.clientAllowedLocked(caller, t.Auth) && (t.Claim == nil || t.Claim.Kind == "primary") {
 				active = append(active, t.Auth)
 			}
 		}

@@ -128,8 +128,8 @@ func TestUsageWatchFansOutOtherCallersHeadersBeforeStreamFinishes(t *testing.T) 
 			t.Fatal("header did not immediately wake idle viewer")
 		}
 	}
-	if got := authCalls.Load(); got != 5 {
-		t.Fatalf("watch performed %d authentication reads, want one per request", got)
+	if got := authCalls.Load(); got != 9 {
+		t.Fatalf("watch performed %d authentication reads, want pre/post checks for four accepted waits and one denied key", got)
 	}
 	awaitUsageWaiters(t, &p.usageChanges, 0)
 }

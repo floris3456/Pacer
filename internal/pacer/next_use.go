@@ -13,6 +13,7 @@ import (
 // Reads never enroll a chat, reserve quota, select an account or refresh meters.
 type routingPreviewInput struct {
 	At              time.Time
+	Caller          string
 	Provider, Model string
 	Candidates      []string
 	Selection       pluginapi.CachePolicy
@@ -61,7 +62,7 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) (
 	expected := 0.0
 	for _, id := range input.Candidates {
 		c, ok := p.creds[id]
-		if !ok || c.Provider != input.Provider {
+		if !ok || c.Provider != input.Provider || !p.clientAllowedLocked(input.Caller, c.ID) {
 			continue
 		}
 		candidates = append(candidates, c)

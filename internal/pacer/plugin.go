@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/buildinfo"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/capacity"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/dryrun"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/history"
@@ -41,16 +42,17 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
-	ForwardReportPath string       `yaml:"forward_report_path" json:"-"`
-	ForwardReportBook string       `yaml:"forward_report_book" json:"-"`
-	ReportPath        string       `yaml:"report_path"`
-	CachePolicy       PolicyConfig `yaml:"cache_policy"`
-	Enabled           bool         `yaml:"enabled"`
-	Priority          int          `yaml:"priority"`
-	StatePath         string       `yaml:"state_path"`
-	HistoryPath       string       `yaml:"history_path"`
-	CompactOnSwitch   bool         `yaml:"compact_on_switch"`
-	UsageAuthURL      string       `yaml:"usage_auth_url"`
+	ClientAccess      *ClientAccess `yaml:"client_access"`
+	ForwardReportPath string        `yaml:"forward_report_path" json:"-"`
+	ForwardReportBook string        `yaml:"forward_report_book" json:"-"`
+	ReportPath        string        `yaml:"report_path"`
+	CachePolicy       PolicyConfig  `yaml:"cache_policy"`
+	Enabled           bool          `yaml:"enabled"`
+	Priority          int           `yaml:"priority"`
+	StatePath         string        `yaml:"state_path"`
+	HistoryPath       string        `yaml:"history_path"`
+	CompactOnSwitch   bool          `yaml:"compact_on_switch"`
+	UsageAuthURL      string        `yaml:"usage_auth_url"`
 	Routing           struct {
 		Mode      string   `yaml:"mode"`
 		Providers []string `yaml:"providers"`
@@ -121,6 +123,8 @@ type Plugin struct {
 	chats              *tracker.Store
 	observer           *observation.Store
 	cfg                Config
+	hostSchema         int
+	hostGuard          requiredInterceptors
 	creds              map[string]credential
 	usageCreds         map[string]credential // usage page only (see usage_accounts.go)
 	recordStore        *historyreports.RecordStore
@@ -148,13 +152,16 @@ func registration(policyEnabled ...bool) any {
 	if enabled || len(policyEnabled) > 1 && policyEnabled[1] {
 		schema = 7
 	}
-	return map[string]any{"schema_version": schema, "metadata": pluginapi.Metadata{Name: "pacer", Version: "0.2.0-dev", Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true, "cache_policy": enabled}}
+	return map[string]any{"schema_version": schema, "metadata": pluginapi.Metadata{Name: "pacer", Version: buildinfo.Version, Author: "floris3456", GitHubRepository: "https://github.com/floris3456/cliproxyapi-quota-handoff"}, "capabilities": map[string]bool{"scheduler": true, "scheduler_across_priorities": true, "request_interceptor": true, "request_lifecycle_plugin": true, "response_interceptor": true, "response_stream_interceptor": true, "usage_plugin": true, "management_api": true, "cache_policy": enabled}}
 }
 
 func (p *Plugin) configure(raw []byte) (any, error) {
 	var request struct {
-		ConfigYAML    []byte `json:"config_yaml"`
-		SchemaVersion int    `json:"schema_version"`
+		ConfigYAML       []byte `json:"config_yaml"`
+		SchemaVersion    int    `json:"schema_version"`
+		HostCapabilities struct {
+			RequiredInterceptors requiredInterceptors `json:"required_interceptors"`
+		} `json:"host_capabilities"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return nil, err
@@ -170,6 +177,18 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	if cfg.StatePath == "" {
 		return nil, errors.New("state_path is required")
+	}
+	if err := validateClientAccess(cfg.ClientAccess); err != nil {
+		return nil, err
+	}
+	if cfg.ClientAccess != nil && !cfg.Enabled {
+		return nil, errors.New("client_access requires an enabled plugin")
+	}
+	if cfg.ClientAccess != nil && !request.HostCapabilities.RequiredInterceptors.enforced() {
+		return nil, errors.New("client_access requires CPA required-interceptor enforcement for pacer")
+	}
+	if cfg.CachePolicy.RequireManaged && (!cfg.CachePolicy.Enabled || !request.HostCapabilities.RequiredInterceptors.enforced()) {
+		return nil, errors.New("require_managed needs enabled cache policy and CPA required-interceptor enforcement for pacer")
 	}
 	policyOpts, err := p.policyOptions(cfg.CachePolicy)
 	if err != nil {
@@ -203,6 +222,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, errors.New("Pacer is quiesced; create a new instance for reload")
 	}
 	if p.db != nil {
+		if !reflect.DeepEqual(p.cfg.ClientAccess, cfg.ClientAccess) {
+			return nil, errors.New("client_access changes require an idle reload")
+		}
 		if p.cfg.ForwardReportPath != cfg.ForwardReportPath || p.cfg.ForwardReportBook != cfg.ForwardReportBook {
 			return nil, errors.New("forward report configuration changes require idle reload")
 		}
@@ -224,6 +246,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		}
 		cfg.Routing.Mode = mode
 		p.cfg = cfg
+		p.hostSchema = request.SchemaVersion
+		p.hostGuard = request.HostCapabilities.RequiredInterceptors
 		p.dryRunMarkLocked()
 		return registration(p.policy != nil), nil
 	}
@@ -329,6 +353,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		}
 	}
 	p.db, p.chats, p.cfg = db, chats, cfg
+	p.hostSchema = request.SchemaVersion
+	p.hostGuard = request.HostCapabilities.RequiredInterceptors
 	p.observer = observer
 	p.policy = policy
 	p.forward = forward
@@ -443,12 +469,19 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	}
 	p.mu.Lock()
 	ready := p.db != nil && !p.stopped
+	restricted := p.cfg.ClientAccess != nil || p.cfg.CachePolicy.RequireManaged
 	p.mu.Unlock()
 	if !ready {
+		if restricted && (method == pluginabi.MethodRequestInterceptBefore || method == pluginabi.MethodRequestInterceptAfter) {
+			return unavailableClientAccess(), nil
+		}
 		return nil, errors.New("Pacer state unavailable")
 	}
 	switch method {
 	case pluginabi.MethodCachePolicyHandle, pluginabi.MethodCachePolicyResolve, pluginabi.MethodCachePolicyAttempt:
+		if err := p.authorizePolicyCall(method, raw); err != nil {
+			return nil, err
+		}
 		if p.policy == nil {
 			return nil, pluginabi.NewError("pacer_cache_unavailable", "Managed cache policy is not configured", 503)
 		}
@@ -501,6 +534,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	case pluginabi.MethodRequestInterceptBefore:
 		var req pluginapi.RequestInterceptRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
+			if restricted {
+				return unavailableClientAccess(), nil
+			}
 			return nil, err
 		}
 		q, err := claim(req.Headers)
@@ -508,6 +544,16 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 			return refuse("quota_protocol_invalid", "Invalid quota coordination header"), nil
 		}
 		caller := text(req.Metadata, "caller_scope")
+		p.mu.Lock()
+		if refusal := p.requiredPolicyLocked(req, caller); refusal.Terminate {
+			p.mu.Unlock()
+			return refusal, nil
+		}
+		allowed := p.clientAllowedLocked(caller, "")
+		p.mu.Unlock()
+		if !allowed {
+			return denyClientAccess(), nil
+		}
 		if q != nil && caller == "" {
 			return refuse("quota_identity_missing", "Quota routing requires authenticated caller identity"), nil
 		}
@@ -524,6 +570,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	case pluginabi.MethodRequestInterceptAfter:
 		var req pluginapi.RequestInterceptRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
+			if restricted {
+				return unavailableClientAccess(), nil
+			}
 			return nil, err
 		}
 		return p.after(req), nil
@@ -660,7 +709,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		ids = append(ids, candidate.ID)
 	}
 	p.mu.Lock()
-	input := routingPreviewInput{At: p.now(), Provider: provider, Model: req.Model, Candidates: ids, Selection: selection, Managed: managed}
+	input := routingPreviewInput{At: p.now(), Caller: t.Caller, Provider: provider, Model: req.Model, Candidates: ids, Selection: selection, Managed: managed}
 	p.rememberPreviewLocked(key, input)
 	accounts, expected, candidates := p.routingInputsLocked(input, p.now())
 	p.mu.Unlock()
@@ -680,6 +729,14 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	auth := text(req.Metadata, "selected_auth_id")
 	p.mu.Lock()
 	t, ok := p.requests[req.RequestID]
+	if refusal := p.requiredPolicyLocked(req, t.Caller); refusal.Terminate {
+		p.mu.Unlock()
+		return refusal
+	}
+	if p.cfg.ClientAccess != nil && (!ok || t.Caller == "" || auth == "" || !p.clientAllowedLocked(t.Caller, auth)) {
+		p.mu.Unlock()
+		return denyClientAccess()
+	}
 	c, known := p.creds[auth]
 	gate := p.cfg.CompactOnSwitch
 	selectedPolicy, managed := p.selections[req.RequestID]
@@ -714,7 +771,9 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		}
 		key := chatKey(t.Caller, c.Provider, req.Model, t.Session, t.Claim)
 		if key != "" && !managedAux {
-			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
+			selection := selectionIntent(t, c, req.Model)
+			selection.Caller = t.Caller
+			b, err := p.chats.Admit(req.RequestID, key, selection, t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
 					p.recordDecision(req.RequestID, t, c, e.Code)

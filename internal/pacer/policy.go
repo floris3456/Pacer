@@ -12,6 +12,7 @@ import (
 
 type PolicyConfig struct {
 	Enabled                   bool                       `yaml:"enabled"`
+	RequireManaged            bool                       `yaml:"require_managed"`
 	Routes                    []PolicyRoute              `yaml:"routes"`
 	TrustedEmptyInstallations []TrustedEmptyInstallation `yaml:"trusted_empty_installations"`
 }

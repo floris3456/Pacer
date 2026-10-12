@@ -49,7 +49,7 @@ func Key(caller, provider string, c Claim) string {
 
 type Binding struct {
 	Key            string    `json:"key"`
-	Caller         string    `json:"-"`
+	Caller         string    `json:"caller_scope,omitempty"`
 	Capability     string    `json:"capability,omitempty"`
 	Route          string    `json:"route"`
 	Provider       string    `json:"provider"`
@@ -73,6 +73,7 @@ type Flight struct {
 
 type Selection struct {
 	Auth, Account, Alias, Provider, Model string
+	Caller                                string
 	Forced                                bool
 }
 type Refusal struct{ Code, Message string }
@@ -154,6 +155,9 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 	if err != nil {
 		return Binding{}, err
 	}
+	if b.Caller != "" && c.Caller != "" && b.Caller != c.Caller {
+		return b, &Refusal{"quota_identity_conflict", "Session owner differs"}
+	}
 	kind := "primary"
 	if q != nil {
 		if !q.Valid() {
@@ -181,6 +185,9 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 		b.UnknownWarmth = true
 	}
 	b.Auth, b.Account, b.Alias, b.Provider, b.Model = c.Auth, c.Account, c.Alias, c.Provider, c.Model
+	if c.Caller != "" {
+		b.Caller = c.Caller
+	}
 	b.PrimaryUsed, b.LastUsed = true, s.now()
 	if q != nil {
 		if b.Consumed != q.Checkpoint {

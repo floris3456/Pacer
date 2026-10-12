@@ -1,7 +1,42 @@
 # Quota consistency validation
 
 These changes build on upstream `d727bc84962c3b86f12bc39a885c0ee959282088`.
-They retain protocol 1, the shared credential pool and existing routing policy.
+They retain protocol 1 and the default shared credential pool and routing policy.
+
+## Independent client contract (2026-10-12)
+
+The additive API and account grants are documented in
+[independent-clients.md](independent-clients.md). Explicit grants and mandatory
+cache admission require the host's required-interceptor guarantee; the default
+remains unchanged. Required-model tests include aliases, thinking suffixes,
+forged headers, foreign callers, retries and real durable policy resolution.
+Three-user regressions cover redaction, persisted ownership and key revocation
+while a quota watch is held.
+
+The full Go race suite, vet, vendored SDK tests, native build and C ABI probe pass
+after these changes. Build receipts record version/revision/dirty status and
+artifact SHA-256 hashes. The accompanying local CPA patch also passes its full
+affected packages, targeted race tests and executable build; its explicit-cache
+backport passes final-wire execute/stream/count and executor regression tests.
+
+The offline integration smoke loads the **actual native plugin into the built
+CPA executable**, then uses the packed generic SDK over localhost. It verifies
+host capability delivery, two granted callers, a denied third caller, an invalid
+key, public/authenticated discovery, structured errors and scoped usage:
+
+```sh
+python3 tests/lab/independent-client.py \
+  /path/to/patched-CPA /path/to/pacer.so /path/to/sdk/dist/index.js
+```
+
+That smoke passes with zero inference calls. All keys, directories and state are
+synthetic and temporary. Stock OpenCode/Pi checks and SDK package isolation are
+recorded in the client repository. These checks do not establish live provider
+billing or complete managed auxiliary support; neither production service was
+changed. The recovered host's original build provenance remains bounded by the
+[inspection receipt](live-build-2026-10-12.md).
+
+## Earlier consistency changes
 
 - Held usage reads reload their binding after waking. A revoked capability or
   changed binding key is rejected; the current account is read from the refreshed
