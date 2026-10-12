@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-12T12:22:15.449143+00:00",
+  "status": "source_snapshot_recovered_original_commit_unresolved",
+  "scope": {
+    "remote": "proxmox / LXC 104",
+    "production_container": "cliproxyapi",
+    "remote_operations": "read-only image metadata, release records, source reads and file hashes",
+    "production_mutated": false,
+    "production_restarted": false,
+    "provider_inference_calls": 0,
+    "copied_source_built_or_run": false
+  },
+  "production": {
+    "container_id": "15733e4b0623d9882d54288d42e5f323688f930f07fbde93a4ba94493d1a01df",
+    "image_reference": "cliproxyapi-opus55:pacer-7333067",
+    "image_id": "sha256:d37bfc8d132aa6128b59632ec8228000b62aaadce7a91c477552723aec310eb7",
+    "registry_repo_digests": [],
+    "image_created_at": "2026-10-11T10:50:19.91994544Z",
+    "platform": "linux/amd64",
+    "pid": 3351006,
+    "started_at": "2026-10-11T22:56:37.253189933Z",
+    "restart_count": 0,
+    "pid_image_and_started_at_unchanged_during_inspection": true,
+    "oci_source_revision_labels": {}
+  },
+  "host_executable": {
+    "process_executable_path": "/CLIProxyAPI/CLIProxyAPI",
+    "sha256": "5ed81b093ba4e6e726d97c2e9d0b1064b56d2134f553a27a38d1fbc4c43eb266",
+    "size_bytes": 91751720,
+    "go_version": "go1.26.8",
+    "module": "github.com/router-for-me/CLIProxyAPI/v8",
+    "module_version": "(devel)",
+    "build_settings": {
+      "buildmode": "exe",
+      "compiler": "gc",
+      "CGO_ENABLED": "1",
+      "GOARCH": "amd64",
+      "GOOS": "linux",
+      "GOAMD64": "v1"
+    },
+    "embedded_vcs_settings": {},
+    "matching_preserved_binary": "/opt/cliproxyapi/releases/pacer-management-data/image/CLIProxyAPI",
+    "matching_deployment_receipt": "/opt/cliproxyapi/releases/pacer-management-data/deployment.json",
+    "receipt_cpa_revision": "7333067",
+    "process_binary_preserved_binary_and_receipt_sha256_match": true
+  },
+  "image_filesystem_lineage": {
+    "live_layer_count": 9,
+    "latest_history_instruction": "COPY CLIProxyAPI",
+    "predecessor": {
+      "image_reference": "cliproxyapi-opus55:pacer-71fb2ac4",
+      "image_id": "sha256:188c215be3db3f2397d63f3fcd8558d98fb5d2324b1d3bc407be1a8693c72094",
+      "layer_count": 8,
+      "all_layers_match_live_prefix": true,
+      "receipt_cpa_revision": "71fb2ac4c01cea3676e765a01c8b5d8dfb1011bf",
+      "receipt": "/opt/cliproxyapi/releases/pacer-phase1-0efd99c-71fb2ac4-qh2/manifest.json"
+    },
+    "earlier_base": {
+      "image_reference": "cliproxyapi-opus55:20261007-13",
+      "image_id": "sha256:21e517dfc7d1390c89ace0e0cb0aa5ec03ce7394cc3a55874f842fa2a24454a2",
+      "layer_count": 7,
+      "all_layers_match_live_prefix": true,
+      "receipt_version": "8.0.12-opus55.13",
+      "receipt_source_commit": "bf8900a748d6db9f3f0859bd72a0705fcc2f0505",
+      "receipt": "/opt/cliproxyapi/releases/20261007-v8.0.12-opus55.13/manifest.json"
+    },
+    "limit": "RootFS layer prefixes establish the preserved base filesystem. Earlier source revisions do not identify the overwritten live executable; the original BASE build argument was not recovered."
+  },
+  "recovered_host_source": {
+    "remote_path": "/opt/cliproxyapi/releases/pacer-management-data/cpa",
+    "association": "Source tree preserved beside the matching executable and its deployment receipt; source-to-binary equivalence has not been checked by rebuilding.",
+    "original_git_metadata_present": false,
+    "original_remote": null,
+    "original_full_commit": null,
+    "original_git_tree": null,
+    "recorded_short_revision": "7333067",
+    "module": "github.com/router-for-me/CLIProxyAPI/v8",
+    "go_directive": "1.26.0",
+    "go_mod_sha256": "740845d5ae3b3275ad1a2104fcbf456b96e2eaa9b5f291efad80d87af3e1cb0d",
+    "original_file_count": 1847,
+    "original_size_bytes": 30135605,
+    "local_path": "/home/viktor/Projects/pacer-contributions/CPA-host",
+    "local_snapshot_branch": "snapshot/live-2026-10-12",
+    "local_snapshot_commit": "a646821df554ec4bb11c61c522892b836db5b176",
+    "local_snapshot_git_tree": "ea6e5cf02732f334c56a39d2c217e8b05196a16f",
+    "local_snapshot_is_original_commit": false,
+    "local_remotes_at_handoff": [],
+    "copied_file_count": 1800,
+    "copied_size_bytes": 23801302,
+    "source_files_sha256": "a283673d8814109e1e8cd018cd990582c529374baee6d270a647d43730bf716c",
+    "fingerprint_algorithm": "Sort files lexicographically by their POSIX path-component tuples, as Python pathlib.Path ordering does. Concatenate UTF-8 records: git-style file mode, NUL, relative path, NUL, file SHA-256, LF; take SHA-256 of the concatenation. Modes are 100644 or 100755. Git metadata is excluded.",
+    "copy_verified": "Every copied file SHA-256 and the complete selected-source fingerprint match the remote source selection.",
+    "copy_policy": {
+      "allowed_suffixes": [".go", ".mod", ".sum", ".md", ".ps1", ".sh", ".txt", ".c", ".h", ".rs", ".toml", ".lock", ".py"],
+      "allowed_filenames": ["LICENSE", "Dockerfile", "Makefile", ".gitignore", ".dockerignore"],
+      "allowed_embedded_json": [
+        "internal/registry/models/devin_models.json",
+        "internal/registry/models/models.json",
+        "internal/registry/models/codex_client_models.json"
+      ],
+      "excluded_top_level_directories": [".git", ".github", "assets", "auth", "auths", "config", "configs", "logs", "data", "dist", "bin", "node_modules"],
+      "additional_exclusions": [".env-prefixed files", ".yaml/.yml/.env files", "symlinks", "non-regular files", "files containing NUL bytes or ELF/MZ signatures", "files outside the allowlist"],
+      "retained_source_packages": "Go source packages such as internal/config and sdk/auth are retained; runtime configuration and auth stores are excluded.",
+      "excluded_file_counts": {
+        "configuration_or_environment_file": 5,
+        "excluded_top_level_directory": 38,
+        "outside_source_build_allowlist": 4
+      },
+      "excluded_json_test_fixtures": [
+        "internal/home/testdata/concurrency_dispatch_accounted.json",
+        "internal/home/testdata/concurrency_dispatch_busy.json",
+        "internal/home/testdata/concurrency_release.json",
+        "internal/home/testdata/credential_in_flight_contract.json"
+      ]
+    }
+  },
+  "recorded_build_recipes": {
+    "exact_live_build_invocation_recovered": false,
+    "source_dockerfile": "/opt/cliproxyapi/releases/pacer-management-data/cpa/Dockerfile",
+    "source_builder_image": "golang:1.26-bookworm",
+    "source_dockerfile_command": "CGO_ENABLED=1 GOOS=linux go build -buildvcs=false -ldflags=\"-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'\" -o ./CLIProxyAPI ./cmd/server/",
+    "source_dockerfile_defaults": {"VERSION": "dev", "COMMIT": "none", "BUILD_DATE": "unknown"},
+    "overlay_dockerfile": "/opt/cliproxyapi/releases/pacer-management-data/image/Dockerfile",
+    "overlay_dockerfile_sha256": "2a8c596346294b05ab49228cc94a90e3ff2166cc98247cc26b15e0d012378e9d",
+    "overlay_instructions": ["ARG BASE", "FROM ${BASE}", "COPY CLIProxyAPI /CLIProxyAPI/CLIProxyAPI"],
+    "limits": [
+      "The source Dockerfile records a recipe, not proof of the invocation used for production.",
+      "No build or executable launch was performed during this investigation.",
+      "The initial filtered snapshot omitted config.example.yaml; the unchanged source template was subsequently restored in source_recovery_addendum.",
+      "The four initially excluded internal/home JSON fixtures were subsequently restored in source_recovery_addendum."
+    ]
+  },
+  "source_recovery_addendum": {
+    "restored_at": "2026-10-12T12:39:19Z",
+    "reason": "Restore specifically requested source example and test fixtures omitted by the initial conservative copy policy, so independent host tests can read their original inputs.",
+    "remote_source_root": "/opt/cliproxyapi/releases/pacer-management-data/cpa",
+    "local_root": "/home/viktor/Projects/pacer-contributions/CPA-host",
+    "files": [
+      {
+        "path": "config.example.yaml",
+        "sha256": "96374a2aa09c230de547897b678614b477576e3ae76d1110832fea6dc7dd5482",
+        "size_bytes": 69773
+      },
+      {
+        "path": "internal/home/testdata/concurrency_dispatch_accounted.json",
+        "sha256": "e0f2bd813e0f83728724a8f296527f2bf55fab98907214bf3ae73032d4900f8c",
+        "size_bytes": 657
+      },
+      {
+        "path": "internal/home/testdata/concurrency_dispatch_busy.json",
+        "sha256": "b289c8e02779fb3a6ccf5ac4e3a64e52f25b3363594814cba28474e606647fe7",
+        "size_bytes": 172
+      },
+      {
+        "path": "internal/home/testdata/concurrency_release.json",
+        "sha256": "fd06a701d3687ac0f6d4649b81119c8da37cc2aa17e1d5e61d436d974a1ff52b",
+        "size_bytes": 57
+      },
+      {
+        "path": "internal/home/testdata/credential_in_flight_contract.json",
+        "sha256": "337474173d83b528e56788371d1b91ea2d5c5d4b6757e822d7ee00b7194022f5",
+        "size_bytes": 1155
+      }
+    ],
+    "restored_file_count": 5,
+    "restored_size_bytes": 71814,
+    "total_recovered_source_file_count": 1805,
+    "total_recovered_source_size_bytes": 23873116,
+    "verification": "All five restored files retain the exact remote source bytes and their independently checked SHA-256 values.",
+    "credential_review": {
+      "config_template": "Parsed source example: management.secret-key and server.tls.key are empty; all three active access.api-keys entries are explicit placeholders. No private-key marker or recognized live-secret token pattern was found, including the reviewed template comments.",
+      "json_fixtures": "Parsed source test fixtures: credential-like values are the dummy literals user-key, cred-1 and cred-a; remaining content is deterministic concurrency protocol example data.",
+      "actual_config_auth_or_environment_files_copied": false
+    },
+    "staged_or_committed_by_provenance_inspection": false,
+    "git_tree_note": "The original 1800-file snapshot commit and its tree/fingerprint remain unchanged. These five additions may be staged by the host-change owner; this addendum does not attribute concurrent host code changes to the recovered source.",
+    "remote_changes": false,
+    "build_or_test_execution_by_provenance_inspection": false,
+    "reproducible_binary_status_changed": false
+  },
+  "mounted_pacer_file": {
+    "path": "/opt/cliproxyapi/plugins/linux/amd64/pacer-v0.2.0-dev.so",
+    "sha256": "65a516eea2e476819fba8a3597e4d5d24ff1dd0093f4c05f6e6518152de2bff5",
+    "size_bytes": 12313352,
+    "go_version": "go1.26.8",
+    "buildmode": "c-shared",
+    "matching_activation_receipt": "/opt/cliproxyapi/releases/pacer-quota-pages-f4a9e2b/activation.json",
+    "receipt_source_sha": "f4a9e2bd0ceedc909b947a561b921927ba9470ae",
+    "mount_is_separate_from_host_image": true,
+    "limit": "This fingerprints the mounted file and its matching receipt, not the in-memory loaded module."
+  },
+  "remaining_uncertainty": [
+    "The original full Git commit and original remote for the recovered CPA source snapshot are unavailable.",
+    "Source-to-binary equivalence is not established by a reproducible rebuild.",
+    "The Docker image ID is known; no registry manifest digest is recorded."
+  ]
+}
