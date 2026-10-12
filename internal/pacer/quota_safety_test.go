@@ -2,6 +2,7 @@ package pacer
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -10,6 +11,52 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+func TestClaudeQuotaSelectionDiscoversStartupCandidates(t *testing.T) {
+	for _, missing := range []string{"all", "a", "b"} {
+		for _, failed := range []bool{false, true} {
+			name := missing
+			if failed {
+				name += "/discovery-failed"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newRoutingFixture(t, "off", false)
+				quotaLeft(t, f, "a", 0)
+				r := f.before(t, "startup", "claude-opus-5-5")
+				if missing == "all" {
+					clear(f.p.creds)
+				} else {
+					delete(f.p.creds, missing)
+				}
+				host := f.p.Host
+				calls := 0
+				f.p.Host = func(method string, input any) (json.RawMessage, error) {
+					if method == "host.http.do" {
+						t.Fatal("selection polled provider quota")
+					}
+					if method == "host.auth.list" {
+						calls++
+						if failed {
+							return nil, errors.New("discovery unavailable")
+						}
+					}
+					return host(method, input)
+				}
+				got := f.pick(t, r, "a", "b")
+				if calls != 1 {
+					t.Fatalf("discovery calls=%d", calls)
+				}
+				if failed {
+					if got.Handled {
+						t.Fatal("selected with incomplete inventory")
+					}
+				} else if !got.Handled || got.AuthID != "b" {
+					t.Fatal("healthy account not selected", got)
+				}
+			})
+		}
+	}
+}
 
 func quotaLeft(t *testing.T, f *routingFixture, id string, left float64) {
 	t.Helper()

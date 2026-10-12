@@ -724,6 +724,21 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		}
 	}
 	if cfg.Enabled && tracked && provider == "claude" && (t.Claim == nil || t.Claim.Kind == "primary") && (!managed || selection.Kind == "primary") {
+		// Startup or auth reload can precede periodic discovery. Refresh local
+		// credential identity before quota selection, not after an exhausted
+		// account has already been selected and admission must reject it.
+		p.mu.Lock()
+		missing := false
+		for _, candidate := range req.Candidates {
+			if candidate.ID != "" && p.creds[candidate.ID].ID == "" {
+				missing = true
+				break
+			}
+		}
+		p.mu.Unlock()
+		if missing {
+			p.discover(true)
+		}
 		if safety := p.pickClaudeQuota(req, t); safety.Handled {
 			return safety
 		}
