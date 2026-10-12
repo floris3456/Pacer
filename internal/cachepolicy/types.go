@@ -102,6 +102,7 @@ type State struct {
 	ActivePrimary   int64       `json:"active_primary"`
 	ActiveWarming   int64       `json:"active_warming"`
 	ActiveAuxiliary int64       `json:"active_auxiliary"`
+	ActiveNative    int64       `json:"active_native,omitempty"`
 	ActiveAttempts  int64       `json:"active_attempts"`
 	WarmingPaused   bool        `json:"warming_paused"`
 	// Until initial existing-history compaction commits, Active describes only
@@ -125,6 +126,9 @@ const (
 	Primary   Kind = "primary"
 	Warming   Kind = "warming"
 	Auxiliary Kind = "auxiliary"
+	// NativeCompaction is attested by the host's consumed exact-account replay
+	// lease. An ordinary request header must never select this kind.
+	NativeCompaction Kind = "native_compaction"
 )
 
 // Kind must be classified by the host. A summary is Auxiliary, never Primary.

@@ -36,7 +36,7 @@ X-Pacer-Client: v=1; caps=quota
 - CPA removes the header before the request goes upstream.
 
 Compacting before an account switch is separate: only a client that can compact at a step boundary sends the
-`X-Quota-Handoff` claim with `compact_on_switch` (OpenCodePlus). Pacer answers `409 quota_compact_required` only to
+`X-Quota-Handoff` claim with `compact_on_switch`. Pacer answers `409 quota_compact_required` only to
 such requests.
 
 Automatic primary claims stay within their previously bound provider, even when
@@ -138,6 +138,11 @@ Pacer checks the key against CPA's own loopback `/v1/models`; reads never call a
   `cache_write` is the 5-minute write price; `context_tiers` and `fast` appear when the model has them. Models without
   a price are left out.
 
+There is no ordinary-key caller execution-history, forced manual-handoff or
+scheduler routing-status endpoint. The private per-chat preview below is a separate
+capability-scoped read, not an ordinary-key routing control. Usage reads and watches
+return stored observations; provider quota refresh remains server scheduled.
+
 ### Shared credential change subscription
 
 The usage view includes `now_ms` (millisecond snapshot time) and an opaque
@@ -161,6 +166,65 @@ processing. They never block on viewers, perform provider requests, or run on
 payload chunks. Authentication still uses CPA's local model-list boundary.
 The native ABI cannot cancel a held call on HTTP disconnect; held calls therefore
 have the 20-second lifetime and a global limit of 256 concurrent waiters.
+
+## Authenticated Claude replay
+
+Revision-1 `keepalive` and `native_compaction` features are supported when the
+schema-7 host advertises final-wire capture, exact-credential execution and the
+corresponding replay operation, with Pacer required and current. They are enabled
+only when durable cache policy is enabled. Check authenticated capabilities;
+neither discovery nor a cache timer grants replay authority.
+
+```http
+POST /v0/resource/plugins/pacer/events?view=claude-replay&auth=api-key&v=1
+Authorization: Bearer <ordinary CPA API key>
+Content-Type: application/json
+```
+
+Requests also carry the authenticated managed cache-policy reference. The command
+body selects `operation: "acquire"` or `"execute"` and `kind: "keepalive"` or
+`"native_compaction"`. Acquire accepts neither a token nor a request override;
+execute consumes the returned lease token. Native execute additionally requires
+the current host-encoded Claude request object in `request`. Keepalive accepts no
+request, model, account or upstream-URL override. These are explicit resource
+commands, not protocol-2 control-model inference.
+
+Eligible Claude Messages primaries declare `X-Pacer-Replay: v=1; role=root` or
+`v=1; role=subagent`; optional `X-Pacer-Request` correlates capture with the local
+request. The host strips these before upstream dispatch. The role is a harness
+assertion checked against known parent signals, not independent proof of a remote
+client's process topology. Subagent captures can support native compaction, never
+keepalive.
+
+Acquire is metadata only. It requires a completed matching primary with positive
+measured cache read/write tokens, physical body closure and durable settlement.
+The live authenticated HTTP callback binds caller, private policy, current epoch,
+revision, captured final-wire request and exact credential. A bounded acquire
+retry is allowed for `unavailable` reason `settling`; it does not execute inference.
+Execute can incur usage, consumes the token before preparation and retains normal
+grant/interceptor checks. No failure authorizes a second physical dispatch or an
+alternate credential.
+
+Every execute result includes `settled`. Only `settled: true` confirms transport
+closure and durable physical/logical acknowledgements, independently of success.
+A miss or rejection can be unavailable and settled; close/read failures or missing
+durable evidence keep it false. An unavailable result without explicit settlement
+cannot authorize checkpoint commit or paid fallback. Native compaction also needs
+a terminal signed compaction block with positive cache reads and the harness's
+durable checkpoint receipt before policy commit. It retains the old active TTL;
+client headers cannot create the private native-replay admission proof.
+
+Keepalive is root-only, has a bounded activity window and is suppressed by a
+verified one-hour cache policy. Only a positive cache-read response can renew its
+lease. Native candidates can extend the captured final prefix but cannot rewrite
+it. The implementation covers first-party Claude HTTPS Messages, not custom
+gateways or Responses translation. Positive past cache usage is eligibility, not
+a guarantee of provider retention. Captures and leases remain memory-only.
+
+The host-side contract is `docs/claude-replay-contract.md` in the CPA-host checkout;
+the [vendored callback DTO](../third_party/cpa-sdk/sdk/pluginapi/claude_replay.go)
+defines the wire fields. Its schema extension changes no C ABI symbols. Host
+fixtures establish their tested execution paths, not paid-provider acceptance.
 
 ## How often Pacer reads meters
 

@@ -28,6 +28,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/management"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/origin"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyadapter"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/policyevidence"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/prefixevidence"
@@ -128,6 +129,9 @@ type Plugin struct {
 	hostSchema         int
 	hostGuard          requiredInterceptors
 	hostCachePolicy    hostCachePolicySupport
+	hostCodexOrigin    pluginapi.CodexOriginCapability
+	hostClaudeReplay   pluginapi.ClaudeReplayCapability
+	codexOrigins       *origin.Store
 	creds              map[string]credential
 	usageCreds         map[string]credential // usage page only (see usage_accounts.go)
 	recordStore        *historyreports.RecordStore
@@ -163,8 +167,10 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		ConfigYAML       []byte `json:"config_yaml"`
 		SchemaVersion    int    `json:"schema_version"`
 		HostCapabilities struct {
-			RequiredInterceptors requiredInterceptors   `json:"required_interceptors"`
-			CachePolicy          hostCachePolicySupport `json:"cache_policy"`
+			RequiredInterceptors requiredInterceptors             `json:"required_interceptors"`
+			CachePolicy          hostCachePolicySupport           `json:"cache_policy"`
+			CodexOrigin          pluginapi.CodexOriginCapability  `json:"codex_origin"`
+			ClaudeReplay         pluginapi.ClaudeReplayCapability `json:"claude_replay"`
 		} `json:"host_capabilities"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
@@ -202,6 +208,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, errors.New("managed cache policy requires CPA schema 7")
 	}
 	policyOpts.AuxiliaryNoCache = request.HostCapabilities.CachePolicy.auxiliarySupported(request.SchemaVersion)
+	policyOpts.NativeCompaction = replaySupported(request.HostCapabilities.ClaudeReplay, "native_compaction") && request.HostCapabilities.RequiredInterceptors.enforced()
 	usageURL, err := validateUsageURL(cfg.UsageAuthURL)
 	if err != nil {
 		return nil, err
@@ -242,6 +249,12 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		if p.policy != nil && p.hostCachePolicy != request.HostCapabilities.CachePolicy {
 			return nil, errors.New("cache policy host capabilities changes require an idle reload")
 		}
+		if p.hostClaudeReplay != request.HostCapabilities.ClaudeReplay {
+			return nil, errors.New("Claude replay host capability changes require an idle reload")
+		}
+		if p.hostCodexOrigin != request.HostCapabilities.CodexOrigin {
+			return nil, errors.New("Codex origin host capability changes require an idle reload")
+		}
 		if p.cfg.HistoryPath != cfg.HistoryPath {
 			return nil, errors.New("history_path change requires idle reload")
 		}
@@ -259,6 +272,18 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		p.hostCachePolicy = request.HostCapabilities.CachePolicy
 		p.dryRunMarkLocked()
 		return registration(p.policy != nil), nil
+	}
+	var codexOrigins *origin.Store
+	if support := request.HostCapabilities.CodexOrigin; support.Version == 1 && support.PhysicalHTTP && support.NativeCompact {
+		codexOrigins, err = origin.Open(cfg.StatePath, p.now)
+		if err != nil {
+			return nil, errors.New("Codex origin store is unavailable")
+		}
+		defer func() {
+			if p.codexOrigins != codexOrigins {
+				_ = codexOrigins.Close()
+			}
+		}()
 	}
 	forward, err := p.openForward(cfg)
 	if err != nil {
@@ -365,6 +390,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.hostSchema = request.SchemaVersion
 	p.hostGuard = request.HostCapabilities.RequiredInterceptors
 	p.hostCachePolicy = request.HostCapabilities.CachePolicy
+	p.hostCodexOrigin = request.HostCapabilities.CodexOrigin
+	p.hostClaudeReplay = request.HostCapabilities.ClaudeReplay
+	p.codexOrigins = codexOrigins
 	p.observer = observer
 	p.policy = policy
 	p.forward = forward
@@ -427,6 +455,10 @@ func (p *Plugin) Close() {
 		_ = p.creditDB.Close()
 		p.creditDB = nil // credits stays immutable for concurrent readers
 	}
+	if p.codexOrigins != nil {
+		_ = p.codexOrigins.Close()
+		// Keep the closed store reference so in-flight callbacks fail closed.
+	}
 	if p.capacityDB != nil {
 		_ = p.capacityDB.Close()
 		p.capacityDB, p.capacityStore = nil, nil
@@ -460,7 +492,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.revokeForwardManagement()
 		if err == nil {
 			p.mu.Lock()
-			result = registration(p.policy != nil, p.forward != nil)
+			result = p.registrationLocked()
 			p.mu.Unlock()
 			p.discover()
 			p.startWorker()
@@ -496,6 +528,8 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		return nil, errors.New("Pacer state unavailable")
 	}
 	switch method {
+	case pluginabi.MethodCodexOrigin:
+		return p.codexOrigin(raw)
 	case pluginabi.MethodCachePolicyHandle, pluginabi.MethodCachePolicyResolve, pluginabi.MethodCachePolicyAttempt:
 		if err := p.authorizePolicyCall(method, raw); err != nil {
 			return nil, err
@@ -544,6 +578,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		result["routes"] = append(result["routes"].([]map[string]string), p.registerForwardManagement(raw)...)
 		return result, nil
 	case pluginabi.MethodManagementHandle:
+		if claudeReplayRPC(raw) {
+			return p.claudeReplay(raw), nil
+		}
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, err
@@ -571,6 +608,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		p.mu.Unlock()
 		if pool != nil && len(pool.AuthIDs) == 0 {
 			return denyClientAccess(), nil
+		}
+		var originRefusal pluginapi.RequestInterceptResponse
+		pool, originRefusal = p.beforeOrigin(req, pool)
+		if originRefusal.Terminate {
+			return originRefusal, nil
 		}
 		if q != nil && caller == "" {
 			return refuse("quota_identity_missing", "Quota routing requires authenticated caller identity"), nil
@@ -744,6 +786,9 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 }
 
 func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestInterceptResponse {
+	if refusal := p.afterOrigin(req); refusal.Terminate {
+		return refusal
+	}
 	auth := text(req.Metadata, "selected_auth_id")
 	p.mu.Lock()
 	t, ok := p.requests[req.RequestID]

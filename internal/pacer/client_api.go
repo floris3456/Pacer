@@ -79,6 +79,19 @@ func (p *Plugin) clientAPILocked() clientAPI {
 		api.Requirements.ManagedKinds = append(api.Requirements.ManagedKinds, "auxiliary")
 	}
 	api.Requirements.CacheRoutes = p.cacheRoutesLocked()
+	for _, kind := range []string{"keepalive", "native_compaction"} {
+		supported := p.claudeReplaySupportedLocked(kind)
+		feature := clientFeature{Supported: supported, Enabled: supported && policy.Enabled, ContractRevision: 1}
+		if !supported {
+			feature.Reason = "host_integration_required"
+		} else if !feature.Enabled {
+			feature.Reason = "not_configured"
+		}
+		api.Features[kind] = feature
+	}
+	s := p.hostCodexOrigin
+	guarded := s.Version == 1 && s.PhysicalHTTP && s.NativeCompact && p.codexOrigins != nil && p.hostGuard.accountPoolEnforced()
+	api.Features["codex_native_compaction"] = clientFeature{Supported: guarded, Enabled: guarded, ContractRevision: 1}
 	return api
 }
 

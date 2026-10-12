@@ -36,6 +36,8 @@ func (p *Plugin) admittedPolicyLocked(selected pluginapi.CachePolicy) bool {
 		return selected.TTL == "5m" || selected.TTL == "1h"
 	case "auxiliary":
 		return selected.TTL == "" && p.policy != nil && p.hostCachePolicy.auxiliarySupported(p.hostSchema)
+	case "native_compaction":
+		return (selected.TTL == "5m" || selected.TTL == "1h") && p.claudeReplaySupportedLocked("native_compaction")
 	default:
 		return false
 	}

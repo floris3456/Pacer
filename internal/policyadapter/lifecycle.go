@@ -16,7 +16,7 @@ func selection(s cachepolicy.Snapshot, caller string) pluginapi.CachePolicy {
 func snapshot(req pluginapi.CachePolicyAttemptRequest) cachepolicy.Snapshot {
 	p := req.Policy
 	return cachepolicy.Snapshot{Protocol: p.Protocol, Scope: scope(p.Scope), ContextEpoch: p.ContextEpoch, Revision: p.Revision,
-		TTL: cachepolicy.TTL(p.TTL), Kind: cachepolicy.Kind(p.Kind), RequestID: req.RequestID, AttemptID: req.AttemptID, Managed: p.Kind == "primary" || p.Kind == "warming", StartedAt: req.StartedAt.UTC()}
+		TTL: cachepolicy.TTL(p.TTL), Kind: cachepolicy.Kind(p.Kind), RequestID: req.RequestID, AttemptID: req.AttemptID, Managed: p.Kind == "primary" || p.Kind == "warming" || p.Kind == "native_compaction", StartedAt: req.StartedAt.UTC()}
 }
 
 func sameSnapshot(a, b cachepolicy.Snapshot) bool {
@@ -31,7 +31,7 @@ func (a *Adapter) ResolveCachePolicy(ctx context.Context, req pluginapi.CachePol
 	if req.Protocol != cachepolicy.Protocol || !id(req.ContextEpoch) || req.Revision < 1 || !id(req.RequestID) {
 		return pluginapi.CachePolicy{}, reject(400, "invalid", "A complete protocol-1 lifecycle policy reference is required.")
 	}
-	if (req.Kind != "primary" && req.Kind != "warming" && !(req.Kind == "auxiliary" && a.auxiliary)) || (req.SourceFormat != "claude" && req.SourceFormat != "openai-response") || !a.models[req.Scope.ProviderRoute][req.Model] {
+	if (req.Kind != "primary" && req.Kind != "warming" && !(req.Kind == "auxiliary" && a.auxiliary) && !(req.Kind == "native_compaction" && a.native && req.NativeReplayAuthorized && req.SourceFormat == "claude")) || (req.SourceFormat != "claude" && req.SourceFormat != "openai-response") || !a.models[req.Scope.ProviderRoute][req.Model] {
 		return pluginapi.CachePolicy{}, reject(422, "unsupported", "The model, transport or request kind is not supported by this host's cache policy integration.")
 	}
 	a.mu.Lock()

@@ -64,16 +64,18 @@ type CachePolicyResponse struct {
 }
 
 type CachePolicyResolveRequest struct {
-	Protocol     int              `json:"protocol"`
-	Scope        CachePolicyScope `json:"scope"`
-	Capability   string           `json:"capability"`
-	ContextEpoch string           `json:"context_epoch"`
-	Revision     int64            `json:"revision"`
-	Kind         string           `json:"kind"`
-	RequestID    string           `json:"request_id"`
-	Model        string           `json:"model"`
-	SourceFormat string           `json:"source_format"`
-	Stream       bool             `json:"stream"`
+	// NativeReplayAuthorized is set only from a consumed host replay guard.
+	NativeReplayAuthorized bool             `json:"native_replay_authorized,omitempty"`
+	Protocol               int              `json:"protocol"`
+	Scope                  CachePolicyScope `json:"scope"`
+	Capability             string           `json:"capability"`
+	ContextEpoch           string           `json:"context_epoch"`
+	Revision               int64            `json:"revision"`
+	Kind                   string           `json:"kind"`
+	RequestID              string           `json:"request_id"`
+	Model                  string           `json:"model"`
+	SourceFormat           string           `json:"source_format"`
+	Stream                 bool             `json:"stream"`
 }
 
 // CachePolicy is a validated, immutable selection. It contains no private capability.
@@ -107,12 +109,36 @@ type CachePolicyAttemptResponse struct {
 // CachePolicyEvidence describes one physical attempt, never the chat's current state.
 // EffectiveTTL covers caller/CPA breakpoints only; provider-added writes can have other TTLs.
 type CachePolicyEvidence struct {
-	AttemptStartedAt  time.Time    `json:"attempt_started_at,omitempty"`
-	Selected          *CachePolicy `json:"selected,omitempty"`
-	EffectiveTTL      string       `json:"effective_ttl,omitempty"`
-	BreakpointCount   int          `json:"breakpoint_count"`
-	Dispatched        bool         `json:"dispatched"`
-	UpstreamStartedAt time.Time    `json:"upstream_started_at,omitempty"`
+	AttemptStartedAt  time.Time            `json:"attempt_started_at,omitempty"`
+	Selected          *CachePolicy         `json:"selected,omitempty"`
+	EffectiveTTL      string               `json:"effective_ttl,omitempty"`
+	BreakpointCount   int                  `json:"breakpoint_count"`
+	Dispatched        bool                 `json:"dispatched"`
+	UpstreamStartedAt time.Time            `json:"upstream_started_at,omitempty"`
+	Prefix            *CachePrefixSnapshot `json:"prefix,omitempty"`
+}
+
+// CachePrefixSnapshot is a content-free, keyed fingerprint of the final signed Claude wire
+// request, computed once before dispatch. Tags are HMACs under a per-process random key, so
+// they are comparable only when KeyID matches; a restart rotates the key. Shape is
+// "text_single_pass" only when Reasons is empty.
+type CachePrefixSnapshot struct {
+	Version     int                   `json:"version"`
+	KeyID       string                `json:"key_id"`
+	SettingsTag string                `json:"settings_tag"`
+	Endpoints   []CachePrefixEndpoint `json:"endpoints"`
+	Automatic   bool                  `json:"automatic"`
+	Shape       string                `json:"shape"`
+	Reasons     []string              `json:"reasons,omitempty"`
+}
+
+// CachePrefixEndpoint is one explicit cache_control marker in final-wire order.
+// Tag covers the cumulative prefix through the marked block.
+type CachePrefixEndpoint struct {
+	Ordinal int    `json:"ordinal"`
+	Section string `json:"section"`
+	TTL     string `json:"ttl"`
+	Tag     string `json:"tag"`
 }
 
 // CacheCreationUsage preserves optional raw provider counters and their classification.

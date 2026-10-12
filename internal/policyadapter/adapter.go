@@ -40,6 +40,7 @@ type Options struct {
 	Routes            []Route
 	NewEmptyAuthority NewEmptyAuthority // nil denies new-empty enrollment
 	AuxiliaryNoCache  bool              // trusted host removes/rejects auxiliary cache-write instructions
+	NativeCompaction  bool              // trusted host consumes an exact-credential replay capability
 }
 
 type Adapter struct {
@@ -48,6 +49,7 @@ type Adapter struct {
 	models    map[string]map[string]bool
 	authority NewEmptyAuthority
 	auxiliary bool
+	native    bool
 	requests  map[string]*logical
 	completed map[string]cachepolicy.Outcome // no private credentials retained after completion
 }
@@ -112,7 +114,7 @@ func Open(ctx context.Context, db *sql.DB, opts Options) (*Adapter, error) {
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	a := &Adapter{store: store, models: make(map[string]map[string]bool), authority: opts.NewEmptyAuthority, auxiliary: opts.AuxiliaryNoCache, requests: make(map[string]*logical), completed: make(map[string]cachepolicy.Outcome)}
+	a := &Adapter{store: store, models: make(map[string]map[string]bool), authority: opts.NewEmptyAuthority, auxiliary: opts.AuxiliaryNoCache, native: opts.NativeCompaction, requests: make(map[string]*logical), completed: make(map[string]cachepolicy.Outcome)}
 	for _, route := range opts.Routes {
 		a.models[route.ProviderRoute] = make(map[string]bool)
 		for _, model := range route.Models {

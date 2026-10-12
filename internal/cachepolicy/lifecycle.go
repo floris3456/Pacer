@@ -18,7 +18,7 @@ func (s *Store) BeginRequest(ctx context.Context, auth Credentials, request Requ
 	if !identifier(request.RequestID) || !identifier(request.ContextEpoch) || request.Revision < 1 {
 		return Snapshot{}, invalid("A request ID and complete policy reference are required.")
 	}
-	if request.Kind != Primary && request.Kind != Warming && request.Kind != Auxiliary {
+	if request.Kind != Primary && request.Kind != Warming && request.Kind != Auxiliary && request.Kind != NativeCompaction {
 		return Snapshot{}, invalid("Unknown host-classified request kind.")
 	}
 	var result Snapshot
@@ -58,8 +58,16 @@ func (s *Store) BeginRequest(ctx context.Context, auth Credentials, request Requ
 			if err = s.support(request.ProviderRoute, request.TTL); err != nil {
 				return err
 			}
-			if state.Pending != nil {
+			if state.Pending != nil && request.Kind != NativeCompaction {
 				return conflict("transition_pending", "New primary and warming requests pause until the transition settles.")
+			}
+			if request.Kind == NativeCompaction {
+				if state.Pending == nil || !state.Active.Used {
+					return conflict("transition_required", "Native compaction requires a prepared transition over an established context.")
+				}
+				if state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveNative != 0 || state.ActiveAuxiliary != 0 || state.ActiveAttempts != 0 {
+					return conflict("inflight", "Native compaction requires all previous requests to settle.")
+				}
 			}
 			state.Active.Used = true
 		}
@@ -69,6 +77,8 @@ func (s *Store) BeginRequest(ctx context.Context, auth Credentials, request Requ
 			state.ActivePrimary++
 		case Warming:
 			state.ActiveWarming++
+		case NativeCompaction:
+			state.ActiveNative++
 		case Auxiliary:
 			state.ActiveAuxiliary++
 			result.TTL = ""
@@ -101,7 +111,7 @@ func validSnapshot(s Snapshot) bool {
 	if s.Kind == Auxiliary {
 		return !s.Managed && s.TTL == ""
 	}
-	return (s.Kind == Primary || s.Kind == Warming) && s.Managed && (s.TTL == TTL5m || s.TTL == TTL1h)
+	return (s.Kind == Primary || s.Kind == Warming || s.Kind == NativeCompaction) && s.Managed && (s.TTL == TTL5m || s.TTL == TTL1h)
 }
 
 func requestSnapshot(ctx context.Context, q queryer, key, requestID string) (Snapshot, string, error) {
@@ -180,8 +190,11 @@ func (s *Store) BeginAttempt(ctx context.Context, auth Credentials, attempt Atte
 			if state.EnrollmentRequired {
 				return conflict("enrollment_required", "Initial existing-history compaction has not committed.")
 			}
-			if state.Pending != nil {
+			if state.Pending != nil && snap.Kind != NativeCompaction {
 				return conflict("transition_pending", "New physical primary and warming attempts pause during a transition.")
+			}
+			if snap.Kind == NativeCompaction && state.Pending == nil {
+				return conflict("transition_required", "The native compaction transition is no longer pending.")
 			}
 			if snap.ContextEpoch != state.Active.ContextEpoch || snap.Revision != state.Revision || snap.TTL != state.Active.TTL {
 				return conflict("policy_conflict", "The logical request policy is no longer current.")
@@ -351,6 +364,8 @@ func (s *Store) FinishRequest(ctx context.Context, auth Credentials, scope Scope
 			state.ActivePrimary--
 		case Warming:
 			state.ActiveWarming--
+		case NativeCompaction:
+			state.ActiveNative--
 		case Auxiliary:
 			state.ActiveAuxiliary--
 		}

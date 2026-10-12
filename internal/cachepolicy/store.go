@@ -233,7 +233,7 @@ func validState(state State) bool {
 		return false
 	}
 	if state.EnrollmentRequired {
-		if state.Active.TTL != "" || !state.Active.Used || state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveAttempts != 0 || state.LastCommit != nil {
+		if state.Active.TTL != "" || !state.Active.Used || state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveNative != 0 || state.ActiveAttempts != 0 || state.LastCommit != nil {
 			return false
 		}
 	} else if state.Active.TTL != TTL5m && state.Active.TTL != TTL1h {
@@ -244,10 +244,13 @@ func validState(state State) bool {
 			return false
 		}
 	}
-	if state.ActivePrimary < 0 || state.ActiveWarming < 0 || state.ActiveAuxiliary < 0 || state.ActiveAttempts < 0 {
+	if state.ActivePrimary < 0 || state.ActiveWarming < 0 || state.ActiveAuxiliary < 0 || state.ActiveNative < 0 || state.ActiveNative > 1 || state.ActiveAttempts < 0 {
 		return false
 	}
-	if (state.ActivePrimary > 0 || state.ActiveWarming > 0 || state.ActiveAttempts > 0) && !state.Active.Used {
+	if (state.ActivePrimary > 0 || state.ActiveWarming > 0 || state.ActiveNative > 0 || state.ActiveAttempts > 0) && !state.Active.Used {
+		return false
+	}
+	if state.ActiveNative > 0 && state.Pending == nil {
 		return false
 	}
 	if p := state.Pending; p != nil {

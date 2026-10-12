@@ -30,16 +30,28 @@ and absent host guarantees must not be treated as support.
 | `requirements.managed_kinds` | `primary` and `warming`, plus `auxiliary` only when the host supports and enables its no-cache lifecycle. |
 | `requirements.cache_routes` | Configured `{provider_route,models,ttls}` mappings for enrollment; empty when cache policy is unavailable. |
 
-Keepalive and native compaction remain explicitly unavailable in this API.
+Claude keepalive and native compaction use the authenticated generic replay
+resource when their revision-1 features are both supported and enabled. They
+require schema-7 host replay guarantees, current required-interceptor enforcement
+and an enabled durable cache policy; discovery alone grants no session authority.
+See [authenticated Claude replay](client-protocol.md#authenticated-claude-replay).
 Ordinary inference and its stream stay with the harness. The library does not
 create pings, spend inference quota, enroll a session or retry an inference request
-on its own. GPT retention estimates are UI observations, not eviction evidence.
+on its own. GPT retention estimates are UI observations, not eviction evidence or
+replay authority; GPT and child sessions never receive keepalive pings.
 
 Quota, prices, watches and per-chat previews retain the existing
 [client protocol](client-protocol.md). Cache commands retain the durable
-[revision-2 contract](cache-policy-contract.md). They use private, random
+[cache-policy contract](cache-policy-contract.md), with revision 3 required for
+managed auxiliary helpers. They use private, random
 per-session capabilities, operation IDs, revisions and transition-bound receipts.
 Discovery never grants authority to create those receipts.
+
+There is no generic ordinary-key endpoint for caller execution history, forced
+manual handoff or a scheduler routing-status view. The existing per-chat preview
+uses its private binding capability and is not an ordinary-key routing control.
+Provider quota refresh is server scheduled: usage reads and watches fetch stored
+observations and cannot force an upstream refresh.
 
 `features.managed_auxiliary` revision 1 enables same-model compaction helpers only
 when `supported` and `enabled` are true. It requires the host's policy contract

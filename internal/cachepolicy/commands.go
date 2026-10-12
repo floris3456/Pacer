@@ -210,7 +210,7 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		if state.Active.Used {
 			return State{}, conflict("compaction_required", "Changing TTL for used context requires prepare, new compaction and commit.")
 		}
-		if state.ActivePrimary != 0 || state.ActiveWarming != 0 {
+		if state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveNative != 0 {
 			return State{}, conflict("inflight", "Primary or warming requests are still active.")
 		}
 		state.Active.TTL = cmd.TTL
@@ -236,7 +236,7 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 		if err := committedReceipt(cmd.CheckpointReceipt, p, cmd.Checkpoint); err != nil {
 			return State{}, err
 		}
-		if state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveAttempts != 0 {
+		if state.ActivePrimary != 0 || state.ActiveWarming != 0 || state.ActiveNative != 0 || state.ActiveAttempts != 0 {
 			return State{}, conflict("inflight", "Old primary requests, warming or physical attempts are not settled.")
 		}
 		var seen int
@@ -260,6 +260,9 @@ func (s *Store) change(ctx context.Context, tx *sql.Tx, key string, state State,
 	case "cancel":
 		if state.Pending == nil || state.Pending.ID != cmd.TransitionID || state.Pending.TTL != cmd.TTL {
 			return State{}, conflict("transition_conflict", "Cancel does not match the pending transition.")
+		}
+		if state.ActiveNative != 0 {
+			return State{}, conflict("inflight", "Native compaction must settle before canceling its transition.")
 		}
 		state.Revision++
 		state.Pending = nil
