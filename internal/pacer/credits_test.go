@@ -1,12 +1,17 @@
 package pacer
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +19,122 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+func TestCreditUpgradeLeavesExistingMeasurementSchemaUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.sqlite")
+	p := startPlugin(t, path)
+	p.Close()
+	// The preceding release's main schema is identical, without a credit file.
+	if err := os.Remove(path + ".credits.sqlite"); err != nil {
+		t.Fatal(err)
+	}
+	witness := func() (int64, int64) {
+		db, err := sql.Open("sqlite3", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var version, saved, tables int64
+		if err := db.QueryRow("PRAGMA schema_version").Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow("SELECT schema_cookie FROM measurement_report_meta WHERE id=1").Scan(&saved); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='observation_credits'").Scan(&tables); err != nil || tables != 0 {
+			t.Fatal(tables, err)
+		}
+		return version, saved
+	}
+	before, saved := witness()
+	if before != saved {
+		t.Fatal("invalid initial witness", before, saved)
+	}
+	p = startPlugin(t, path)
+	if p.credits == nil {
+		t.Fatal("credit store missing")
+	}
+	c := observation.CodexCredits([]byte(`{"credits":{"has_credits":true,"unlimited":false}}`), p.now())
+	if _, err := p.credits.ObserveCredits("account", c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.measurement.ReportFeedHead(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	p.Close()
+	p = startPlugin(t, path)
+	defer p.Close()
+	if got := p.readCredits("account"); got != c {
+		t.Fatal(got)
+	}
+	if version, saved := witness(); version != before || saved != before {
+		t.Fatal("upgrade changed guarded schema", version, saved)
+	}
+	if _, err := p.measurement.ReportFeedHead(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path + ".credits.sqlite"); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal(info, err)
+	}
+}
+
+func TestCreditStoreFailureKeepsStartupAndUnknownCreditStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.sqlite")
+	if err := os.Mkdir(path+".credits.sqlite", 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := startPlugin(t, path)
+	defer p.Close()
+	if p.credits != nil || p.creditDB != nil {
+		t.Fatal("unexpected store")
+	}
+	c := credential{ID: "codex", Account: "credit-fixture", Provider: "codex"}
+	encoded, ok := p.quotaReplyValue(p.observer, c, "gpt-fixture")
+	if !ok {
+		t.Fatal("missing header")
+	}
+	reply := decodeQuota(t, http.Header{quotaReplyHeader: {encoded}})
+	if reply.Credits == nil || reply.Credits.State != "unknown" || reply.Credits.ReadMS != 0 {
+		t.Fatal(reply)
+	}
+	if _, err := p.measurement.ReportFeedHead(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosedCreditStoreDoesNotHideQuotasAndConcurrentCloseIsSafe(t *testing.T) {
+	p := startPlugin(t, filepath.Join(t.TempDir(), "state.sqlite"))
+	c := credential{ID: "codex", Account: "credit-fixture", Provider: "codex"}
+	windows, err := observation.API("codex", []byte(`{"rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_at":1800000000}}}`), p.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.storeObservations(c, windows)
+	if err := p.creditDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, ok := p.quotaReplyValue(p.observer, c, "gpt-fixture")
+	if !ok {
+		t.Fatal("optional credit failure removed quota header")
+	}
+	reply := decodeQuota(t, http.Header{quotaReplyHeader: {encoded}})
+	if reply.Credits == nil || reply.Credits.State != "unknown" || len(reply.Windows) != 1 || *reply.Windows[0].Left != 0 {
+		t.Fatal(reply)
+	}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 100 {
+				_ = p.readCredits(c.Account)
+			}
+		})
+	}
+	p.Close()
+	wg.Wait()
+	if got := p.readCredits(c.Account); got.State != "unknown" || got.ReadMS != 0 {
+		t.Fatal(got)
+	}
+}
 
 func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *testing.T) {
 	f := newRoutingFixture(t, "dry-run", false)
@@ -83,9 +204,9 @@ func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *tes
 		t.Fatal("credit-only update did not notify readers")
 	}
 	afterWindows, err := p.observer.ReadWindows(c.Account)
-	credits, creditErr := p.observer.ReadCredits(c.Account)
-	if err != nil || creditErr != nil || !reflect.DeepEqual(beforeWindows, afterWindows) || credits.ReadMS != p.now().UnixMilli() {
-		t.Fatal("credit-only read changed windows or lost credit evidence", err, creditErr, credits)
+	credits := p.readCredits(c.Account)
+	if err != nil || !reflect.DeepEqual(beforeWindows, afterWindows) || credits.ReadMS != p.now().UnixMilli() {
+		t.Fatal("credit-only read changed windows or lost credit evidence", err, credits)
 	}
 	body = fullBody
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +251,7 @@ func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *tes
 			c.Account = "stale-account"
 			p.creds[c.ID] = c
 		}
-		if _, err := p.observer.ObserveCredits(c.Account, sample); err != nil {
+		if _, err := p.credits.ObserveCredits(c.Account, sample); err != nil {
 			t.Fatal(err)
 		}
 		input := routingPreviewInput{Caller: clientCaller("allowed-key"), Provider: "codex", Model: "gpt-fixture", Candidates: []string{c.ID, alias.ID, "a"}}

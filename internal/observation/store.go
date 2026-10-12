@@ -23,8 +23,6 @@ const schema = `
 CREATE TABLE IF NOT EXISTS observation_windows (
  account TEXT NOT NULL, key TEXT NOT NULL, provider TEXT NOT NULL, body TEXT NOT NULL,
  PRIMARY KEY(account,key));
-CREATE TABLE IF NOT EXISTS observation_credits (
- account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS observation_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, key TEXT NOT NULL,
  received_at INTEGER NOT NULL, sample TEXT NOT NULL, disposition TEXT NOT NULL);

@@ -1,10 +1,25 @@
 package observation
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 )
+
+func openTestCredits(t *testing.T, path string, clock *fakeClock) *CreditStore {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	s, err := OpenCredits(db, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
 
 func TestCodexCreditsAreSeparateFromSubscriptionLimits(t *testing.T) {
 	at := instant("2026-10-12T12:00:00Z")
@@ -34,7 +49,9 @@ func TestCodexCreditsAreSeparateFromSubscriptionLimits(t *testing.T) {
 }
 
 func TestCreditEvidenceSurvivesRestartButNotExpiryOrNewUnknown(t *testing.T) {
-	s, clock, path := testStore(t)
+	windows, clock, path := testStore(t)
+	path += ".credits.sqlite"
+	s := openTestCredits(t, path, clock)
 	at := clock.Now()
 	available := CodexCredits([]byte(`{"credits":{"has_credits":true,"unlimited":false}}`), at)
 	if changed, err := s.ObserveCredits("account", available); !changed || err != nil {
@@ -43,7 +60,7 @@ func TestCreditEvidenceSurvivesRestartButNotExpiryOrNewUnknown(t *testing.T) {
 	if changed, err := s.ObserveCredits("account", available); changed || err != nil {
 		t.Fatal("replay", changed, err)
 	}
-	reopened, _ := openTest(t, path, clock)
+	reopened := openTestCredits(t, path, clock)
 	got, err := reopened.ReadCredits("account")
 	if err != nil || got != available {
 		t.Fatal(got, err)
@@ -52,7 +69,7 @@ func TestCreditEvidenceSurvivesRestartButNotExpiryOrNewUnknown(t *testing.T) {
 		t.Fatal(unknown, err)
 	}
 	clock.Add(CreditMaxAge)
-	observe(t, s, "account", "codex", sample(clock.Now(), clock.Now().Add(time.Hour), 0))
+	observe(t, windows, "account", "codex", sample(clock.Now(), clock.Now().Add(time.Hour), 0))
 	got, err = s.ReadCredits("account")
 	if err != nil || got != available || got.At(clock.Now()).State != "stale" || got.At(at.Add(-time.Millisecond)).State != "stale" {
 		t.Fatal("headers refreshed credit evidence", got, err)
@@ -74,7 +91,8 @@ func TestCreditEvidenceSurvivesRestartButNotExpiryOrNewUnknown(t *testing.T) {
 
 func TestEqualTimeCreditConflictIsUnknownInBothOrders(t *testing.T) {
 	for _, states := range [][]string{{"available", "empty"}, {"empty", "available"}} {
-		s, clock, _ := testStore(t)
+		_, clock, path := testStore(t)
+		s := openTestCredits(t, path+".credits.sqlite", clock)
 		for _, state := range states {
 			c := Credits{State: state, ReadMS: clock.Now().UnixMilli(), Source: APISource}
 			if _, err := s.ObserveCredits("account", c); err != nil {

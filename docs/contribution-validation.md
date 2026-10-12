@@ -107,7 +107,8 @@ and reopened capability lookups.
 This is local automated validation with synthetic credentials. It does not assert
 live provider behavior or identify a deployed CPA binary. No deployment or
 routing-mode change is included.
-# Codex credit status follow-up
+
+## Codex credit status follow-up
 
 The additive credit snapshot is tested separately from subscription windows:
 weekly zero with available credits, missing/malformed flags, expiry, restart,
@@ -120,3 +121,9 @@ Affected observation/routing/Pacer suites pass with the Go race detector and vet
 The associated client passes 292 tests (1,649 assertions), typecheck and standalone
 SDK build, including actual OpenTUI rendering at 37 columns. Existing quota
 scheduling is unchanged. This follow-up adds no paid inference test requests.
+
+An initial real upgrade exposed the main ledger's schema-cookie protection;
+fresh-database tests alone did not exercise that migration. Credit storage now
+lives in its own owner-only file. Upgrade/restart tests assert that the existing
+main schema and report-feed witness stay identical. Optional storage failures
+preserve quota headers, and concurrent reads during shutdown pass race checks.

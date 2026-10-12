@@ -101,6 +101,11 @@ including across persistence/reconnects, and must not substitute the envelope's
 then become visibly stale until the next scheduled read, rather than causing
 additional polling. Source freshness does not reserve credits against other users.
 
+Credit observations use an owner-only `<state_path>.credits.sqlite` file. They
+never change the main measurement ledger's guarded schema generation. Missing
+or unavailable credit storage degrades to unknown credits while ordinary quota
+windows and policy enforcement remain available.
+
 Merge credit evidence by `read_ms` independently from quota-window envelopes;
 an absent field on an older server/header must not refresh or erase evidence.
 Retain account-grant filtering for aliases and persisted data. Display credits

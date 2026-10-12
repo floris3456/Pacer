@@ -10,6 +10,29 @@ import (
 
 const CreditMaxAge = time.Hour
 
+// CreditStore borrows its own database. The measurement feed guards the main
+// state database's DDL generation, so upgrades must not add tables there.
+type CreditStore struct{ store *Store }
+
+func OpenCredits(db *sql.DB, clock func() time.Time) (*CreditStore, error) {
+	if db == nil {
+		return nil, errors.New("observation: nil credit database")
+	}
+	if clock == nil {
+		clock = time.Now
+	}
+	s := &Store{db: db, clock: clock}
+	err := s.write(func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS observation_credits (
+ account TEXT PRIMARY KEY, state TEXT NOT NULL, observed INTEGER NOT NULL)`)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &CreditStore{store: s}, nil
+}
+
 // Credits is separate from subscription windows: no percentage, reset, dollar
 // conversion or inference guarantee can be derived from provider credit flags.
 type Credits struct {
@@ -55,8 +78,8 @@ func (c Credits) At(now time.Time) Credits {
 // ObserveCredits accepts only newer source evidence. Aliases use the verified
 // account identity, just like quota windows. Conflicting equal-time readings
 // become unknown; neither arrival order can turn them into confirmed capacity.
-func (s *Store) ObserveCredits(account string, sample Credits) (bool, error) {
-	if account == "" || sample.ReadMS <= 0 || sample.ReadMS > s.clock().UnixMilli() || sample.Source != APISource {
+func (s *CreditStore) ObserveCredits(account string, sample Credits) (bool, error) {
+	if account == "" || sample.ReadMS <= 0 || sample.ReadMS > s.store.clock().UnixMilli() || sample.Source != APISource {
 		return false, errors.New("observation: invalid credit observation")
 	}
 	switch sample.State {
@@ -65,7 +88,7 @@ func (s *Store) ObserveCredits(account string, sample Credits) (bool, error) {
 		return false, errors.New("observation: invalid credit state")
 	}
 	changed := false
-	err := s.write(func(conn *sql.Conn) error {
+	err := s.store.write(func(conn *sql.Conn) error {
 		result, err := conn.ExecContext(context.Background(), `INSERT INTO observation_credits(account,state,observed) VALUES(?,?,?)
  ON CONFLICT(account) DO UPDATE SET
  state=CASE WHEN excluded.observed=observation_credits.observed THEN 'unknown' ELSE excluded.state END,
@@ -81,9 +104,9 @@ func (s *Store) ObserveCredits(account string, sample Credits) (bool, error) {
 	return changed, err
 }
 
-func (s *Store) ReadCredits(account string) (Credits, error) {
+func (s *CreditStore) ReadCredits(account string) (Credits, error) {
 	c := Credits{State: "unknown", Source: APISource}
-	err := s.db.QueryRow("SELECT state,observed FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS)
+	err := s.store.db.QueryRow("SELECT state,observed FROM observation_credits WHERE account=?", account).Scan(&c.State, &c.ReadMS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, nil
 	}

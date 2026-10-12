@@ -122,6 +122,8 @@ type Plugin struct {
 	db                 *sql.DB
 	chats              *tracker.Store
 	observer           *observation.Store
+	creditDB           *sql.DB
+	credits            *observation.CreditStore
 	cfg                Config
 	hostSchema         int
 	hostGuard          requiredInterceptors
@@ -376,6 +378,10 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		_ = p.prefixDB.Close()
 	}
 	p.prefixDB, p.prefixEvidence = openPrefixEvidence(cfg.StatePath, p.now)
+	p.creditDB, p.credits = openCredits(cfg.StatePath, p.now)
+	if p.credits == nil {
+		p.measurementErrors++
+	}
 	if p.prefixEvidence == nil {
 		p.measurementErrors++
 	}
@@ -416,6 +422,10 @@ func (p *Plugin) Close() {
 	if p.prefixDB != nil {
 		_ = p.prefixDB.Close()
 		p.prefixDB, p.prefixEvidence = nil, nil
+	}
+	if p.creditDB != nil {
+		_ = p.creditDB.Close()
+		p.creditDB = nil // credits stays immutable for concurrent readers
 	}
 	if p.capacityDB != nil {
 		_ = p.capacityDB.Close()

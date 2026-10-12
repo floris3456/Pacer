@@ -147,11 +147,7 @@ func (p *Plugin) quotaReplyValue(observer *observation.Store, c credential, mode
 	now := p.now()
 	reply := quotaReply{V: clientVersion, Provider: c.Provider, Auth: c.ID, Alias: c.Alias, AtMS: now.UnixMilli(), Windows: clientWindows(windows, model, now)}
 	if c.Provider == "codex" {
-		credits, err := observer.ReadCredits(c.Account)
-		if err != nil {
-			return "", false
-		}
-		credits = credits.At(now)
+		credits := p.readCredits(c.Account).At(now)
 		reply.Credits = &credits
 	}
 	raw, err := json.Marshal(reply)
