@@ -208,6 +208,10 @@ measured cache read/write tokens, physical body closure and durable settlement.
 The live authenticated HTTP callback binds caller, private policy, current epoch,
 revision, captured final-wire request and exact credential. A bounded acquire
 retry is allowed for `unavailable` reason `settling`; it does not execute inference.
+`snapshot_too_large` and `snapshot_capacity` report the host's bounded snapshot
+limits. Display these reasons without retrying inference or rebuilding a cache.
+The host can retain larger screenshot histories for keepalive while declining
+native compaction at its separate 4-MiB command limit, before client upload.
 Execute can incur usage, consumes the token before preparation and retains normal
 grant/interceptor checks. No failure authorizes a second physical dispatch or an
 alternate credential.

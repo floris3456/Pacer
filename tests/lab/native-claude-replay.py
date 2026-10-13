@@ -40,7 +40,7 @@ class ReplayHandler(native.FixtureHandler):
         if self.path.split("?", 1)[0] != "/v1/messages":
             return self.reply(403, {"error": "external_network_disabled"})
         size = int(self.headers.get("Content-Length", "0"))
-        if not 0 < size <= 5 << 20:
+        if not 0 < size <= 32 << 20:
             return self.reply(413, {"error": "invalid_size"})
         raw = self.rfile.read(size)
         body = json.loads(raw)
@@ -222,7 +222,7 @@ def main():
     def replay(session, operation, kind, **extra):
         return request("POST", REPLAY, {"operation": operation, "kind": kind, **extra}, reference(session))
 
-    def start_session(name, role):
+    def start_session(name, role, screenshots=False):
         session = {"id": name, "capability": base64.urlsafe_b64encode(hashlib.sha256(name.encode()).digest()).decode().rstrip("=")}
         status, state = command(session, "ensure", enrollment="new_empty")
         check(status == 200, f"enrollment failed: {status} {state}")
@@ -231,6 +231,11 @@ def main():
                            "system": [{"type": "text", "text": "Synthetic stable replay system."}],
                            "messages": [{"role": "user", "content": [{"type": "text", "text": "Synthetic prefix " + name,
                                                                          "cache_control": {"type": "ephemeral", "ttl": "5m"}}]}]}
+        if screenshots:
+            session["body"]["messages"][0]["content"].extend([
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abcd" * (1 << 18)}}
+                for _ in range(5)
+            ])
         headers = reference(session)
         headers.update({"X-Pacer-Replay": "v=1; role=" + role, "X-Pacer-Request": name + "-primary"})
         status, answer = request("POST", "/v1/messages", session["body"], headers)
@@ -254,13 +259,19 @@ def main():
                 threading.Event().wait(0.2)
         else:
             raise AssertionError("CPA did not become ready")
-        root_session = start_session("root-keepalive", "root")
+        root_session = start_session("root-keepalive", "root", screenshots=True)
+        check(len(json.dumps(root_session["body"]).encode()) > 4 << 20, "large ingress scenario below old snapshot limit")
+        check(len(json.dumps(root_session["wire"]["body"]).encode()) > 4 << 20, "large final wire scenario below old snapshot limit")
         status, acquired = replay(root_session, "acquire", "keepalive")
         check(status == 200 and acquired.get("state") == "ready", f"root acquire failed: {status} {acquired}")
         root_lease = acquired["lease"]
         check(root_lease["request_id"] and acquired["cache_read_tokens"] > 0, "capture identity or cache proof missing")
         result["request_id_correlated"] = root_lease["request_id"] == "root-keepalive-primary"
         checked("authenticated-native-ABI-primary-capture-and-root-acquire")
+        status, oversized_native = replay(root_session, "acquire", "native_compaction")
+        check(status == 200 and oversized_native.get("reason") == "snapshot_too_large" and not oversized_native.get("lease"),
+              "large native command must be declined before client upload")
+        checked("large-image-history-keeps-ping-authority-and-reports-native-command-limit")
 
         count = len(fixture.attempts)
         for name, headers, caller in [
@@ -351,7 +362,7 @@ def main():
         expected = copy.deepcopy(root_session["wire"]["body"])
         expected.update({"max_tokens": 0, "stream": False})
         check(normalize_cch(ping_wire["body"]) == normalize_cch(expected), "keepalive changed captured final wire")
-        checked("root-keepalive-replays-final-wire-with-the-same-credential")
+        checked("large-image-root-keepalive-replays-final-wire-with-the-same-credential")
 
         target_ms = expiring["lease"]["expires_ms"] + 250
         print(f"Waiting for unused native lease expiry_ms={target_ms}.", flush=True)
