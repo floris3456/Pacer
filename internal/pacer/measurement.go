@@ -245,6 +245,9 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 		p.metricError(err)
 		return
 	}
+	if p.windowStarts != nil && c.Provider == "claude" {
+		p.metricError(p.windowStarts.Confirm(c.Account, after, p.now()))
+	}
 	// Audit-only replays and refused stale evidence leave the canonical view
 	// unchanged. Include evidence times and status, not just quota values:
 	// a fresh reading can make an unchanged balance usable again.

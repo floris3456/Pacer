@@ -92,6 +92,14 @@ func (p *Plugin) clientAPILocked() clientAPI {
 	s := p.hostCodexOrigin
 	guarded := s.Version == 1 && s.PhysicalHTTP && s.NativeCompact && p.codexOrigins != nil && p.hostGuard.accountPoolEnforced()
 	api.Features["codex_native_compaction"] = clientFeature{Supported: guarded, Enabled: guarded, ContractRevision: 1}
+	start := clientFeature{Supported: windowStartSupported(p.hostWindowStart), ContractRevision: 1}
+	start.Enabled = start.Supported && p.cfg.Enabled && p.cfg.QuotaWindowStart.Enabled && p.windowStarts != nil
+	if !start.Supported {
+		start.Reason = "host_integration_required"
+	} else if !start.Enabled {
+		start.Reason = "not_configured"
+	}
+	api.Features["claude_quota_window_start"] = start
 	return api
 }
 

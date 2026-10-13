@@ -24,7 +24,7 @@ func (p *Plugin) claudeReplaySupportedLocked(kind string) bool {
 }
 
 func (p *Plugin) registrationLocked() any {
-	result := registration(p.policy != nil, p.forward != nil).(map[string]any)
+	result := registration(p.policy != nil, p.forward != nil || p.cfg.QuotaWindowStart.Enabled).(map[string]any)
 	s := p.hostCodexOrigin
 	result["capabilities"].(map[string]bool)["codex_origin"] = s.Version == 1 && s.PhysicalHTTP && s.NativeCompact && p.codexOrigins != nil && p.hostGuard.accountPoolEnforced()
 	return result

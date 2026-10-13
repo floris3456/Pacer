@@ -87,6 +87,7 @@ func (p *Plugin) startWorker() {
 		// leave a dry-run interval unproven.
 		p.startDryRunHeartbeat()
 		p.startUsageLive()
+		p.startWindowWorker()
 		p.workerWait.Add(1)
 		go func() {
 			defer p.workerWait.Done()

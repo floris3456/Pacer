@@ -213,6 +213,7 @@ func (p *Plugin) events(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			}
 		}
 		row := map[string]any{"id": c.ID, "alias": c.Alias, "provider": c.Provider, "shared_with": shared, "windows": windows}
+		row["quota_window_start"] = p.windowStartView(c)
 		if c.Provider == "codex" {
 			row["credits"] = p.readCredits(c.Account).At(p.now())
 		}

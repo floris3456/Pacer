@@ -71,6 +71,7 @@ func (p *Plugin) quotaAPI(req pluginapi.ManagementRequest) pluginapi.ManagementR
 		return resource(503, map[string]string{"error": "quota_schedule_unavailable"})
 	}
 	body := map[string]any{"provider": selected.Provider, "now": p.now(), "windows": windows, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked, "reason": job.Reason, "state": job.State}}
+	body["quota_window_start"] = p.windowStartView(selected)
 	if window != nil {
 		attempts, err := p.observer.Attempts(selected.Account, window.after, window.limit)
 		if err != nil {

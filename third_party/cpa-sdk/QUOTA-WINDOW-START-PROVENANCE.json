@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/floris3456/CLIProxyAPI",
+  "branch": "host-improvements",
+  "commit": "3527c6ebf13b73cd193ee654b4e4eeaa482802c9",
+  "published": false,
+  "abi": 1,
+  "schema": 7,
+  "quota_window_start_contract_version": 1,
+  "scope": "Additive host.claude.quota_window_start contract, byte-for-byte copy from the local CPA-host contribution",
+  "files": {
+    "sdk/pluginapi/quota_window_start.go": "e4366538dec78664c8c127445291e0393a42e99f0a00054db3741fdf6fa9a55f"
+  }
+}

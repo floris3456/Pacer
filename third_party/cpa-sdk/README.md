@@ -43,3 +43,8 @@ the original upstream hash. The matching CPA-host contribution enforces this
 optional JSON field before credential selection. This patch changes neither the
 native C ABI nor the registration schema; required filtering is separately
 attested by the host. It is not an unchanged upstream file.
+
+`QUOTA-WINDOW-START-PROVENANCE.json` pins the additive Claude quota-window
+starter contract to the local CPA-host contribution. It is a byte-for-byte copy
+of that file, not a whole-SDK refresh. The host owns the exact-account, single
+attempt and no-cache guarantees advertised by this optional capability.

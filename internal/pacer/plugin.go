@@ -35,6 +35,7 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/usagecoverage"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/windowstart"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -43,17 +44,18 @@ import (
 
 type Host func(string, any) (json.RawMessage, error)
 type Config struct {
-	ClientAccess      *ClientAccess `yaml:"client_access"`
-	ForwardReportPath string        `yaml:"forward_report_path" json:"-"`
-	ForwardReportBook string        `yaml:"forward_report_book" json:"-"`
-	ReportPath        string        `yaml:"report_path"`
-	CachePolicy       PolicyConfig  `yaml:"cache_policy"`
-	Enabled           bool          `yaml:"enabled"`
-	Priority          int           `yaml:"priority"`
-	StatePath         string        `yaml:"state_path"`
-	HistoryPath       string        `yaml:"history_path"`
-	CompactOnSwitch   bool          `yaml:"compact_on_switch"`
-	UsageAuthURL      string        `yaml:"usage_auth_url"`
+	QuotaWindowStart  WindowStartConfig `yaml:"quota_window_start"`
+	ClientAccess      *ClientAccess     `yaml:"client_access"`
+	ForwardReportPath string            `yaml:"forward_report_path" json:"-"`
+	ForwardReportBook string            `yaml:"forward_report_book" json:"-"`
+	ReportPath        string            `yaml:"report_path"`
+	CachePolicy       PolicyConfig      `yaml:"cache_policy"`
+	Enabled           bool              `yaml:"enabled"`
+	Priority          int               `yaml:"priority"`
+	StatePath         string            `yaml:"state_path"`
+	HistoryPath       string            `yaml:"history_path"`
+	CompactOnSwitch   bool              `yaml:"compact_on_switch"`
+	UsageAuthURL      string            `yaml:"usage_auth_url"`
 	Routing           struct {
 		Mode      string   `yaml:"mode"`
 		Providers []string `yaml:"providers"`
@@ -74,13 +76,17 @@ type attempt struct {
 	RoutingChoice              pluginapi.SchedulerPickResponse
 	RoutingProvider            string
 	Binding                    tracker.Binding
-	// Client is what this request's client declared (X-Pacer-Client); Served
-	// is the credential CPA picked, kept when the client asked for quota.
+	// Client is what this request's client declared (X-Pacer-Client). Served
+	// captures the picked account even for requests without a session or quota UI.
 	Client      clientCaps
 	Served      credential
 	ServedModel string
 }
 type Plugin struct {
+	windowStartMu          sync.Mutex
+	windowStartDB          *sql.DB
+	windowStarts           *windowstart.Store
+	hostWindowStart        pluginapi.QuotaWindowStartCapability
 	forwardManagementMu    sync.Mutex
 	forwardManagementEpoch uint64
 	forwardManagement      *forwardManagementBinding
@@ -167,10 +173,11 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		ConfigYAML       []byte `json:"config_yaml"`
 		SchemaVersion    int    `json:"schema_version"`
 		HostCapabilities struct {
-			RequiredInterceptors requiredInterceptors             `json:"required_interceptors"`
-			CachePolicy          hostCachePolicySupport           `json:"cache_policy"`
-			CodexOrigin          pluginapi.CodexOriginCapability  `json:"codex_origin"`
-			ClaudeReplay         pluginapi.ClaudeReplayCapability `json:"claude_replay"`
+			QuotaWindowStart     pluginapi.QuotaWindowStartCapability `json:"quota_window_start"`
+			RequiredInterceptors requiredInterceptors                 `json:"required_interceptors"`
+			CachePolicy          hostCachePolicySupport               `json:"cache_policy"`
+			CodexOrigin          pluginapi.CodexOriginCapability      `json:"codex_origin"`
+			ClaudeReplay         pluginapi.ClaudeReplayCapability     `json:"claude_replay"`
 		} `json:"host_capabilities"`
 	}
 	if err := json.Unmarshal(raw, &request); err != nil {
@@ -196,6 +203,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	}
 	if cfg.ClientAccess != nil && !request.HostCapabilities.RequiredInterceptors.accountPoolEnforced() {
 		return nil, errors.New("client_access requires CPA required-interceptor enforcement and auth-pool filtering for pacer")
+	}
+	if err := validateWindowStart(&cfg.QuotaWindowStart, cfg.Enabled, request.SchemaVersion, request.HostCapabilities.QuotaWindowStart); err != nil {
+		return nil, err
 	}
 	if cfg.CachePolicy.RequireManaged && (!cfg.CachePolicy.Enabled || !request.HostCapabilities.RequiredInterceptors.enforced()) {
 		return nil, errors.New("require_managed needs enabled cache policy and CPA required-interceptor enforcement for pacer")
@@ -234,6 +244,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, errors.New("Pacer is quiesced; create a new instance for reload")
 	}
 	if p.db != nil {
+		if p.cfg.QuotaWindowStart != cfg.QuotaWindowStart || p.hostWindowStart != request.HostCapabilities.QuotaWindowStart {
+			return nil, errors.New("quota_window_start changes require an idle reload")
+		}
 		if !reflect.DeepEqual(p.cfg.ClientAccess, cfg.ClientAccess) {
 			return nil, errors.New("client_access changes require an idle reload")
 		}
@@ -341,6 +354,24 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		db.Close()
 		return nil, err
 	}
+	var windowDB *sql.DB
+	var windowStarts *windowstart.Store
+	if cfg.QuotaWindowStart.Enabled {
+		windowDB = openOwnerOnlySQLite(cfg.StatePath + ".window-start.sqlite")
+		windowStarts, err = windowstart.Open(windowDB)
+		if err != nil {
+			if windowDB != nil {
+				_ = windowDB.Close()
+			}
+			_ = db.Close()
+			return nil, errors.New("quota window start ledger is unavailable")
+		}
+		defer func() {
+			if p.windowStartDB != windowDB {
+				_ = windowDB.Close()
+			}
+		}()
+	}
 	// Optional marker telemetry does not authorize policy operations and must
 	// never turn an evidence-store failure into a policy reset or fake readback.
 	// Its compiled namespace must precede the guarded measurement feed boundary.
@@ -394,6 +425,8 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 	p.hostClaudeReplay = request.HostCapabilities.ClaudeReplay
 	p.codexOrigins = codexOrigins
 	p.observer = observer
+	p.windowStartDB, p.windowStarts = windowDB, windowStarts
+	p.hostWindowStart = request.HostCapabilities.QuotaWindowStart
 	p.policy = policy
 	p.forward = forward
 	// Prefix evidence is equally optional: an open failure only counts as a
@@ -447,6 +480,10 @@ func (p *Plugin) Close() {
 	p.workerWait.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.windowStartDB != nil {
+		_ = p.windowStartDB.Close()
+		p.windowStartDB = nil
+	}
 	if p.prefixDB != nil {
 		_ = p.prefixDB.Close()
 		p.prefixDB, p.prefixEvidence = nil, nil
@@ -836,8 +873,8 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	if ok && !known && (managed || t.Claim != nil) {
 		return refuse("quota_state_unavailable", "Selected credential identity could not be verified")
 	}
-	if ok && t.Client.Quota && auth != "" {
-		// The reply carries this credential's quota (X-Pacer-Quota).
+	if ok && auth != "" {
+		// Also tracks account activity for requests without a session or quota UI.
 		if served, found := p.servedCredential(auth); found {
 			t.Served, t.ServedModel = served, req.Model
 			p.mu.Lock()
