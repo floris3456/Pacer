@@ -211,7 +211,9 @@ if (phase === "initial") {
     "X-Pacer-Cache-Kind": "primary", "X-Pacer-Cache-Capability": record(sessions[1], 1).capability,
   }, "PACER_LAB_BEFORE_CHECKPOINT")
   assert.equal(blockedPrimary.status, 409)
+  assert.equal(blockedPrimary.body.error.code, "pacer_cache_enrollment_required")
   assert.equal((await fixture("/_test/attempts")).length, before)
+  checked("native-pre-dispatch-enrollment-refusal-retains-client-recovery-code")
   leases[1] = ready(await controls[1].completeCompaction(await helper(controls[1], 1, enrollment)))
   checked("lost-prepare-replays-stable-operation-after-sdk-reconnect")
   checked("existing-history-enrolls-only-after-correlated-durable-compaction")
