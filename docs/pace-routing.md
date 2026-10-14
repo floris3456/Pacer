@@ -124,6 +124,18 @@ Pinning warm chats also stops CPA from moving them.
   compaction is routed; a forced move keeps the 409 contract; `off` returns `Handled:false`.
 - Isolated lab run (`tests/lab/`) before deployment; afterwards, the 7-day % left at each reset.
 
+## Implementation notes
+
+- New chats: CPA's `host.affinity.lookup` answers `unsupported` whenever a plugin scheduler is
+  registered (`LookupSessionAffinity`), so Pacer used to leave every new chat with a session header to
+  CPA: production recorded one `new_chat` decision against 3,036 for known chats. `unsupported` now
+  means "new to Pacer"; `ambiguous` and lookup failures still leave the chat to CPA.
+- `next_use.mode` stays in the clients' vocabulary: `active` when routing is on, else `off`.
+- The former `dry-run` mode (YAML and persisted) reads as `off`; management accepts `off` or `on`.
+- Pacer reads an account's meter at most every 15 minutes; between reads, reply headers keep a used
+  account current, and dormant windows are read every 30 minutes while idle.
+- Lab: `tests/lab/pace-lab.sh` and `check-pace.py` run the example above through a real CPA host.
+
 ## Not planned
 
 - Keep-alive requests that start a window as soon as it resets: rejected by the owner, because they
