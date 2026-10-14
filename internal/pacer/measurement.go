@@ -25,6 +25,14 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth)); CREATE TABLE IF NOT EXISTS pacer_usage_capture_metadata(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
 		return nil, err
 	}
+	// This process's tables above, and any table a newer Pacer version added
+	// before this one, changed the DDL generation the feed records as its
+	// schema witness. Re-anchor the witness before Open checks it; the feed
+	// objects themselves must still be intact, so a database a DDL runaway left
+	// inconsistent still refuses.
+	if err := measurement.SettleReportFeedSchema(ctx, db); err != nil {
+		return nil, err
+	}
 	m, err := measurement.Open(ctx, db, measurement.Options{Clock: p.now})
 	if err != nil {
 		return nil, err

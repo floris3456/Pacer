@@ -45,6 +45,10 @@ func testHost(method string, input any) (json.RawMessage, error) {
 	return json.Marshal(data)
 }
 
+func registerRaw(path string) ([]byte, error) {
+	return json.Marshal(map[string]any{"config_yaml": []byte("enabled: true\npriority: 1\nstate_path: " + path + "\ncompact_on_switch: true\nrouting:\n  mode: off\n")})
+}
+
 func startPlugin(t *testing.T, path string) *Plugin {
 	t.Helper()
 	p := New(testHost)

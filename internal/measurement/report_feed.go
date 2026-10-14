@@ -67,6 +67,35 @@ func openReportFeed(ctx context.Context, c *sql.Conn) error {
 	return checkReportFeed(ctx, c, "")
 }
 
+// SettleReportFeedSchema re-anchors the feed's schema cookie to the database's
+// current DDL generation, after this process's own migrations (initialization)
+// added Pacer's tables: every DDL statement changes the cookie, so a later
+// capture sees the new generation although the feed objects did not change.
+// The feed's own objects must exist and no v1 migration may be pending, so the
+// call cannot bless an unknown writer's transition.
+func SettleReportFeedSchema(ctx context.Context, db *sql.DB) error {
+	var version, saved, current int64
+	var objects int
+	err := db.QueryRowContext(ctx, `SELECT m.version,m.schema_cookie,
+		(SELECT schema_version FROM pragma_schema_version),
+		(SELECT count(*) FROM sqlite_master WHERE type='table' AND name='measurement_report_feed')
+		FROM measurement_report_meta m WHERE m.id=1`).Scan(&version, &saved, &current, &objects)
+	if errors.Is(err, sql.ErrNoRows) || objects != 1 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if version != 2 || current < saved {
+		return ErrReportFeedIntegrity
+	}
+	if current == saved {
+		return nil
+	}
+	_, err = db.ExecContext(ctx, `UPDATE measurement_report_meta SET schema_cookie=? WHERE id=1 AND version=2 AND schema_cookie=?`, current, saved)
+	return err
+}
+
 type reportFeedQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
