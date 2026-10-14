@@ -252,7 +252,16 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 	}
 	for _, w := range after {
 		// Named scopes need exact catalogue membership, not guessed substrings.
-		if w.Scope != "all" || w.Remaining == nil || w.Cycle == "" || w.Usage.At.IsZero() {
+		if w.Scope != "all" {
+			continue
+		}
+		// A window that reset and has not started has no cycle yet; the one it
+		// replaced is closed.
+		if old := previous[w.Key()]; w.Dormant && !old.Dormant && old.Cycle != "" {
+			p.metricError(p.measurement.CloseCycle(context.Background(), measurement.Closure{CycleRef: measurement.CycleRef{Provider: c.Provider, AccountID: c.Account, Scope: w.Scope, CycleID: old.Cycle, Duration: time.Duration(old.Seconds) * time.Second}, At: w.StatusEvidence.At, Source: "pacer-observer:" + w.StatusEvidence.Source}))
+			continue
+		}
+		if w.Remaining == nil || w.Cycle == "" || w.Usage.At.IsZero() {
 			continue
 		}
 		o := measurement.Observation{Provider: c.Provider, AccountID: c.Account, Scope: w.Scope, CycleID: w.Cycle, Duration: time.Duration(w.Seconds) * time.Second, At: w.Usage.At, UsedPercent: 100 - *w.Remaining, Source: w.Usage.Source, Usable: w.Complete(w.Usage.At) && !w.Dormant && !w.NotApplicable && !w.Usage.At.After(p.now())}

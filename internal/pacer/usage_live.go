@@ -123,6 +123,13 @@ func (p *Plugin) usageLiveStatus() *historyreports.LiveStatus {
 
 func nativeReading(e observation.AccountHistoryEntry) (historyreports.NativeReading, bool) {
 	w := e.Sample
+	if w.Dormant && w.Remaining != nil && *w.Remaining == 100 && !w.StatusEvidence.At.IsZero() && w.Seconds > 0 {
+		// A window that reset and has not started: 100 % left, as an idle window
+		// starting at the read. The record shows the newest one and drops older
+		// idle windows (cpamp.Derive), so it neither sticks nor piles up cycles.
+		remaining, at := 100.0, w.StatusEvidence.At
+		return historyreports.NativeReading{ID: e.ID, Account: e.Account, Provider: w.Provider, Scope: w.Scope, Seconds: w.Seconds, Remaining: &remaining, Reset: at.Add(time.Duration(w.Seconds) * time.Second), At: at, Source: w.StatusEvidence.Source}, true
+	}
 	if w.Remaining == nil || w.Usage.At.IsZero() || w.Reset.IsZero() {
 		return historyreports.NativeReading{}, false
 	}
