@@ -122,7 +122,7 @@ func TestWindowStartOnceAcrossAliasesCallersAndRestart(t *testing.T) {
 	var calls atomic.Int64
 	host := windowHost(func(q pluginapi.HostQuotaWindowStartRequest) (json.RawMessage, error) {
 		calls.Add(1)
-		if q.Version != 1 || q.AuthID != "one" || q.Model != "claude-haiku-5-5" || q.OperationID != "fixture-operation" || q.AccountKey != "claude:"+tracker.Digest("claude:account:verified-fixture") {
+		if q.Version != 1 || q.AuthID != "one" || q.Model != "claude-haiku-4-5-20251001" || q.OperationID != "fixture-operation" || q.AccountKey != "claude:"+tracker.Digest("claude:account:verified-fixture") {
 			t.Errorf("incorrect request %+v", q)
 		}
 		clock.Add(int64(time.Second))

@@ -23,7 +23,7 @@ func windowStartSupported(c pluginapi.QuotaWindowStartCapability) bool {
 
 func validateWindowStart(c *WindowStartConfig, enabled bool, schema int, host pluginapi.QuotaWindowStartCapability) error {
 	if c.Model == "" {
-		c.Model = "claude-haiku-5-5"
+		c.Model = "claude-haiku-4-5-20251001"
 	}
 	if !pluginapi.QuotaWindowStartModelAllowed(c.Model) {
 		return errors.New("quota_window_start.model must be a direct Claude Haiku model ID")

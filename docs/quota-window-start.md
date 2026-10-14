@@ -17,8 +17,14 @@ Under `plugins.configs.pacer`:
 ```yaml
 quota_window_start:
   enabled: true  # Omitted/false is the default.
-  model: claude-haiku-5-5
+  model: claude-haiku-4-5-20251001
 ```
+
+The default uses the minimal Haiku 4.5 helper profile verified against the
+provider: one text message, one output token and no thinking or cache fields.
+This internal model selection does not change chat or compaction models.
+An explicit Haiku 5.5 override remains supported and disables adaptive thinking;
+its availability must be verified for the intended accounts.
 
 The paired CPA host must advertise the exact-account, single-attempt, no-cache
 capability. Enabling on an older host fails closed. Changing this configuration
@@ -38,7 +44,7 @@ requires an idle reload. Never delete or roll back its private
   say `extra_usage.is_enabled: false`. Unknown or enabled paid overage blocks
   automatic starts. An external change to that setting between observation and
   dispatch cannot be atomically prevented by the provider API.
-- The host builds a fixed request with one output token, thinking disabled,
+- The host builds a fixed request with one output token and no reasoning,
   no tools, no history and no cache-write instructions. It pins the verified
   account and does not retry, refresh-and-resend or fall back to another account.
 - The durable claim precedes dispatch; three users, aliases and restarts cannot
