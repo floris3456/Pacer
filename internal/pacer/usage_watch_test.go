@@ -16,7 +16,7 @@ import (
 func TestUsageWatchFansOutOtherCallersHeadersBeforeStreamFinishes(t *testing.T) {
 	for _, provider := range []string{"claude", "codex"} {
 		t.Run(provider, func(t *testing.T) {
-			f := newRoutingFixture(t, "off", false)
+			f := newRoutingFixture(t, "off")
 			p := f.p
 			id, model, seconds, left := "a", "claude-opus-5-5", int64(18000), 31.0
 			reset := p.now().Add(7 * 24 * time.Hour)

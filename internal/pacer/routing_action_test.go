@@ -18,22 +18,13 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
+func TestRoutingActionRequiresTheExactCurrentCandidate(t *testing.T) {
 	base := pluginapi.SchedulerPickRequest{Provider: "claude", Providers: []string{"claude"}, Model: "claude-opus-5-5", Candidates: []pluginapi.SchedulerAuthCandidate{{ID: "a", Provider: "claude", Attributes: map[string]string{"unchanged": "yes"}}, {ID: "b", Provider: "claude"}}}
 	known := []credential{{ID: "a", Provider: "claude", Account: "account-a"}, {ID: "b", Provider: "claude", Account: "account-b"}}
 	d := routing.Decision{Handled: true, Auth: "b", Account: "account-b", Reason: "cold_move"}
 	before, _ := json.Marshal(base)
-	for _, mode := range []string{"", "off", "dry-run", "active", "ACTIVE", "unknown"} {
-		for _, gate := range []bool{false, true} {
-			got := routingAction(base, mode, gate, d, known)
-			want := pluginapi.SchedulerPickResponse{}
-			if mode == "active" && gate {
-				want = pluginapi.SchedulerPickResponse{Handled: true, AuthID: "b"}
-			}
-			if got != want {
-				t.Fatalf("mode=%q eligible=%v: %+v", mode, gate, got)
-			}
-		}
+	if got := routingAction(base, d, known); got != (pluginapi.SchedulerPickResponse{Handled: true, AuthID: "b"}) {
+		t.Fatal(got)
 	}
 	for _, tc := range []struct {
 		name   string
@@ -72,7 +63,7 @@ func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
 			_ = json.Unmarshal(before, &r)
 			x, k := d, append([]credential(nil), known...)
 			tc.change(&r, &x, &k)
-			if got := routingAction(r, "active", true, x, k); got != (pluginapi.SchedulerPickResponse{}) {
+			if got := routingAction(r, x, k); got != (pluginapi.SchedulerPickResponse{}) {
 				t.Fatal(got)
 			}
 		})
@@ -83,7 +74,7 @@ func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
 	}
 	inferred := base
 	inferred.Provider = ""
-	if !routingAction(inferred, "active", true, d, known).Handled {
+	if !routingAction(inferred, d, known).Handled {
 		t.Fatal("single inferred provider refused")
 	}
 }
@@ -94,9 +85,8 @@ type routingFixture struct {
 	q     tracker.Claim
 }
 
-// Active injection exists ONLY in this _test.go fixture. Runtime YAML, management,
-// durable settings and New never provide eligibility. No worker or provider HTTP.
-func newRoutingFixture(t *testing.T, mode string, eligible bool) *routingFixture {
+// The fixture sets the mode directly. No worker or provider HTTP.
+func newRoutingFixture(t *testing.T, mode string) *routingFixture {
 	t.Helper()
 	f := &routingFixture{q: tracker.Claim{Protocol: 1, Installation: "fixture", Session: "chat", Route: "claude/opus-alias", Request: "client-request", Kind: "primary", Capability: tracker.Digest("private-test-capability"), Checkpoint: "committed-old", Auto: true, CompactOnSwitch: true}}
 	f.clock.Store(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC).UnixNano())
@@ -108,7 +98,7 @@ func newRoutingFixture(t *testing.T, mode string, eligible bool) *routingFixture
 	}
 	t.Cleanup(f.p.Close)
 	f.p.discover()
-	f.p.cfg.Routing.Mode, f.p.routingEligible = mode, eligible
+	f.p.cfg.Routing.Mode = mode
 	f.observe(t)
 	return f
 }
@@ -202,53 +192,39 @@ func requireCompact(t *testing.T, r pluginapi.RequestInterceptResponse) {
 	}
 }
 
-func TestHandleActiveRequiresPrivateEligibilityAndRuntimeGatesStayClosed(t *testing.T) {
+func TestHandleRoutesOnlyWhenOn(t *testing.T) {
 	for _, tc := range []struct {
 		mode    string
-		gate    bool
 		handled bool
-	}{{"off", false, false}, {"off", true, false}, {"dry-run", true, false}, {"active", false, false}, {"active", true, true}} {
-		t.Run(tc.mode+"/"+map[bool]string{false: "ineligible", true: "eligible"}[tc.gate], func(t *testing.T) {
-			f := newRoutingFixture(t, tc.mode, tc.gate)
+	}{{"off", false}, {"dry-run", false}, {"on", true}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			f := newRoutingFixture(t, tc.mode)
 			r := f.before(t, "new", "claude-opus-5-5")
 			got := f.pick(t, r, "a", "b")
 			if got.Handled != tc.handled || got.Handled && got.AuthID != "b" {
 				t.Fatal(got)
 			}
-			// Injected active mode is not rollout evidence for management.
 			state := invoke(t, f.p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "GET", Path: "/v0/management/plugins/pacer/state"}).(pluginapi.ManagementResponse)
 			var body struct {
 				Routing struct {
-					CanActivate bool `json:"can_activate"`
+					Mode string `json:"mode"`
 				} `json:"routing"`
+				Accounts []struct {
+					ID   string   `json:"id"`
+					Pace *float64 `json:"pace"`
+				} `json:"accounts"`
 			}
-			if json.Unmarshal(state.Body, &body) != nil || state.StatusCode != 200 || body.Routing.CanActivate {
+			if json.Unmarshal(state.Body, &body) != nil || state.StatusCode != 200 || body.Routing.Mode != tc.mode || len(body.Accounts) != 2 || body.Accounts[1].Pace == nil || *body.Accounts[1].Pace != 80.0/96 {
 				t.Fatal(string(state.Body))
 			}
-			patch := invoke(t, f.p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "PATCH", Path: "/v0/management/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}).(pluginapi.ManagementResponse)
-			if patch.StatusCode != 409 || f.p.setMode("active") == nil {
-				t.Fatal("runtime activation gate opened")
-			}
 		})
-	}
-	for _, yaml := range []string{"routing:\n  mode: active\n", "routing_eligible: true\n", "routing:\n  eligible: true\n"} {
-		p := New(nil)
-		if p.routingEligible {
-			t.Fatal("New granted rollout authorization")
-		}
-		raw, _ := json.Marshal(map[string]any{"config_yaml": []byte("state_path: " + filepath.Join(t.TempDir(), "state.sqlite") + "\n" + yaml)})
-		_, err := p.Handle(pluginabi.MethodPluginRegister, raw)
-		p.Close()
-		if err == nil {
-			t.Fatal("runtime YAML allowed test injection", yaml)
-		}
 	}
 }
 
 func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t *testing.T) {
 	for _, forced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "forced"}[forced], func(t *testing.T) {
-			f := newRoutingFixture(t, "active", true)
+			f := newRoutingFixture(t, "on")
 			f.seed(t, 5*time.Minute)
 			before := f.binding(t)
 			f.clock.Add(int64(6 * time.Minute))
@@ -296,7 +272,7 @@ func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t 
 func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 	for _, deviation := range []string{"different-auth-alias", "different-model", "retry-no-candidates", "retry-mixed", "mode-off", "disabled"} {
 		t.Run(deviation, func(t *testing.T) {
-			f := newRoutingFixture(t, "active", true)
+			f := newRoutingFixture(t, "on")
 			f.seed(t, 5*time.Minute)
 			f.clock.Add(int64(6 * time.Minute))
 			f.observe(t)
@@ -336,8 +312,8 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 			requireCompact(t, f.after(t, r, auth))
 		})
 	}
-	for _, mode := range []string{"off", "dry-run", "active"} {
-		f := newRoutingFixture(t, mode, false)
+	for _, mode := range []string{"off", "dry-run"} {
+		f := newRoutingFixture(t, mode)
 		f.seed(t, 5*time.Minute)
 		f.clock.Add(int64(6 * time.Minute))
 		f.observe(t)
@@ -345,12 +321,12 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 		if f.pick(t, r, "a", "b").Handled {
 			t.Fatal("closed gate acted")
 		}
-		requireCompact(t, f.after(t, r, "b")) // An advisory cold_move is never permission.
+		requireCompact(t, f.after(t, r, "b")) // CPA's own move stays forced.
 	}
 }
 
 func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
-	f := newRoutingFixture(t, "active", true)
+	f := newRoutingFixture(t, "on")
 	f.seed(t, time.Hour)
 	f.clock.Add(int64(6 * time.Minute))
 	f.observe(t)
@@ -358,7 +334,7 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 	// Same declared route/checkpoint with a changed model alias remains the same chat.
 	r := f.before(t, "warm-alias", "opus-public-alias")
 	choice := f.pick(t, r, "a", "b")
-	if !choice.Handled || choice.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != "protected" {
+	if !choice.Handled || choice.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != routing.Warm {
 		t.Fatal(choice)
 	}
 	if got := f.after(t, r, "a"); got.Terminate {
@@ -376,8 +352,10 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 	for _, kind := range []string{"compaction", "title", "generate"} {
 		f.q.Kind = kind
 		r := f.before(t, kind, "summary-model")
-		if f.pick(t, r, "a", "b").Handled {
-			t.Fatal("auxiliary routed", kind)
+		// A compaction on another model has no warm cache: it is placed by pace.
+		// Titles and generations are left to CPA.
+		if got := f.pick(t, r, "a", "b"); got.Handled != (kind == "compaction") || got.Handled && got.AuthID != "b" {
+			t.Fatal("auxiliary placement", kind, got)
 		}
 		if got := f.after(t, r, "b"); got.Terminate {
 			t.Fatal(string(got.ResponseBody))
@@ -399,7 +377,7 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 
 func TestHandleUnknownWarmthAndInflightBindingsStay(t *testing.T) {
 	for _, inflight := range []bool{false, true} {
-		f := newRoutingFixture(t, "active", true)
+		f := newRoutingFixture(t, "on")
 		ttl := time.Duration(0)
 		if inflight {
 			ttl = 5 * time.Minute
@@ -446,5 +424,128 @@ func TestSelectionIntentRequiresTheWholeEmittedProposal(t *testing.T) {
 		if !selectionIntent(a, actual, "model").Forced {
 			t.Fatal("unmatched selection lost forced contract", a, actual)
 		}
+	}
+}
+
+// Routing moments (docs/pace-routing.md): a chat moves only when its prompt
+// cache is cold on every account, and then without compaction.
+func TestHandleColdMomentsMoveWithoutCompaction(t *testing.T) {
+	for _, moment := range []string{"unknown-warmth-expired", "new-checkpoint", "ttl-expired"} {
+		t.Run(moment, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			switch moment {
+			case "unknown-warmth-expired":
+				f.seed(t, 0)
+				f.clock.Add(int64(59 * time.Minute))
+				f.observe(t)
+				r := f.before(t, "within-hour", "claude-opus-5-5")
+				if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != routing.Warm {
+					t.Fatal("unknown warmth moved before an hour", got)
+				}
+				f.complete(t, r.RequestID)
+				f.clock.Add(int64(2 * time.Minute))
+			case "new-checkpoint":
+				f.seed(t, time.Hour)
+				f.clock.Add(int64(time.Minute))
+				f.q.Checkpoint = "committed-new"
+			case "ttl-expired":
+				f.seed(t, 5*time.Minute)
+				f.clock.Add(int64(6 * time.Minute))
+			}
+			f.observe(t)
+			before := f.binding(t)
+			r := f.before(t, "cold", "claude-opus-5-5")
+			got := f.pick(t, r, "a", "b")
+			d := f.p.requests[r.RequestID].Decision
+			if !got.Handled || got.AuthID != "b" || d.Reason != routing.ColdMove || d.Forced {
+				t.Fatal(got, d)
+			}
+			if after := f.after(t, r, "b"); after.Terminate {
+				t.Fatal("cold move asked for compaction", string(after.ResponseBody))
+			}
+			if b := f.binding(t); b.Account != f.p.creds["b"].Account || b.Generation != before.Generation+1 {
+				t.Fatal("binding not moved", b)
+			}
+		})
+	}
+}
+
+func TestHandleCompactionOnTheChatModelStaysOnItsAccount(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, 5*time.Minute)
+	f.clock.Add(int64(6 * time.Minute)) // cold: a primary request would move
+	f.observe(t)
+	before := f.binding(t)
+	f.q.Kind = "compaction"
+	r := f.before(t, "same-model", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("same-model compaction left the chat's cache", got)
+	}
+	f.complete(t, r.RequestID)
+	r = f.before(t, "other-model", "claude-haiku-4-5")
+	got := f.pick(t, r, "a", "b")
+	if d := f.p.requests[r.RequestID].Decision; !got.Handled || got.AuthID != "b" || d.Reason != routing.ColdMove {
+		t.Fatal("other-model compaction not placed by pace", got, d)
+	}
+	if after := f.after(t, r, "b"); after.Terminate {
+		t.Fatal(string(after.ResponseBody))
+	}
+	if f.binding(t) != before {
+		t.Fatal("compaction rebound the chat")
+	}
+	// A compaction for a chat Pacer has never seen is left to CPA.
+	f.q.Session = "unknown-chat"
+	if f.pick(t, f.before(t, "unknown", "claude-haiku-4-5"), "a", "b").Handled {
+		t.Fatal("compaction without a chat routed")
+	}
+}
+
+func TestDecisionTraceRecordsEveryCandidate(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	r := f.before(t, "new", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "b" {
+		t.Fatal(got)
+	}
+	f.after(t, r, "b")
+	decisions, err := f.p.decisionView()
+	if err != nil || len(decisions) != 1 {
+		t.Fatal(decisions, err)
+	}
+	d := decisions[0]
+	if d.Outcome != "admitted" || d.Proposed.Reason != routing.NewChat || len(d.Proposed.Candidates) != 2 {
+		t.Fatalf("%+v", d)
+	}
+	for _, c := range d.Proposed.Candidates {
+		if !c.Known || !c.Eligible || c.Pace <= 0 || len(c.Budgets) != 2 {
+			t.Fatalf("candidate inputs missing: %+v", c)
+		}
+	}
+	// Off records nothing.
+	f.p.cfg.Routing.Mode = "off"
+	f.q.Session = "other"
+	r = f.before(t, "off", "claude-opus-5-5")
+	f.pick(t, r, "a", "b")
+	f.after(t, r, "a")
+	if decisions, _ = f.p.decisionView(); len(decisions) != 1 {
+		t.Fatal("off recorded a decision")
+	}
+}
+
+// A dormant 5-hour window (reset, not started) is a usable, full meter.
+func TestHandleDormantWindowIsAvailable(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.clock.Add(int64(time.Minute)) // a newer meter read than the fixture's
+	now := f.p.now()
+	full, weekly := 100.0, 90.0
+	windows := []observation.Window{
+		{Provider: "claude", Scope: "all", Seconds: 18000, Remaining: &full, Dormant: true, Usage: observation.Field{At: now, Source: "api"}, StatusEvidence: observation.Field{At: now, Source: "api", Quality: "measured", Raw: "null"}},
+		{Provider: "claude", Scope: "all", Seconds: 604800, Remaining: &weekly, Reset: now.Add(96 * time.Hour), Usage: observation.Field{At: now, Source: "api"}, ResetEvidence: observation.Field{At: now, Source: "api", Quality: "absolute"}},
+	}
+	if err := f.p.observer.Observe(f.p.creds["a"].Account, "claude", windows); err != nil {
+		t.Fatal(err)
+	}
+	r := f.before(t, "new", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("dormant account excluded", got, f.p.requests[r.RequestID].Decision)
 	}
 }

@@ -218,7 +218,7 @@ func readCapacity(t *testing.T, p *Plugin) (capacityReadback, capacityObject) {
 	if c := state.Measurement.Checkpoint; c.Complete == nil || *c.Complete || c.Physical == nil || *c.Physical {
 		t.Fatal("existing readback fields changed", string(response.Body))
 	}
-	if state.Accounts[0].PaceUnit != "%/h · equal sizes" {
+	if state.Accounts[0].PaceUnit != "%/h" {
 		t.Fatal("capacity lower bound reached routing", state.Accounts[0].PaceUnit)
 	}
 	return state, object

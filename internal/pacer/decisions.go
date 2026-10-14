@@ -31,7 +31,7 @@ func openDecisions(db *sql.DB) error {
 
 func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome string) {
 	p.mu.Lock()
-	enabled := p.cfg.Routing.Mode == "dry-run"
+	enabled := p.cfg.Routing.Mode == "on"
 	p.mu.Unlock()
 	if !enabled || t.Key == "" || t.Decision.Reason == "" {
 		return
@@ -41,8 +41,7 @@ func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome
 	if err != nil {
 		return
 	}
-	// Trace failures never change serving policy. Expose them instead of silently
-	// claiming a complete dry-run observation interval.
+	// Trace failures never change serving policy; they are counted and exposed.
 	_, err = p.db.Exec(`INSERT INTO pacer_decisions(at,body) VALUES(?,?)`, entry.At.UnixNano(), body)
 	p.mu.Lock()
 	if err != nil {

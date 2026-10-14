@@ -126,7 +126,7 @@ func TestQuotaReplyOnlyForDeclaredClients(t *testing.T) {
 }
 
 func TestStreamQuotaIsLiveAtHeadersWithNoPerTokenMeterWork(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	p := f.p
 	f.clock.Add(int64(time.Second))
 	req := pluginapi.RequestInterceptRequest{RequestID: "live-quota", Model: "claude-opus-5-5", Headers: http.Header{clientHeader: {"v=1; caps=quota"}}, Metadata: map[string]any{"caller_scope": "test-caller", "selected_auth_id": "a"}}

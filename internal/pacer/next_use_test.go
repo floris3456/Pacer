@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -53,12 +54,12 @@ func TestUsageInUseTracksOnlyThisChatsPrimaryRequests(t *testing.T) {
 
 func previewFixture(t *testing.T) *routingFixture {
 	t.Helper()
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "on")
 	f.q.Capability = tracker.Digest(previewCapability)
 	f.seed(t, 5*time.Minute)
 	r := f.before(t, "preview-source", "claude-opus-5-5")
-	if choice := f.pick(t, r, "a", "b"); choice.Handled {
-		t.Fatal("preview activated routing", choice)
+	if choice := f.pick(t, r, "a", "b"); !choice.Handled || choice.AuthID != "a" {
+		t.Fatal("warm chat not kept", choice)
 	}
 	f.complete(t, r.RequestID)
 	return f
@@ -79,13 +80,13 @@ func previewUsage(t *testing.T, f *routingFixture) nextUseView {
 func TestNextUseReevaluatesColdCacheWithoutChangingBinding(t *testing.T) {
 	f := previewFixture(t)
 	before := f.binding(t)
-	if value := previewUsage(t, f); value.Auth != "" || value.Reason != "protected" {
+	if value := previewUsage(t, f); value.Auth != "" || value.Reason != routing.Warm {
 		t.Fatal(value)
 	}
 	// No model request occurs: the next UI poll sees that cache protection ended.
 	f.clock.Add(int64(6 * time.Minute))
 	value := previewUsage(t, f)
-	if value.Auth != "b" || value.Reason != "cold_move" || value.Mode != "dry-run" || value.Forced || value.ExpiresMS <= value.AtMS {
+	if value.Auth != "b" || value.Reason != routing.ColdMove || value.Mode != "on" || value.Forced || value.ExpiresMS <= value.AtMS {
 		t.Fatal(value)
 	}
 	if after := f.binding(t); after != before {
@@ -103,7 +104,7 @@ func TestNextUseReevaluatesColdCacheWithoutChangingBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.complete(t, r.RequestID)
-	if value := previewUsage(t, f); value.Auth != "" || value.Reason != "protected" {
+	if value := previewUsage(t, f); value.Auth != "" || value.Reason != routing.Warm {
 		t.Fatal(value)
 	}
 }
@@ -147,7 +148,7 @@ func TestNextUseScopeExpiryAndMode(t *testing.T) {
 		t.Fatal(value)
 	}
 	f.p.mu.Lock()
-	f.p.cfg.Routing.Mode = "dry-run"
+	f.p.cfg.Routing.Mode = "on"
 	f.p.mu.Unlock()
 	f.clock.Add(int64(previewRetention))
 	if value := previewUsage(t, f); value.Auth != "" || value.Reason != "unavailable" {

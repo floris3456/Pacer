@@ -142,7 +142,9 @@ func (s *Store) Seed(key string, c Selection) error {
 	if err != nil || b.Key != "" {
 		return err
 	}
-	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true})
+	// CPA's affinity binding means the chat ran recently: its warmth is unknown
+	// from now, not from an unknown past.
+	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true, LastUsed: s.now()})
 }
 
 // Admit runs before the selected account receives a byte. A cold optimization

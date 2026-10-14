@@ -15,12 +15,11 @@ import (
 
 func TestHandleRoutingActionOrFallbackCannotBypassManagedPolicy(t *testing.T) {
 	for _, tc := range []struct {
-		mode     string
-		eligible bool
-		kind     string
-	}{{"off", false, "primary"}, {"dry-run", false, "primary"}, {"active", false, "primary"}, {"active", true, "primary"}, {"active", true, "warming"}, {"active", true, "compaction"}} {
-		t.Run(tc.mode+"/"+map[bool]string{false: "closed", true: "injected"}[tc.eligible]+"/"+tc.kind, func(t *testing.T) {
-			f := newRoutingFixture(t, tc.mode, tc.eligible)
+		mode string
+		kind string
+	}{{"off", "primary"}, {"dry-run", "primary"}, {"on", "primary"}, {"on", "warming"}, {"on", "compaction"}} {
+		t.Run(tc.mode+"/"+tc.kind, func(t *testing.T) {
+			f := newRoutingFixture(t, tc.mode)
 			opts := policyadapter.Options{Clock: f.p.now, Routes: []policyadapter.Route{{ProviderRoute: "claude-main", Models: []string{"claude-opus-5-5"}, TTLs: []cachepolicy.TTL{cachepolicy.TTL5m, cachepolicy.TTL1h}}}}
 			policyOpts, err := policyadapter.PolicyOptions(opts)
 			if err != nil {
@@ -64,7 +63,7 @@ func TestHandleRoutingActionOrFallbackCannotBypassManagedPolicy(t *testing.T) {
 			selected := invoke(t, f.p, pluginabi.MethodCachePolicyResolve, resolve).(pluginapi.CachePolicy)
 			r := f.before(t, "managed", resolve.Model)
 			choice := f.pick(t, r, "a", "b")
-			if choice.Handled != (tc.mode == "active" && tc.eligible && tc.kind == "primary") {
+			if choice.Handled != (tc.mode == "on" && tc.kind == "primary") {
 				t.Fatal(choice)
 			}
 			if got := f.after(t, r, "b"); got.Terminate {

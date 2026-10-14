@@ -33,7 +33,7 @@ func forwardWiringOpen(t *testing.T, f forwardFixture, edit func(*forwardOptions
 	}
 	p.forwardOptions = &opts
 	result := invoke(t, p, pluginabi.MethodPluginRegister, map[string]any{"config_yaml": f.config(), "schema_version": 7}).(map[string]any)
-	if result["schema_version"] != 7 || result["capabilities"].(map[string]bool)["cache_policy"] || p.policy != nil || p.cfg.CachePolicy.Enabled || p.routingEligible {
+	if result["schema_version"] != 7 || result["capabilities"].(map[string]bool)["cache_policy"] || p.policy != nil || p.cfg.CachePolicy.Enabled || p.cfg.Routing.Mode == "on" {
 		t.Fatal("forward registration enabled policy/routing or omitted schema 7", result)
 	}
 	t.Cleanup(p.Close)

@@ -20,9 +20,13 @@ func routingBudgets(provider, model string, windows []observation.Window, now ti
 		if !w.Applies(model) || w.NotApplicable {
 			continue
 		}
-		b := routing.Budget{Seconds: w.Seconds, Reset: w.Reset, Known: w.FreshComplete(now, time.Hour) && !w.Dormant && w.Remaining != nil}
+		// A dormant window reset and has not started: 100 % left, no reset yet.
+		b := routing.Budget{Seconds: w.Seconds, Reset: w.Reset, Dormant: w.Dormant, Known: w.FreshComplete(now, time.Hour) && (w.Dormant || w.Remaining != nil)}
 		if w.Remaining != nil {
 			b.Remaining = *w.Remaining
+		}
+		if w.Dormant {
+			b.Remaining, b.Reset = 100, time.Time{}
 		}
 		result = append(result, b)
 	}

@@ -103,7 +103,6 @@ type Plugin struct {
 	dryRunPruned       time.Time
 	reports            *historyreports.Reader
 	reportSlots        chan struct{}
-	routingEligible    bool // Private rollout gate: false in every runtime constructor/configuration.
 	policy             *policyadapter.Adapter
 	selections         map[string]pluginapi.CachePolicy
 	history            *history.Store
@@ -183,11 +182,9 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		return nil, err
 	}
 	cfg.UsageAuthURL = usageURL
+	cfg.Routing.Mode = routingMode(cfg.Routing.Mode)
 	if cfg.Routing.Mode == "" {
-		cfg.Routing.Mode = "off"
-	}
-	if cfg.Routing.Mode != "off" && cfg.Routing.Mode != "dry-run" {
-		return nil, errors.New("active routing requires completed rollout verification; candidate supports off or dry-run")
+		return nil, errors.New("routing.mode must be off or on")
 	}
 	if len(cfg.Routing.Providers) == 0 {
 		cfg.Routing.Providers = []string{"claude"}
@@ -593,9 +590,12 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 	return nil, fmt.Errorf("unsupported Pacer method %s", method)
 }
 
+// pick places a chat by 7-day pace (docs/pace-routing.md) when routing is on.
+// Primary requests and compactions are routed; other auxiliaries are left to
+// CPA. Warm chats stay on their account; a compaction never rebinds the chat.
 func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPickResponse {
 	p.mu.Lock()
-	cfg, eligible := p.cfg, p.routingEligible
+	cfg := p.cfg
 	id := header(http.Header(req.Options.Headers), requestHeader)
 	t, tracked := p.requests[id]
 	selection, managed := p.selections[id]
@@ -620,7 +620,12 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			enabled = true
 		}
 	}
-	if !cfg.Enabled || !enabled || !tracked || (t.Claim != nil && t.Claim.Kind != "primary") || (managed && selection.Kind != "primary") {
+	kind := "primary"
+	if t.Claim != nil {
+		kind = t.Claim.Kind
+	}
+	// A managed cache policy selects only primary requests for routing.
+	if !cfg.Enabled || cfg.Routing.Mode != "on" || !enabled || !tracked || (kind != "primary" && kind != "compaction") || (managed && selection.Kind != "primary") {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
@@ -629,6 +634,9 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	}
 	b, active, err := p.chats.Get(key)
 	if err != nil {
+		return pluginapi.SchedulerPickResponse{}
+	}
+	if kind == "compaction" && b.Key == "" {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	if b.Key == "" && p.Host != nil && t.Session != "" {
@@ -655,23 +663,36 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			}
 		}
 	}
+	now := p.now()
+	chat := routing.Chat{Account: b.Account, Warm: warm(b, active, now)}
+	switch {
+	case kind == "compaction":
+		// The prompt cache is per model: a compaction on the chat's own model
+		// reads the warm cache; one on another model is placed like a cold chat.
+		chat.Warm = req.Model == b.Model
+	case t.Claim != nil && b.Key != "" && t.Claim.Checkpoint != b.Consumed:
+		// The first request after a compaction starts from a new checkpoint.
+		chat.Warm = false
+	}
 	ids := make([]string, 0, len(req.Candidates))
 	for _, candidate := range req.Candidates {
 		ids = append(ids, candidate.ID)
 	}
 	p.mu.Lock()
-	input := routingPreviewInput{At: p.now(), Provider: provider, Model: req.Model, Candidates: ids, Selection: selection, Managed: managed}
-	p.rememberPreviewLocked(key, input)
-	accounts, expected, candidates := p.routingInputsLocked(input, p.now())
+	input := routingPreviewInput{At: now, Provider: provider, Model: req.Model, Candidates: ids, Selection: selection, Managed: managed}
+	if kind == "primary" {
+		p.rememberPreviewLocked(key, input)
+	}
+	accounts, candidates := p.routingInputsLocked(input, now)
 	p.mu.Unlock()
-	d := routing.Pick(routing.Default(), p.now(), routing.Chat{Account: b.Account, ProtectedUntil: b.ProtectedUntil, UnknownWarmth: b.UnknownWarmth, InFlight: active, ExpectedValue: expected}, accounts)
+	d := routing.Pick(routing.Default(), now, chat, accounts)
 	p.mu.Lock()
 	t.Key = key
 	t.Decision = d
 	t.Model, t.PreviousAccount = req.Model, b.Account
 	t.RoutingProvider = provider
-	t.RoutingChoice = routingAction(req, cfg.Routing.Mode, eligible, d, candidates)
-	p.requests[header(http.Header(req.Options.Headers), requestHeader)] = t
+	t.RoutingChoice = routingAction(req, d, candidates)
+	p.requests[id] = t
 	p.mu.Unlock()
 	return t.RoutingChoice
 }
@@ -842,17 +863,12 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 				return resource(503, map[string]string{"error": "observation_unavailable"})
 			}
 			row := map[string]any{"id": c.ID, "auth_index": c.Index, "alias": c.Alias, "provider": c.Provider, "state": accountState(c.Provider, windows, p.now()), "windows": views, "reconciliation": map[string]any{"next": job.Next, "blocked": job.Blocked}}
-			base := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now())}
-			row["pace_unit"] = "%/h · equal sizes"
+			row["pace_unit"] = "%/h"
 			if report, ok := p.measurements[c.Account]; ok {
 				row["measurement"] = map[string]any{"as_of": report.AsOf, "five_hour": report.FiveHour, "seven_day": report.SevenDay, "warm_burn": report.WarmBurn, "coverage": report.Coverage}
-				if report.SevenDay.Known && p.now().Sub(report.AsOf) < time.Minute {
-					base.Size = report.SevenDay.USDPerPercent
-					row["pace_unit"] = "$/h"
-				}
 			}
-			if d := routing.Pick(routing.Default(), p.now(), routing.Chat{}, []routing.Account{base}); d.Handled {
-				row["pace"] = d.Pace
+			if pace, ok := routing.Pace(routing.Default(), p.now(), routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now())}); ok {
+				row["pace"] = pace
 			}
 			// Additive readback only: a lower bound never reaches routing.
 			row["capacity"] = p.capacityView(c)
@@ -864,7 +880,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			pin := p.reports.DefaultPin()
 			historyCoverage = fmt.Sprintf("Frozen reports at %s, event checkpoint %d. Native future usage is separate. Legacy views, real-data migration and retirement gates remain unverified.", time.UnixMilli(pin.At).UTC().Format(time.RFC3339), pin.Through)
 		}
-		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "can_activate": false, "gate": "Active routing awaits integration acceptance and 24–48 hours of dry-run observation."}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "No account size is ever known. accounts[].capacity holds a measured lower bound only where a quiescent sample pair proves membership and carry-in; otherwise it is unknown with reasons.", "errors": p.measurementErrors, "capacity_known": false, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
+		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "modes": []string{"off", "on"}, "providers": p.cfg.Routing.Providers}, "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "No account size is ever known. accounts[].capacity holds a measured lower bound only where a quiescent sample pair proves membership and carry-in; otherwise it is unknown with reasons.", "errors": p.measurementErrors, "capacity_known": false, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/routing" {
 		if len(req.Body) > 1024 {
@@ -875,8 +891,8 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		decoder := json.NewDecoder(bytes.NewReader(req.Body))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF || (body.Mode != "off" && body.Mode != "dry-run") {
-			return resource(409, map[string]string{"error": "routing_rollout_gate", "message": "Only off or dry-run is accepted before rollout verification"})
+		if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF || (body.Mode != "off" && body.Mode != "on") {
+			return resource(400, map[string]string{"error": "routing_mode_invalid", "message": "Routing mode is off or on"})
 		}
 		if err := p.setMode(body.Mode); err != nil {
 			return resource(503, map[string]string{"error": "routing_state_unavailable"})

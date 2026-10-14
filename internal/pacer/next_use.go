@@ -3,7 +3,6 @@ package pacer
 import (
 	"time"
 
-	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -53,12 +52,11 @@ func (p *Plugin) rememberPreviewLocked(key string, input routingPreviewInput) {
 	p.previews[key] = input
 }
 
-// Called under p.mu by both the scheduler and the read-only preview. This is
-// deliberately the same evidence and scoring input construction for both paths.
-func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) ([]routing.Account, float64, []credential) {
+// Called under p.mu by both the scheduler and the read-only preview: the same
+// meter inputs for both paths.
+func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) ([]routing.Account, []credential) {
 	accounts := []routing.Account{}
 	candidates := []credential{}
-	expected := 0.0
 	for _, id := range input.Candidates {
 		c, ok := p.creds[id]
 		if !ok || c.Provider != input.Provider {
@@ -69,29 +67,18 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) (
 		if err != nil {
 			continue
 		}
-		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now)}
-		if report, ok := p.measurements[c.Account]; ok && now.Sub(report.AsOf) < time.Minute {
-			selection := input.Selection
-			if input.Managed {
-				prior := report.Expected(measurement.ChatRef{CallerID: selection.Scope.CallerScope, InstallationID: selection.Scope.InstallationID, SessionID: selection.Scope.SessionID, ProviderRoute: selection.Scope.ProviderRoute, Provider: input.Provider, AccountID: c.Account, ContextEpoch: selection.ContextEpoch}, measurement.TTL(selection.TTL))
-				if prior.Known && prior.USD > expected {
-					expected = prior.USD
-				}
-			}
-			if report.SevenDay.Known {
-				account.Size = report.SevenDay.USDPerPercent
-			}
-			if report.FiveHour.Known {
-				account.ShortValue = report.FiveHour.USDPerPercent
-				account.RunwayUnknown = !report.WarmBurn.Bounded
-			}
-			if report.WarmBurn.Bounded {
-				account.WarmBurn = report.WarmBurn.HighUSDPerHour
-			}
-		}
-		accounts = append(accounts, account)
+		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now)})
 	}
-	return accounts, expected, candidates
+	return accounts, candidates
+}
+
+// unknownWarmth is how long a chat without confirmed cache activity counts as
+// warm after its last primary request: the longest Claude cache TTL.
+const unknownWarmth = time.Hour
+
+// warm reports whether the chat's prompt cache may still be warm on its account.
+func warm(b tracker.Binding, active bool, now time.Time) bool {
+	return active || now.Before(b.ProtectedUntil) || (b.UnknownWarmth && now.Before(b.LastUsed.Add(unknownWarmth)))
 }
 
 func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
@@ -99,7 +86,7 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	view := nextUseView{Version: 1, AtMS: now.UnixMilli(), ExpiresMS: now.Add(30 * time.Second).UnixMilli(), Mode: p.cfg.Routing.Mode, Provider: binding.Provider, Model: binding.Model, Reason: "unavailable"}
-	if !p.cfg.Enabled || p.cfg.Routing.Mode == "off" {
+	if !p.cfg.Enabled || p.cfg.Routing.Mode != "on" {
 		view.Reason = "routing_off"
 		return view
 	}
@@ -119,10 +106,10 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	if err != nil || current.Key == "" {
 		return view
 	}
-	accounts, expected, candidates := p.routingInputsLocked(input, now)
-	d := routing.Pick(routing.Default(), now, routing.Chat{Account: current.Account, ProtectedUntil: current.ProtectedUntil, UnknownWarmth: current.UnknownWarmth, InFlight: active, ExpectedValue: expected}, accounts)
+	accounts, candidates := p.routingInputsLocked(input, now)
+	d := routing.Pick(routing.Default(), now, routing.Chat{Account: current.Account, Warm: warm(current, active, now)}, accounts)
 	view.Reason = d.Reason
-	if !d.Handled || d.Account == current.Account || (d.Reason != "cold_move" && d.Reason != "forced_move") {
+	if !d.Handled || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
 		return view
 	}
 	for _, c := range candidates {

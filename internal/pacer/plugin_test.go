@@ -178,14 +178,14 @@ func TestNativeDispatchForcedMoveStopsBeforeFakeUpstreamAndRecovers(t *testing.T
 func TestPublicResourceCannotReadManagementStateOrChangeRouting(t *testing.T) {
 	p := startPlugin(t, filepath.Join(t.TempDir(), "pacer.sqlite"))
 	defer p.Close()
-	for _, req := range []pluginapi.ManagementRequest{{Method: "GET", Path: "/v0/resource/plugins/pacer/state"}, {Method: "PATCH", Path: "/v0/resource/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}, {Method: "GET", Path: "/v0/resource/plugins/pacer/events", Headers: http.Header{"Authorization": {"Bearer guessed"}}}} {
+	for _, req := range []pluginapi.ManagementRequest{{Method: "GET", Path: "/v0/resource/plugins/pacer/state"}, {Method: "PATCH", Path: "/v0/resource/plugins/pacer/routing", Body: []byte(`{"mode":"on"}`)}, {Method: "GET", Path: "/v0/resource/plugins/pacer/events", Headers: http.Header{"Authorization": {"Bearer guessed"}}}} {
 		response := invoke(t, p, pluginabi.MethodManagementHandle, req).(pluginapi.ManagementResponse)
 		if response.StatusCode == 200 {
 			t.Fatalf("public request reached private data: %s", req.Path)
 		}
 	}
 	response := invoke(t, p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "PATCH", Path: "/v0/management/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}).(pluginapi.ManagementResponse)
-	if response.StatusCode != 409 || p.cfg.Routing.Mode != "off" {
-		t.Fatal("rollout gate bypassed")
+	if response.StatusCode != 400 || p.cfg.Routing.Mode != "off" {
+		t.Fatal("invalid mode accepted")
 	}
 }
