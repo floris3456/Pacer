@@ -86,9 +86,9 @@ def chat(session, model="claude-opus-5-5"):
     return status, served, decisions[0] if decisions else None
 
 
-def claim_chat(session, checkpoint, request):
+def claim_chat(session, checkpoint, request, kind="primary"):
     """A request with OpenCode's quota claim (docs/client-protocol.md)."""
-    claim = {"protocol": 1, "installation": "pace-lab", "session": session, "route": "claude/lab", "request": request, "kind": "primary",
+    claim = {"protocol": 1, "installation": "pace-lab", "session": session, "route": "claude/lab", "request": request, "kind": kind,
              "capability": hashlib.sha256(b"pace-lab-capability-" + session.encode()).hexdigest(), "checkpoint": checkpoint, "auto": True, "fresh": False, "compact_on_switch": True}
     header = base64.urlsafe_b64encode(json.dumps(claim).encode()).decode().rstrip("=")
     before = {k: v.get("/v1/messages", 0) for k, v in call(FIXTURE + "/_test/attempts")[1]["counts"].items()}
@@ -159,6 +159,13 @@ def main():
     check("forced move asks the client to compact first, naming the summary models", status == 409 and isinstance(body, dict) and body["error"]["code"] == "quota_compact_required" and body["error"].get("compaction_models") == ["claude-sonnet-4-6", "claude-haiku-lab"] and served == [] and d["proposed"]["reason"] == "forced_move", {"status": status, "body": body, "served": served})
     status, body, served, d = claim_chat(run + "claim", "c2", "r4")
     check("compacted chat continues on the new account", status == 200 and served == ["cap-c"] and d["actual_auth"] == "cap-c.json", {"status": status, "served": served, "decision": d["proposed"]})
+    # A warming ping is a generation on the chat's model. Left to CPA, fill-first
+    # and CPA's own session affinity would send it to another account.
+    status, body, served, d = claim_chat(run + "claim", "c2", "r5", "generate")
+    check("warming ping stays on the chat's account", status == 200 and served == ["cap-c"] and d["proposed"]["reason"] == "warm_auxiliary" and d["actual_auth"] == "cap-c.json", {"status": status, "served": served, "decision": d["proposed"]})
+    status, view = call(CPA + "/v0/resource/plugins/pacer/events?view=usage&v=1&model=claude/lab", key="pace-lab-capability-" + run + "claim")
+    preview = view.get("next_use") if isinstance(view, dict) else None
+    check("usage view previews next and forced use (none: the other accounts are at their floor)", status == 200 and preview and preview["mode"] == "active" and preview["warm"] is True and preview["reason"] == "cold_stay" and "auth" not in preview and "force_auth" not in preview, {"status": status, "next_use": preview})
     status, body = call(CPA + "/v0/management/plugins/pacer/routing", "PATCH", {"mode": "off"}, key=ADMIN)
     count = len(state()["decisions"])
     status, served, d = chat(run + "3")
