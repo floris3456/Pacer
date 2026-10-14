@@ -57,8 +57,11 @@ func TestRecoveryAcceptsADormantWindowReadAfterTheFailure(t *testing.T) {
 	}
 	for name, change := range map[string]func(*observation.Window){
 		"read before the failure": func(w *observation.Window) { w.StatusEvidence.At = failure },
-		"stale":                   func(w *observation.Window) { w.StatusEvidence.At = now.Add(-2 * time.Hour); w.Usage.At = w.StatusEvidence.At },
-		"from headers":            func(w *observation.Window) { w.StatusEvidence.Source = observation.HeaderSource },
+		"stale": func(w *observation.Window) {
+			w.StatusEvidence.At = now.Add(-2 * time.Hour)
+			w.Usage.At = w.StatusEvidence.At
+		},
+		"from headers": func(w *observation.Window) { w.StatusEvidence.Source = observation.HeaderSource },
 	} {
 		changed := short
 		change(&changed)
