@@ -121,7 +121,7 @@ func TestForwardWiringRegistrationCapabilityAndLegacyPreservation(t *testing.T) 
 			t.Fatal("forward legacy alias")
 		}
 	}
-	if usageCount != 7 || modelsCount != 3 {
+	if usageCount != 8 || modelsCount != 3 {
 		t.Fatal("the usage and model price routes are missing", usageCount, modelsCount)
 	}
 	r := forwardWiringCall(t, p, forwardWiringRequest(t, "status", nil), 200)
