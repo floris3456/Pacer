@@ -218,7 +218,9 @@ func (s *Store) Observe(account, provider string, samples []Window) error {
 			if !retired {
 				next, disposition = merge(old, sample)
 			}
-			if disposition == "accepted-cycle" && !sameReset(old.Reset, next.Reset) {
+			// A cycle ends on a new reset or when the window reads dormant again
+			// (reset, not yet started); late readings of it are refused either way.
+			if (disposition == "accepted-cycle" && !sameReset(old.Reset, next.Reset)) || (disposition == "accepted-status" && next.Dormant && !old.Dormant) {
 				for _, reset := range []time.Time{old.Reset, timestamp(old.Cycle)} {
 					if !reset.IsZero() {
 						if _, err := c.ExecContext(context.Background(), "INSERT OR IGNORE INTO observation_retired(account,key,reset) VALUES(?,?,?)", account, key, reset.UnixNano()); err != nil {

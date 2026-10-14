@@ -316,6 +316,9 @@ func API(provider string, body []byte, at time.Time) ([]Window, error) {
 					}
 				}
 				w := window(provider, scope, seconds, scalar(first(v, "used_percent", "usedPercent")), scalar(first(v, "reset_at", "resetAt")), scalar(first(v, "reset_after_seconds", "resetAfterSeconds")), false, at, source)
+				if source == APISource {
+					w = codexDormant(w, at)
+				}
 				if w.Valid() {
 					out = append(out, w)
 				}
@@ -351,6 +354,30 @@ func API(provider string, body []byte, at time.Time) ([]Window, error) {
 	}
 	sortWindows(out)
 	return out, nil
+}
+
+// CodexDormantTolerance bounds how far an unused Codex window's reported reset
+// may be from read time + window length. Codex reports a window that has not
+// started as resetting one full window after each read (0.1 s off on CT104);
+// started windows were at least 52 minutes off.
+const CodexDormantTolerance = 10 * time.Second
+
+// codexDormant records a meter read of an unstarted Codex window as dormant,
+// like Claude's resets_at: null, keeping the reported reset as status evidence.
+// Response headers and stream events never qualify: a request starts the
+// window, and its first minute also reads 0 % used.
+func codexDormant(w Window, at time.Time) Window {
+	if w.Remaining == nil || *w.Remaining != 100 || w.Reset.IsZero() || w.ResetEvidence.Quality != Absolute || w.Seconds <= 0 {
+		return w
+	}
+	gap := w.Reset.Sub(at.Add(time.Duration(w.Seconds) * time.Second))
+	if gap > CodexDormantTolerance || gap < -CodexDormantTolerance {
+		return w
+	}
+	w.Dormant = true
+	w.StatusEvidence = Field{at.UTC(), APISource, Measured, w.ResetEvidence.Raw}
+	w.Reset, w.ResetEvidence = time.Time{}, Field{}
+	return w
 }
 
 // MonthSeconds is the window length Pacer stores for monthly meters. The
