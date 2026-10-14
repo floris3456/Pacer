@@ -58,6 +58,19 @@ tbody tr.empty:hover td{background:transparent}
 .pill{display:inline-block;background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r);padding:0 6px;font-size:12px}
 form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 fieldset{border:1px solid var(--line);border-radius:0;padding:10px 12px;margin:10px 0}
+form.settings{display:block;max-width:92ch}
+form.settings legend{color:var(--text);font-weight:600;font-size:13px}
+.setting{display:flex;gap:12px;align-items:flex-start;margin:10px 0;color:var(--text)}
+.setting input[type=number]{width:84px;flex:none}
+.setting input[type=checkbox]{margin-top:4px}
+.setting span,.setting-block{display:flex;flex-direction:column;gap:2px}
+.setting small,.setting-block small{color:var(--muted);font-size:12px;line-height:1.45}
+.setting-block{margin:10px 0;color:var(--text)}
+.model-list{margin:6px 0 0;padding-left:22px}
+.model-list li{margin:4px 0}
+.model-list input{width:min(100%,360px)}
+.model-list li::marker{color:var(--muted)}
+.changed::after{content:" · changed here";color:var(--muted);font-weight:400;font-size:12px}
 legend{color:var(--muted);font-size:12px;padding:0 4px}
 dialog{color:var(--text);background:var(--surface);border:1px solid var(--line-strong);border-radius:3px;max-width:600px;width:90%;padding:18px 20px}
 dialog h2{margin-top:0}
@@ -257,7 +270,25 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <section id="login"><h2>Connect to Pacer</h2><p class="muted">Pacer uses your existing authenticated session. If your session has expired, reload this page to sign in.</p><button id="reconnect" type="button">Retry connection</button></section>
 <div id="message" role="status" class="status" hidden></div>
 <section id="workspace" hidden><div class="toolbar"><span id="updated" class="muted" aria-live="off"></span></div>
-<section id="pacer"><h2>Routing</h2><p>Pace routing spends each account’s 7-day meter by its reset. Warm chats stay on their account; cold chats go to the account that must be spent fastest. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA routing</option><option value="on">On · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
+<section id="pacer"><h2>Routing</h2><p>Pace routing spends each account’s 7-day meter by its reset. Warm chats stay on their account; cold chats go to the account that must be spent fastest. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA routing</option><option value="on">On · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th><th>New chats</th></tr></thead><tbody id="accounts"></tbody></table></div>
+<form id="settings-form" class="settings" novalidate><h3>Settings</h3><p class="muted">Changes apply at once and survive restarts. A setting that is also in CPA’s config.yaml follows config.yaml again when its value there changes.</p>
+<fieldset><legend>Account switches</legend>
+<label class="setting"><input type="checkbox" id="set-compact" aria-labelledby="set-compact-name" aria-describedby="set-compact-help"> <span><b id="set-compact-name">Compact on switch</b><small id="set-compact-help">When Pacer must move a chat to another account, a client that can compact (OpenCodePlus) summarises the chat first, so the new account receives a short summary instead of the whole history.</small></span></label>
+<div class="setting-block"><b>Summary models</b><small>Write the switch summary. The first is used; if it fails, the next, and so on. Empty: the client’s own compaction model. Adding a model opens a field for the next fallback.</small><ol id="set-models" class="model-list"></ol><datalist id="model-options"></datalist><span id="model-options-status" class="muted"></span></div>
+</fieldset>
+<fieldset><legend>Placement</legend>
+<label class="setting"><input type="number" id="set-band" min="50" max="100" step="1" required aria-labelledby="set-band-name" aria-describedby="set-band-help"> <span><b id="set-band-name">Equal pace band (%)</b><small id="set-band-help">Accounts within this % of the best pace count as equally good, so a cold chat stays on its account instead of moving for a small gain. Lower: fewer moves; 100: always the best account.</small></span></label>
+<label class="setting"><input type="number" id="set-new-min" min="0" max="100" step="1" required aria-labelledby="set-new-min-name" aria-describedby="set-new-min-help"> <span><b id="set-new-min-name">New-chat minimum (5-hour % left)</b><small id="set-new-min-help">An account needs this much of its 5-hour window to take a new or moved chat, so new chats do not start on a nearly empty window.</small></span></label>
+<label class="setting"><input type="number" id="set-short-floor" min="0" max="50" step="0.5" required aria-labelledby="set-short-floor-name" aria-describedby="set-short-floor-help"> <span><b id="set-short-floor-name">5-hour floor (% left)</b><small id="set-short-floor-help">At or below this, an account serves no chat, not even a warm one: its chats move (with a summary if compact on switch is on).</small></span></label>
+<label class="setting"><input type="number" id="set-long-floor" min="0" max="50" step="0.5" required aria-labelledby="set-long-floor-name" aria-describedby="set-long-floor-help"> <span><b id="set-long-floor-name">7-day floor (% left)</b><small id="set-long-floor-help">The same for the 7-day meter. Raise it to keep a reserve on every account.</small></span></label>
+</fieldset>
+<fieldset><legend>Warm chats</legend>
+<label class="setting"><input type="number" id="set-warm" min="0" max="1440" step="1" required aria-labelledby="set-warm-name" aria-describedby="set-warm-help"> <span><b id="set-warm-name">Warm for (minutes after the last request)</b><small id="set-warm-help">A chat counts as warm this long after its last request when Pacer has no cache evidence, and warm chats are never moved without need. 60 matches Claude’s 1-hour cache; 5 matches the 5-minute cache and frees chats sooner.</small></span></label>
+<label class="setting"><input type="number" id="set-retries" min="0" max="10" step="1" required aria-labelledby="set-retries-name" aria-describedby="set-retries-help"> <span><b id="set-retries-name">Retries before moving a warm chat</b><small id="set-retries-help">When a warm chat’s account fails briefly (an upstream 5xx) while its meters are fine, the request is refused as retryable this many times (within 2 minutes) before the chat moves. The client retries by itself. 0 moves at once.</small></span></label>
+</fieldset>
+<fieldset><legend>Providers</legend><span class="setting-block"><small>Pace routing applies to these providers; others use CPA’s routing. Pause single accounts in the table above.</small></span>
+<label><input type="checkbox" id="set-claude"> Claude</label> <label><input type="checkbox" id="set-codex"> Codex</label></fieldset>
+<div class="toolbar"><button id="save-settings">Save settings</button><button type="button" id="reset-settings">Revert unsaved changes</button><span id="settings-status" class="muted" role="status"></span></div></form><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
 <div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
 <div id="usage-status" role="status" class="status" hidden></div>
@@ -331,7 +362,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
   const root = '/v0/management/plugins/pacer';
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
-  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','PATCH '+root+'/settings','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
   allowed.add('GET /v8/management/config/access/api-keys');
   for(const channel of ['claude','codex','gemini','gemini-interactions','antigravity','aistudio','vertex','kimi','kimi-ai','kimi.ai','kimi.com','meta','muse','xai','x-ai','grok','devin'])allowed.add('GET /v8/management/routing/model-definitions/'+channel);
   for(const op of ['profiles','windows','inspect','accounts'])allowed.add('POST '+root+'/usage/'+op);
@@ -1903,7 +1934,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   async function refresh(knownState){message('');forwardControls();try{
     if(tab==='models'){await loadModels()}
     else if(tab==='keys'){await loadKeys()}
-    else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('rollout').textContent=(data.routing.providers||[]).join(', ');el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' %/h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
+    else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('rollout').textContent=(data.routing.providers||[]).join(', ');renderSettings(data.settings);el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){const tr=row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' %/h':'Unknown',account.state||'Unknown']);tr.append(pauseCell(account));for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
   async function showWorkspace(data){connected=true;allowBridge=false;el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
@@ -1920,6 +1951,87 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
   setInterval(refreshVisible,30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshVisible()});
+  // Settings: rendered from the state, saved as one PATCH. Auto-refresh does
+  // not overwrite unsaved edits.
+  let settings=null, settingsDirty=false, modelOptions=null;
+  const numberFields={'set-band':'band_percent','set-new-min':'new_chat_minimum_percent','set-short-floor':'short_floor_percent','set-long-floor':'long_floor_percent','set-warm':'warm_minutes','set-retries':'transient_retries'};
+  function renderSettings(view){
+    if(!view?.settings)return;
+    settings=view;el('set-models').dataset.max=view.limits?.compaction_models||8;
+    if(settingsDirty)return;
+    const s=view.settings;
+    el('set-compact').checked=!!s.compact_on_switch;
+    for(const [id,name] of Object.entries(numberFields))el(id).value=s[name];
+    el('set-claude').checked=(s.providers||[]).includes('claude');el('set-codex').checked=(s.providers||[]).includes('codex');
+    renderModelList(s.compaction_models||[]);
+    const changed=view.changed||[];
+    const names={compact_on_switch:'compact on switch',compaction_models:'summary models',band_percent:'equal pace band',new_chat_minimum_percent:'new-chat minimum',short_floor_percent:'5-hour floor',long_floor_percent:'7-day floor',warm_minutes:'warm for',transient_retries:'retries',providers:'providers',paused_accounts:'paused accounts'};
+    el('settings-status').textContent=changed.length?'Changed here (differs from config.yaml or the default): '+changed.map(n=>names[n]||n).join(', ')+'.':'All settings follow config.yaml or the defaults.';
+    loadModelOptions();
+  }
+  function modelValues(){return [...el('set-models').querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean)}
+  // One field per model plus an empty one for the next fallback.
+  function modelField(list,value,index){
+    const li=document.createElement('li'),input=document.createElement('input');
+    input.setAttribute('list','model-options');input.maxLength=128;input.value=value;input.autocomplete='off';
+    input.placeholder=index===0?'Model, e.g. claude-sonnet-4-6':'Fallback model (optional)';
+    input.setAttribute('aria-label',index===0?'Summary model':'Fallback model '+index);
+    // Typing into the last, empty field adds the next one without disturbing this one.
+    input.oninput=()=>{settingsDirty=true;const max=Number(list.dataset.max)||8;if(input.value.trim()&&li===list.lastElementChild&&list.children.length<max)list.append(modelField(list,'',list.children.length))};
+    // A committed change redraws the list (buttons, no gaps), keeping focus on
+    // the field the user moved to.
+    input.onchange=()=>{settingsDirty=true;setTimeout(()=>{const fields=[...list.querySelectorAll('input')],focused=fields.indexOf(document.activeElement),before=fields.slice(0,Math.max(focused,0)).filter(i=>!i.value.trim()).length;renderModelList(modelValues());if(focused>=0){const next=list.querySelectorAll('input')[Math.min(focused-before,list.children.length-1)];next?.focus()}})};
+    li.append(input);return li;
+  }
+  function renderModelList(values){
+    const list=el('set-models'),max=Number(list.dataset.max)||8;list.replaceChildren();
+    const items=values.length<max?[...values,'']:values;
+    items.forEach((value,index)=>{
+      const li=modelField(list,value,index);
+      if(value){
+        // Positions of the fields as they are now, blanks included.
+        const fields=()=>[...list.querySelectorAll('input')].map(i=>i.value.trim());
+        const at=()=>[...list.children].indexOf(li);
+        for(const [label,text,move] of [['Move up','↑',-1],['Move down','↓',1]]){if((move<0&&index===0)||(move>0&&index===values.length-1))continue;const b=document.createElement('button');b.type='button';b.textContent=text;b.title=label;b.setAttribute('aria-label',label+' '+value);b.onclick=()=>{const v=fields(),i=at(),j=i+move;if(j<0||j>=v.length)return;[v[i],v[j]]=[v[j],v[i]];settingsDirty=true;renderModelList(v.filter(Boolean))};li.append(' ',b)}
+        const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.setAttribute('aria-label','Remove '+value);remove.onclick=()=>{const v=fields();v.splice(at(),1);settingsDirty=true;renderModelList(v.filter(Boolean))};li.append(' ',remove);
+      }
+      list.append(li);
+    });
+  }
+  async function loadModelOptions(){
+    if(modelOptions)return;
+    modelOptions=[];
+    try{
+      const data=await api('/v8/management/oauth/settings/models');
+      const names=new Set();for(const m of data.models||[])if(m.enabled!==false)for(const n of (m.exposed?.length?m.exposed:[m.id||m.name]))if(n)names.add(n);
+      modelOptions=[...names].sort();
+      el('model-options').replaceChildren(...modelOptions.map(n=>{const o=document.createElement('option');o.value=n;return o}));
+      el('model-options-status').textContent=modelOptions.length+' models CPA serves are suggested; other names CPA accepts work too.';
+    }catch(error){modelOptions=null;el('model-options-status').textContent='Model suggestions unavailable: '+error.message}
+  }
+  function pauseCell(account){
+    const td=document.createElement('td'),label=document.createElement('label'),box=document.createElement('input');
+    box.type='checkbox';box.checked=!account.paused;box.disabled=!settings||!account.account;
+    box.setAttribute('aria-label','New chats on '+(account.alias||account.id));
+    box.onchange=async()=>{
+      const paused=new Set(settings.settings.paused_accounts||[]);if(box.checked)paused.delete(account.account);else paused.add(account.account);
+      box.disabled=true;
+      try{const view=await api(root+'/settings','PATCH',{paused_accounts:[...paused]});settings=view;await refresh();message(box.checked?'New chats may use '+(account.alias||account.id)+' again.':'Paused for new chats: '+(account.alias||account.id)+'. Its warm chats stay.')}catch(error){box.checked=!box.checked;message(error.message,true)}finally{box.disabled=false}
+    };
+    label.append(box,document.createTextNode(account.paused?' Paused':' Allowed'));td.append(label);return td;
+  }
+  el('settings-form').addEventListener('input',()=>{settingsDirty=true});
+  el('reset-settings').onclick=()=>{settingsDirty=false;renderSettings(settings);message('')};
+  el('settings-form').onsubmit=async event=>{
+    event.preventDefault();
+    const body={compact_on_switch:el('set-compact').checked,compaction_models:modelValues(),providers:['claude','codex'].filter(p=>el('set-'+p).checked)};
+    for(const [id,name] of Object.entries(numberFields)){const input=el(id),value=Number(input.value);if(input.value===''||!input.checkValidity()||!Number.isFinite(value)){input.focus();message('Check “'+input.closest('label').querySelector('b').textContent+'”: '+(input.validationMessage||'enter a number'),true);return}body[name]=value}
+    if(!body.providers.length){message('Route at least one provider, or turn routing off above.',true);return}
+    if(new Set(body.compaction_models).size!==body.compaction_models.length){message('A summary model is listed twice.',true);return}
+    const unknown=modelOptions?.length?body.compaction_models.filter(m=>!modelOptions.includes(m)):[];
+    el('save-settings').disabled=true;
+    try{const view=await api(root+'/settings','PATCH',body);settingsDirty=false;renderSettings(view);await refresh();message('Settings saved'+(unknown.length?'. Not in CPA’s model list: '+unknown.join(', ')+'; the client skips a model it cannot use.':'.'))}catch(error){message(error.message,true)}finally{el('save-settings').disabled=false}
+  };
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
   async function saveModel(reset=false){

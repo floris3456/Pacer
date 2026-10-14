@@ -586,3 +586,130 @@ func TestHandleNewChatWhenCPAReportsAffinityUnsupported(t *testing.T) {
 		})
 	}
 }
+
+// A warm chat whose account CPA leaves out although its meters are fine (an
+// upstream error in this request, a transient-error cooldown) is refused as
+// retryable instead of moved, up to the retry setting; then it is moved.
+func TestWarmChatWaitsForItsBrieflyUnavailableAccount(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, time.Hour) // warm on a for an hour
+	key := tracker.Key("fixture-caller", "claude", f.q)
+	r := f.before(t, "retry", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != "warm" {
+		t.Fatal(got)
+	}
+	// CPA retries the same request without a; then the client retries twice more.
+	for i := 1; i <= 3; i++ {
+		got := f.pick(t, r, "b")
+		if !got.Handled || !got.Reject || got.RejectCode != "auth_unavailable" || got.AuthID != "" || f.p.strikes[key].n != i {
+			t.Fatal(i, got)
+		}
+	}
+	decisions, err := f.p.decisionView()
+	if err != nil || len(decisions) == 0 || decisions[0].Outcome != TransientWait || decisions[0].Proposed.Unoffered != true {
+		t.Fatal("transient wait not traced", decisions)
+	}
+	// Past the setting: the chat is moved, compacting first.
+	got := f.pick(t, r, "b")
+	if !got.Handled || got.Reject || got.AuthID != "b" || !f.p.requests[r.RequestID].Decision.Forced {
+		t.Fatal(got)
+	}
+	requireCompact(t, f.after(t, r, "b"))
+	f.complete(t, r.RequestID)
+
+	// a recovers within the retries: the chat stays, and its strikes end.
+	f2 := newRoutingFixture(t, "on")
+	f2.seed(t, time.Hour)
+	r = f2.before(t, "blip", "claude-opus-5-5")
+	if got := f2.pick(t, r, "b"); !got.Reject {
+		t.Fatal(got)
+	}
+	if got := f2.pick(t, r, "a", "b"); got.AuthID != "a" {
+		t.Fatal(got)
+	}
+	if after := f2.after(t, r, "a"); after.Terminate || len(f2.p.strikes) != 0 || f2.binding(t).Account != f2.p.creds["a"].Account {
+		t.Fatal("blip moved the chat or kept strikes", string(after.ResponseBody))
+	}
+}
+
+func TestTransientWaitNeedsUsableMetersAWarmChatAndRetries(t *testing.T) {
+	for _, tc := range []string{"floor", "cold", "zero-retries", "expired"} {
+		t.Run(tc, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			f.seed(t, time.Hour)
+			switch tc {
+			case "floor":
+				left, short := 30.0, 1.0
+				now := f.p.now()
+				if err := f.p.observer.Observe(f.p.creds["a"].Account, "claude", []observation.Window{
+					{Provider: "claude", Scope: "all", Seconds: 18000, Remaining: &short, Reset: now.Add(3 * time.Hour), Usage: observation.Field{At: now, Source: "header"}, ResetEvidence: observation.Field{At: now, Source: "header", Quality: "absolute"}},
+					{Provider: "claude", Scope: "all", Seconds: 604800, Remaining: &left, Reset: now.Add(96 * time.Hour), Usage: observation.Field{At: now, Source: "header"}, ResetEvidence: observation.Field{At: now, Source: "header", Quality: "absolute"}},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "cold":
+				f.clock.Add(int64(2 * time.Hour))
+				f.observe(t)
+			case "zero-retries":
+				s := f.p.settings
+				s.TransientRetries = 0
+				if err := f.p.setSettings(s); err != nil {
+					t.Fatal(err)
+				}
+			case "expired":
+				r := f.before(t, "first", "claude-opus-5-5")
+				for i := 0; i < 3; i++ {
+					if !f.pick(t, r, "b").Reject {
+						t.Fatal("not held")
+					}
+				}
+				f.clock.Add(int64(transientWindow + time.Second))
+				f.observe(t)
+				if got := f.pick(t, r, "b"); !got.Reject {
+					t.Fatal("expired strikes still counted", got)
+				}
+				return
+			}
+			r := f.before(t, "move", "claude-opus-5-5")
+			if got := f.pick(t, r, "b"); !got.Handled || got.Reject || got.AuthID != "b" {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+// The forced move's 409 names the configured summary models, in order.
+func TestCompactRefusalCarriesTheCompactionModels(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, 5*time.Minute)
+	f.clock.Add(int64(6 * time.Minute))
+	f.observe(t)
+	s := f.p.settings
+	s.CompactionModels = []string{"claude-sonnet-4-6", "gemini-3.8-flash-high"}
+	if err := f.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	r := f.before(t, "move", "claude-opus-5-5")
+	f.pick(t, r, "b")
+	after := f.after(t, r, "b")
+	requireCompact(t, after)
+	var body struct {
+		Error struct {
+			Models []string `json:"compaction_models"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(after.ResponseBody, &body) != nil || strings.Join(body.Error.Models, ",") != "claude-sonnet-4-6,gemini-3.8-flash-high" {
+		t.Fatal(string(after.ResponseBody))
+	}
+	// compact_on_switch off on the page: the move is admitted without compaction.
+	f.complete(t, r.RequestID)
+	s.CompactOnSwitch = false
+	if err := f.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	r = f.before(t, "move-2", "claude-opus-5-5")
+	f.pick(t, r, "b")
+	if after = f.after(t, r, "b"); after.Terminate {
+		t.Fatal(string(after.ResponseBody))
+	}
+}

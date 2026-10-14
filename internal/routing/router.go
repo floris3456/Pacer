@@ -24,11 +24,18 @@ type Budget struct {
 	Dormant   bool      `json:"dormant,omitempty"`
 }
 
-// Account contains only credentials CPA currently offers; cooling and disabled
-// credentials must never be added by the caller. Aliases share Account identity.
+// Account is a credential CPA offers for this request; aliases share Account
+// identity. Cooling and disabled credentials are never offered. The caller may
+// add the chat's own account with NotOffered set: it is never chosen, but when
+// its meters are usable the decision says so (Decision.Unoffered), because CPA
+// left it out for another reason (a failed attempt of this request, a
+// transient-error cooldown). Paused accounts take no new or moved chats; their
+// warm chats stay.
 type Account struct {
 	Auth, Account string
 	Budgets       []Budget
+	NotOffered    bool `json:"-"`
+	Paused        bool `json:"-"`
 }
 
 // Chat is the chat being placed. Account is empty for a new chat. Warm means
@@ -58,14 +65,19 @@ type Candidate struct {
 	Known    bool     `json:"known"`
 	Pace     float64  `json:"pace"`
 	Eligible bool     `json:"eligible"`
+	Paused   bool     `json:"paused,omitempty"`
+	Offered  *bool    `json:"offered,omitempty"` // false only for the chat's own account CPA left out
 }
 
 type Decision struct {
-	Handled    bool        `json:"handled"`
-	Auth       string      `json:"auth,omitempty"`
-	Account    string      `json:"account,omitempty"`
-	Reason     string      `json:"reason"`
-	Forced     bool        `json:"forced"`
+	Handled bool   `json:"handled"`
+	Auth    string `json:"auth,omitempty"`
+	Account string `json:"account,omitempty"`
+	Reason  string `json:"reason"`
+	Forced  bool   `json:"forced"`
+	// Unoffered: a warm chat's own account was not offered although its meters
+	// can serve it. The caller may wait for it instead of forcing the move.
+	Unoffered  bool        `json:"unoffered,omitempty"`
 	Pace       float64     `json:"pace,omitempty"`
 	Candidates []Candidate `json:"candidates,omitempty"`
 }
@@ -96,7 +108,8 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 	for _, a := range accounts {
 		s := evaluate(cfg, now, a)
 		scores = append(scores, s)
-		if chat.Account != "" && a.Account == chat.Account && (current == nil || s.Auth < current.Auth) {
+		// The chat's account: an offered alias first, then the lowest auth.
+		if chat.Account != "" && a.Account == chat.Account && (current == nil || (current.NotOffered && !s.NotOffered) || (current.NotOffered == s.NotOffered && s.Auth < current.Auth)) {
 			c := s
 			current = &c
 		}
@@ -105,23 +118,30 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 	eligible := []score{}
 	anyKnown := false
 	for _, s := range scores {
-		anyKnown = anyKnown || s.known
-		ok := s.known && !s.hard && (s.Account.Account == chat.Account || s.short >= cfg.NewShort)
+		if !s.NotOffered {
+			anyKnown = anyKnown || s.known
+		}
+		ok := s.known && !s.hard && !s.NotOffered && !s.Paused && (s.Account.Account == chat.Account || s.short >= cfg.NewShort)
 		if ok {
 			eligible = append(eligible, s)
 		}
-		trace = append(trace, Candidate{Auth: s.Auth, Account: s.Account.Account, Budgets: s.Budgets, Known: s.known, Pace: s.pace, Eligible: ok})
+		c := Candidate{Auth: s.Auth, Account: s.Account.Account, Budgets: s.Budgets, Known: s.known, Pace: s.pace, Eligible: ok, Paused: s.Paused}
+		if s.NotOffered {
+			c.Offered = new(bool)
+		}
+		trace = append(trace, c)
 	}
-	forced := chat.Account != "" && (current == nil || current.hard)
+	forced := chat.Account != "" && (current == nil || current.hard || current.NotOffered)
 	if chat.Warm && current != nil && !forced {
 		return chosen(*current, Warm, false, trace)
 	}
+	unoffered := chat.Warm && current != nil && current.NotOffered && current.known && !current.hard
 	if len(eligible) == 0 {
 		reason := NoEligible
 		if !anyKnown {
 			reason = NoUsableData
 		}
-		return Decision{Reason: reason, Forced: forced, Candidates: trace}
+		return Decision{Reason: reason, Forced: forced, Unoffered: unoffered, Candidates: trace}
 	}
 	best := 0.0
 	for _, s := range eligible {
@@ -151,7 +171,9 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 	choice := band[0]
 	switch {
 	case forced:
-		return chosen(choice, ForcedMove, true, trace)
+		d := chosen(choice, ForcedMove, true, trace)
+		d.Unoffered = unoffered
+		return d
 	case chat.Account == "":
 		return chosen(choice, NewChat, false, trace)
 	case choice.Account.Account == chat.Account:

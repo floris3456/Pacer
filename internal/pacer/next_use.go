@@ -53,10 +53,13 @@ func (p *Plugin) rememberPreviewLocked(key string, input routingPreviewInput) {
 }
 
 // Called under p.mu by both the scheduler and the read-only preview: the same
-// meter inputs for both paths.
-func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) ([]routing.Account, []credential) {
+// meter inputs for both paths. chatAccount, when CPA did not offer it, is added
+// as not offered so routing can tell a briefly unavailable account from one
+// that cannot serve.
+func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, chatAccount string) ([]routing.Account, []credential) {
 	accounts := []routing.Account{}
 	candidates := []credential{}
+	offered := false
 	for _, id := range input.Candidates {
 		c, ok := p.creds[id]
 		if !ok || c.Provider != input.Provider {
@@ -67,17 +70,30 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) (
 		if err != nil {
 			continue
 		}
-		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now)})
+		offered = offered || c.Account == chatAccount
+		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), Paused: p.settings.paused(c.Account)})
+	}
+	if chatAccount != "" && !offered {
+		var own *credential
+		for _, c := range p.creds {
+			if c.Account == chatAccount && c.Provider == input.Provider && (own == nil || c.ID < own.ID) {
+				c := c
+				own = &c
+			}
+		}
+		if own != nil {
+			if windows, err := p.observer.ReadWindows(own.Account); err == nil {
+				accounts = append(accounts, routing.Account{Auth: own.ID, Account: own.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), NotOffered: true, Paused: p.settings.paused(own.Account)})
+			}
+		}
 	}
 	return accounts, candidates
 }
 
-// unknownWarmth is how long a chat without confirmed cache activity counts as
-// warm after its last primary request: the longest Claude cache TTL.
-const unknownWarmth = time.Hour
-
-// warm reports whether the chat's prompt cache may still be warm on its account.
-func warm(b tracker.Binding, active bool, now time.Time) bool {
+// warm reports whether the chat's prompt cache may still be warm on its
+// account: a request is running, cache evidence protects it, or (without
+// evidence) its last request is within the warm time setting.
+func warm(b tracker.Binding, active bool, now time.Time, unknownWarmth time.Duration) bool {
 	return active || now.Before(b.ProtectedUntil) || (b.UnknownWarmth && now.Before(b.LastUsed.Add(unknownWarmth)))
 }
 
@@ -108,10 +124,11 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	if err != nil || current.Key == "" {
 		return view
 	}
-	accounts, candidates := p.routingInputsLocked(input, now)
-	d := routing.Pick(routing.Default(), now, routing.Chat{Account: current.Account, Warm: warm(current, active, now)}, accounts)
+	accounts, candidates := p.routingInputsLocked(input, now, current.Account)
+	d := routing.Pick(p.settings.routing(), now, routing.Chat{Account: current.Account, Warm: warm(current, active, now, p.settings.warmFor())}, accounts)
 	view.Reason = d.Reason
-	if !d.Handled || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
+	// An unoffered but usable account is waited for (transient retries), not left.
+	if !d.Handled || (d.Unoffered && p.settings.TransientRetries > 0) || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
 		return view
 	}
 	for _, c := range candidates {

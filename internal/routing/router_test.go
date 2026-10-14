@@ -89,6 +89,46 @@ func TestForcedMovesLeaveAccountsAtTheirFloorOrNotOffered(t *testing.T) {
 	}
 }
 
+func TestUnofferedWarmAccountWithUsableMetersIsReported(t *testing.T) {
+	high := claude("high", short(80, 3*time.Hour), weekly(80, 96*time.Hour))
+	jan := claude("jan", short(96, 3*time.Hour), weekly(77, 150*time.Hour))
+	jan.NotOffered = true
+	d := pick(Chat{Account: "acct-jan", Warm: true}, jan, high)
+	want(t, d, "high", ForcedMove, true)
+	if !d.Unoffered || len(d.Candidates) != 2 || d.Candidates[0].Eligible || d.Candidates[0].Offered == nil || *d.Candidates[0].Offered {
+		t.Fatalf("unoffered usable account: %+v", d)
+	}
+	// A cold chat, or an account at its floor, is simply moved.
+	if d := pick(Chat{Account: "acct-jan"}, jan, high); d.Unoffered || d.Reason != ForcedMove {
+		t.Fatalf("cold: %+v", d)
+	}
+	floor := jan
+	floor.Budgets = []Budget{short(2, time.Hour), weekly(77, 150*time.Hour)}
+	if d := pick(Chat{Account: "acct-jan", Warm: true}, floor, high); d.Unoffered {
+		t.Fatalf("floor: %+v", d)
+	}
+	// Never chosen, even as the only account.
+	if d := pick(Chat{Account: "acct-jan", Warm: true}, jan); d.Handled || !d.Unoffered || d.Reason != NoUsableData {
+		t.Fatalf("alone: %+v", d)
+	}
+	// The offered entry wins over a not-offered alias of the same account.
+	offered := claude("jan2", short(96, 3*time.Hour), weekly(77, 150*time.Hour))
+	offered.Account = "acct-jan"
+	want(t, pick(Chat{Account: "acct-jan", Warm: true}, jan, offered, high), "jan2", Warm, false)
+}
+
+func TestPausedAccountsKeepWarmChatsOnly(t *testing.T) {
+	best := claude("best", short(80, 3*time.Hour), weekly(13, 7*time.Hour))
+	other := claude("other", short(80, 3*time.Hour), weekly(60, 96*time.Hour))
+	best.Paused = true
+	want(t, pick(Chat{}, best, other), "other", NewChat, false)
+	want(t, pick(Chat{Account: "acct-best", Warm: true}, best, other), "best", Warm, false)
+	want(t, pick(Chat{Account: "acct-best"}, best, other), "other", ColdMove, false)
+	if d := pick(Chat{}, best); d.Handled || d.Reason != NoEligible || !d.Candidates[0].Paused {
+		t.Fatalf("all paused: %+v", d)
+	}
+}
+
 func TestNewPlacementsNeedFifteenPercentOfTheShortWindow(t *testing.T) {
 	expiring := claude("exp", short(14, 3*time.Hour), weekly(50, 10*time.Hour))
 	other := claude("other", short(15, 3*time.Hour), weekly(50, 96*time.Hour))
