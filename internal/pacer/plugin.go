@@ -550,6 +550,11 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		}
 		p.chats.Complete(req.RequestID)
 		p.mu.Lock()
+		// A request that succeeded ends its chat's transient strikes. Admission
+		// alone does not: it precedes the upstream call that may fail again.
+		if t := p.requests[req.RequestID]; req.Outcome == pluginapi.RequestCompletionSucceeded && t.Key != "" {
+			delete(p.strikes, t.Key)
+		}
 		delete(p.requests, req.RequestID)
 		delete(p.selections, req.RequestID)
 		p.mu.Unlock()
@@ -710,7 +715,8 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 }
 
 // TransientWait: a warm chat's account was left out although its meters can
-// serve; the request is refused as retryable (503) instead of moving the chat.
+// serve; the request ends with a retryable error instead of moving the chat
+// (CPA answers with the upstream error that left it out, else 503).
 const TransientWait = "transient_wait"
 
 type strike struct {
@@ -719,8 +725,8 @@ type strike struct {
 }
 
 // holdLocked counts one refusal for the chat while it is under the retry
-// setting. Strikes expire transientWindow after the first, and end when the
-// chat is admitted on its own account again.
+// setting. Strikes expire transientWindow after the first, and end when a
+// request of the chat succeeds.
 func (p *Plugin) holdLocked(key string, now time.Time, limit int) bool {
 	if limit <= 0 {
 		return false
@@ -799,7 +805,6 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			p.mu.Lock()
 			t.Key, t.Auth, t.Binding = key, auth, b
 			p.requests[req.RequestID] = t
-			delete(p.strikes, key) // admitted: on its own account again, or moved
 			p.mu.Unlock()
 			p.recordDecision(req.RequestID, t, c, "admitted")
 		}

@@ -66,7 +66,7 @@ class State:
             self.accounts[name] = {"generation": 0, "five_hour": 10, "seven_day": 20,
                                    "five_hour_reset": now + 18000, "seven_day_reset": now + 604800,
                                    "partial_window": True, "armed": False, "holding": 0,
-                                   "release": threading.Event()}
+                                   "release": threading.Event(), "fail": 0}
             self.access[access_token(name)] = (name, 0)
             self.refresh[refresh_token(name)] = (name, 0)
         short, long = original_resets or (now + 18000, now + 604800)
@@ -139,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
         if raw is None:
             return None
         # The body is drained first: refusing unread bytes would reset the connection.
-        if path not in PROVIDER_PATHS and not (self.server.control and path in ("/_test/usage", "/_test/hold", "/_test/release")):
+        if path not in PROVIDER_PATHS and not (self.server.control and path in ("/_test/usage", "/_test/hold", "/_test/release", "/_test/fail")):
             return self.reply(404, {"error": "not_found"})
         body = self.parse_body(raw)
         if body is None:
@@ -152,7 +152,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.set_usage(body)
         if path in ("/_test/hold", "/_test/release"):
             return self.hold(path, body)
+        if path == "/_test/fail":
+            return self.set_fail(body)
         return self.reply(405, {"error": "method_not_allowed"})
+
+    def set_fail(self, body):
+        """The account's next `count` messages fail like a Cloudflare 502."""
+        account, count = body.get("account"), body.get("count")
+        if set(body) != {"account", "count"} or account not in ACCOUNTS or not is_int(count) or not 0 <= count <= 100:
+            return self.reply(400, {"error": "invalid_fixture_fail"})
+        with self.state.lock:
+            self.state.accounts[account]["fail"] = count
+            self.state.log.append({"at": time.time(), "path": "/_test/fail", "account": account, "status": 200})
+        return self.reply(200, {"account": account, "fail": count})
 
     def read_body(self):
         try:
@@ -261,6 +273,16 @@ class Handler(BaseHTTPRequestHandler):
         with state.lock:
             self.note_token(account, generation)
             a = state.accounts[account]
+            if a["fail"] > 0:
+                a["fail"] -= 1
+                state.record("/v1/messages", account, 502)
+                page = b"<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>cloudflare</center></body></html>"
+                self.send_response(502)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+                return None
             state.sequence += 1
             request_id = "req_capacity_%s_%06d" % (account[4:], state.sequence)
             if not a["five_hour_reset"]:

@@ -139,3 +139,10 @@ tests/lab/pace-lab.sh up <CLIProxyAPI> dist/linux_<arch>/pacer-v$(cat VERSION).s
 tests/lab/pace-lab.sh check
 tests/lab/pace-lab.sh down
 ```
+
+The pace lab also checks the warm-chat wait: the fixture's `/_test/fail` makes an
+account's next messages answer a Cloudflare 502, as on 2026-10-14 in production.
+
+`check-settings.mjs` checks the Pacer page's settings in Chromium against a stub (as
+`check-management.mjs` does), e.g. in `mcr.microsoft.com/playwright:v1.63.0-noble` with
+Playwright under `/b/node_modules`.

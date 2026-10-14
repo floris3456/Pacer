@@ -55,6 +55,11 @@ def meters(account, five, five_reset, weekly, weekly_reset):
     assert status == 200, body
 
 
+def fail(account, count):
+    status, body = call(FIXTURE + "/_test/fail", "POST", {"account": account, "count": count})
+    assert status == 200, body
+
+
 def read_meters(expect, changed):
     """Queue a meter read of the changed accounts and wait until every account shows
     the expected 7-day % left and 5-hour state."""
@@ -112,6 +117,26 @@ def main():
     check("decision trace records every candidate's pace and meters", d and len(d["proposed"]["candidates"]) == 3 and all(c["known"] and c["budgets"] for c in d["proposed"]["candidates"]), d and d["proposed"]["candidates"])
     status, served, d = chat(run + "1")
     check("warm chat stays (unknown warmth, within 1 h)", status == 200 and served == ["cap-a"] and d["proposed"]["reason"] == "warm", {"served": served, "decision": d and d["proposed"]})
+    # One upstream 502 on the warm chat's account: CPA retries the request without
+    # it; Pacer refuses that retry instead of moving the chat, so the client gets
+    # the (retryable) upstream error and its own retry lands on the same account.
+    fail("cap-a", 1)
+    status, served, d = chat(run + "1")
+    check("upstream 502 on a warm chat: retryable error, no move", status in (502, 503) and served == ["cap-a"] and d["outcome"] == "transient_wait" and d["proposed"]["unoffered"], {"status": status, "served": served, "decision": d})
+    status, served, d = chat(run + "1")
+    check("the client's retry stays on the warm account", status == 200 and served == ["cap-a"] and d["proposed"]["reason"] == "warm", {"status": status, "served": served, "decision": d and d["proposed"]})
+    # Past the retry setting the chat moves.
+    status, body = call(CPA + "/v0/management/plugins/pacer/settings", "PATCH", {"transient_retries": 1}, key=ADMIN)
+    check("settings saved through management", status == 200 and body["settings"]["transient_retries"] == 1 and "transient_retries" in body["changed"], body)
+    status, served, d = chat(run + "outage")  # a second warm chat on cap-a
+    placed = status == 200 and served == ["cap-a"]
+    fail("cap-a", 5)
+    status, served, d = chat(run + "outage")
+    held = status in (502, 503) and d["outcome"] == "transient_wait"
+    status, served, d = chat(run + "outage")
+    check("a lasting failure moves the warm chat after the retries", placed and held and status == 200 and "cap-a" in served and len(served) == 2 and d["proposed"]["reason"] == "forced_move" and d["actual_auth"] != "cap-a.json", {"placed": placed, "held": held, "status": status, "served": served, "decision": d and d["proposed"]})
+    fail("cap-a", 0)
+    call(CPA + "/v0/management/plugins/pacer/settings", "PATCH", {"transient_retries": 3, "compaction_models": ["claude-sonnet-4-6", "claude-haiku-lab"]}, key=ADMIN)
     # cap-a's 5-hour window is used up. Its next reply carries the meters in its
     # headers (Pacer reads an account's meter at most every 15 minutes).
     meters("cap-a", 99, now + 2 * 3600, 88, now + 7 * 3600)
@@ -131,7 +156,7 @@ def main():
     status, body, served, d = claim_chat(run + "claim", "c1", "r2")
     check("claim chat stays while warm; reply headers bring cap-b to its floor", status == 200 and served == ["cap-b"] and d["proposed"]["reason"] == "warm", {"served": served, "decision": d["proposed"]})
     status, body, served, d = claim_chat(run + "claim", "c1", "r3")
-    check("forced move asks the client to compact first", status == 409 and "quota_compact_required" in json.dumps(body) and served == [] and d["proposed"]["reason"] == "forced_move", {"status": status, "body": body, "served": served})
+    check("forced move asks the client to compact first, naming the summary models", status == 409 and isinstance(body, dict) and body["error"]["code"] == "quota_compact_required" and body["error"].get("compaction_models") == ["claude-sonnet-4-6", "claude-haiku-lab"] and served == [] and d["proposed"]["reason"] == "forced_move", {"status": status, "body": body, "served": served})
     status, body, served, d = claim_chat(run + "claim", "c2", "r4")
     check("compacted chat continues on the new account", status == 200 and served == ["cap-c"] and d["actual_auth"] == "cap-c.json", {"status": status, "served": served, "decision": d["proposed"]})
     status, body = call(CPA + "/v0/management/plugins/pacer/routing", "PATCH", {"mode": "off"}, key=ADMIN)

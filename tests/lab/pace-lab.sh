@@ -42,6 +42,7 @@ up)
 	access: {api-keys: ["pacer-test-inference"]}
 	oauth: {auth-dir: "/lab/auths"}
 	routing: {strategy: fill-first, session-affinity: true, session-affinity-ttl: 24h}
+	transient-error-cooldown-seconds: -1 # as on CT104: one 5xx does not cool an account down
 	plugins:
 	  enabled: true
 	  dir: "/lab/plugins"

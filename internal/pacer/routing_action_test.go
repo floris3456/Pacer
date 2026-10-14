@@ -627,8 +627,39 @@ func TestWarmChatWaitsForItsBrieflyUnavailableAccount(t *testing.T) {
 	if got := f2.pick(t, r, "a", "b"); got.AuthID != "a" {
 		t.Fatal(got)
 	}
-	if after := f2.after(t, r, "a"); after.Terminate || len(f2.p.strikes) != 0 || f2.binding(t).Account != f2.p.creds["a"].Account {
-		t.Fatal("blip moved the chat or kept strikes", string(after.ResponseBody))
+	if after := f2.after(t, r, "a"); after.Terminate || f2.binding(t).Account != f2.p.creds["a"].Account {
+		t.Fatal("blip moved the chat", string(after.ResponseBody))
+	}
+	// Admission precedes the upstream call: only a succeeded request ends strikes.
+	if len(f2.p.strikes) != 1 {
+		t.Fatal("admission cleared strikes")
+	}
+	f2.complete(t, r.RequestID)
+	if len(f2.p.strikes) != 0 {
+		t.Fatal("success kept strikes")
+	}
+
+	// A lasting outage: every attempt on a is admitted, then fails upstream.
+	f3 := newRoutingFixture(t, "on")
+	f3.seed(t, time.Hour)
+	s := f3.p.settings
+	s.TransientRetries = 1
+	if err := f3.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"hold", "move"} {
+		r := f3.before(t, "outage-"+want, "claude-opus-5-5")
+		if got := f3.pick(t, r, "a", "b"); got.AuthID != "a" {
+			t.Fatal(i, got)
+		}
+		if after := f3.after(t, r, "a"); after.Terminate {
+			t.Fatal(string(after.ResponseBody))
+		}
+		got := f3.pick(t, r, "b") // a's upstream answered 502
+		if (want == "hold") != got.Reject || (want == "move" && got.AuthID != "b") {
+			t.Fatal(want, got)
+		}
+		invoke(t, f3.p, pluginabi.MethodRequestComplete, pluginapi.RequestCompletion{RequestID: r.RequestID, Outcome: pluginapi.RequestCompletionFailed})
 	}
 }
 
