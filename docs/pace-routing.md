@@ -93,8 +93,17 @@ Pinning warm chats also stops CPA from moving them.
 
 ## Changes
 
-1. Routing inputs: a dormant 5-hour window is known, with 100 % left (`observation.go:23`).
-   (The usage page and measurement store drop the same readings; that fix is separate.)
+1. Dormant windows. Routing treats a dormant window as known, with 100 % left (`observation.go:23`).
+   The usage page (`usage_live.go:126`) and the measurement store (`measurement.go:255`) keep the
+   reading as 100 % left without a reset, and the measurement store closes the previous cycle.
+   - Codex: a meter-read (API) window with 0 % used whose reset is within 10 s of read time + window
+     length has not started. Codex reports it as resetting one full window after each read; the
+     27 such reads on CT104 were 0.1 s from that, while started windows were at least 52 min away.
+     The parser stores it as dormant, like Claude's `resets_at: null`, keeping the reported reset in
+     the status evidence. Response headers and stream events never qualify: a request starts the
+     window, and its first minute also reads 0 % used. A window that started within 10 s of a read is
+     briefly dormant until the next reading. Stored history is not rewritten.
+   - A cycle replaced by a dormant reading is retired, as on any other cycle change.
 2. `internal/routing`: replace `Pick` and its scoring with the rule above. Remove `Size`, `ShortValue`,
    `WarmBurn`, `RunwayUnknown`, `MoveMargin` and the fallback ladder.
 3. Warmth: with unknown warmth, a chat is cold 1 h after its last primary request.
@@ -118,6 +127,4 @@ Pinning warm chats also stops CPA from moving them.
 - The band (90 %) and the new-placement minimum (15 %) are accepted starting values.
 - Codex: the rule applies unchanged (only its 7-day window exists, so the 5-hour conditions are
   skipped), but with one Codex account there is nothing to choose. It is worth enabling once a second
-  account exists. Codex reports a window that has not started as 100 % left with its reset 7 days after
-  each read, so every idle read opens a new cycle. That pollutes cycle history and reports, not routing:
-  an unstarted window has no deadline, and its low pace is correct. Treat it as dormant, like Claude.
+  account exists. Its idle-window reads become dormant (change 1).
