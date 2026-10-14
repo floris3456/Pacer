@@ -135,6 +135,17 @@ Pinning warm chats also stops CPA from moving them.
 - Pacer reads an account's meter at most every 15 minutes; between reads, reply headers keep a used
   account current, and dormant windows are read every 30 minutes while idle.
 - Lab: `tests/lab/pace-lab.sh` and `check-pace.py` run the example above through a real CPA host.
+- Warm chats and upstream errors (2026-10-14, production): a Cloudflare 502 on a warm chat's account
+  made CPA retry the request without that account, which Pacer read as "cannot serve" and forced a
+  move with compaction. Now the chat's own account is passed to routing as not offered; when its
+  meters can serve, Pacer ends the request with the retryable error (`transient_wait`) up to
+  `transient_retries` times within 2 minutes, then moves the chat. CPA's
+  `transient-error-cooldown-seconds: -1` keeps one 5xx from cooling the account for a minute, so the
+  client's retry finds it.
+- Settings on the Pacer page (`PATCH /plugins/pacer/settings`), each kept until its YAML seed changes:
+  compact on switch, summary models (sent in order with the 409 as `compaction_models`; OpenCodePlus
+  uses them for the switch summary), equal pace band, new-chat minimum, 5-hour and 7-day floors, warm
+  minutes, transient retries, providers, accounts paused for new chats.
 
 ## Not planned
 
