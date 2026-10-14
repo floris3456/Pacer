@@ -115,44 +115,6 @@ Pinning warm chats also stops CPA from moving them.
    the activation gates. Remove the dry-run report, evidence ledger and mode marks as a separate cleanup.
 6. Decision trace: record each candidate's pace and meters.
 
-## Keep windows running
-
-Most windows start their countdown at the first request after a reset. Measured on CT104: Claude 5-hour,
-Codex 7-day, Antigravity 5-hour and 7-day (Gemini and Claude/GPT pools), OpenCode Go 5-hour. Claude 7-day
-and OpenCode Go weekly/monthly run on a fixed schedule. An idle, unstarted window loses time: its next
-reset comes as much later as the window stayed unstarted (on 2026-10-11 Codex sat unstarted from
-03:59 to 09:34, so its weekly reset moved 5.5 hours later). Capacity is not prorated, so starting a window as soon as it resets never costs quota.
-At worst an unused window expires, as it would anyway.
-
-When Pacer reads a window as dormant, it sends one minimal request on that credential:
-
-- **Transport**: `host.model.execute` with `auth_id` (CPA locks execution to that credential),
-  `forced_provider`, `stream: false`. CPA handles token refresh and provider specifics. On Claude
-  OAuth it adds only its one-line Claude Code identity and billing header. The host skips Pacer's own
-  router and interceptor, so no chat, binding, routing decision or usage-ledger request is created.
-- **Request**: the user message `Reply with ok`, no system prompt, no tools, thinking off, the provider's
-  minimum output cap. The model is set per provider and pool (the cheapest model in that pool, for
-  example Claude Haiku). It must be in CPA's model catalogue; otherwise the pool is skipped and logged.
-- **Result**: Claude and Codex reply headers carry the new window; Pacer observes them as an ordinary
-  reading. For Antigravity and OpenCode Go, Pacer queues an immediate meter read.
-
-Conditions:
-
-1. The window is dormant (change 1), from a Pacer meter read. Deadline reads run 30–90 s after a known
-   reset; idle reads every 30 min catch early resets.
-2. The credential is enabled, not cooling down, and no other window of the same pool is exhausted (a
-   refused request starts nothing).
-3. One request per dormant window. If a successful request leaves the window dormant, that provider/pool
-   is not started this way again until restart, and it is logged. A failed request is retried at the
-   next idle read, at most 3 times per window.
-
-Setting: `keep_windows_running` (YAML and management, live), a list of providers; empty means off. It is
-independent of `routing.mode`. Each attempt is recorded with credential, pool, model, status and the
-reading that followed. With every window started immediately, pace routing's tie-break on the earliest
-5-hour reset picks the window that expires first.
-
-These are automated requests on subscription accounts, so the provider sees a request at every reset.
-
 ## Verification
 
 - Unit tests for the rule: pace order, band tie-breaks, dormant windows, floors, the new-placement
@@ -160,10 +122,12 @@ These are automated requests on subscription accounts, so the provider sees a re
 - `Plugin.Handle` tests: a warm chat is pinned; unknown warmth stays pinned until 1 h; a
   different-model compaction is routed; a same-model compaction is pinned; the first primary after
   compaction is routed; a forced move keeps the 409 contract; `off` returns `Handled:false`.
-- Keep-alive tests: dormant → one request with `auth_id`; started window, header source, cooldown,
-  exhausted sibling window, unknown model, or setting off → none; still dormant after success → pool stopped.
-- Isolated lab run (`tests/lab/`) before deployment; afterwards, the 7-day % left at each reset and,
-  per keep-alive, the time from reset to a started window.
+- Isolated lab run (`tests/lab/`) before deployment; afterwards, the 7-day % left at each reset.
+
+## Not planned
+
+- Keep-alive requests that start a window as soon as it resets: rejected by the owner, because they
+  add an automated request pattern to subscription accounts.
 
 ## Open points
 
