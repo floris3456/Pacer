@@ -141,7 +141,7 @@ func (p *Plugin) startDormantWindows() {
 		}
 		p.usageChanges.notify()
 		if err := p.captureUsageCredential(pluginapi.QuotaWindowStartRequestID(op.ID), c); err != nil {
-			p.metricError(p.windowStarts.Finish(c.Account, now, p.now(), false, 0))
+			p.metricError(p.windowStarts.Finish(c.Account, now, p.now(), windowstart.Result{}))
 			_, _ = p.Host("host.http.cancel", map[string]string{"operation_id": op.ID})
 			p.usageChanges.notify()
 			return
@@ -175,17 +175,27 @@ func (p *Plugin) executeWindowStart(c credential, model, operation string, start
 		StatusCode *int  `json:"status_code"`
 	}
 	// Any malformed/failed callback might already have sent bytes. Do not retry.
-	dispatched, status := true, 0
+	result := windowstart.Result{Dispatched: true}
 	if err == nil && len(raw) <= 64<<10 && json.Unmarshal(raw, &evidence) == nil && evidence.Version == 1 && evidence.Dispatched != nil && evidence.StatusCode != nil &&
 		json.Unmarshal(raw, &response) == nil && (response.StatusCode == 0 || response.StatusCode >= 100 && response.StatusCode <= 599) && (response.Dispatched || response.StatusCode < 200 || response.StatusCode >= 300) {
-		dispatched, status = response.Dispatched, response.StatusCode
-		if dispatched && status >= 200 && status < 300 {
+		result.Dispatched, result.HTTPStatus = response.Dispatched, response.StatusCode
+		result.RetryAfter = response.Headers.Get("Retry-After")
+		// Diagnostics are a finite vocabulary, never arbitrary provider text.
+		switch response.Reason {
+		case "invalid_request", "unsupported_runtime", "credential_unavailable", "cancelled", "upstream_error", "response_incomplete",
+			"http_rate_limited", "rate_limit_error", "spend_limit_reached", "authentication_error", "permission_error", "invalid_request_error", "not_found_error", "overloaded_error", "api_error":
+			result.Reason = response.Reason
+		}
+		if result.HTTPStatus == 429 && (result.Reason == "" || result.Reason == "upstream_error" || result.Reason == "response_incomplete") {
+			result.Reason = "http_rate_limited"
+		}
+		if result.Dispatched && result.HTTPStatus >= 200 && result.HTTPStatus < 300 {
 			// A credential ID may be re-used by discovery while this request runs.
 			// The response belongs to the captured billing account, not its replacement.
 			p.storeObservations(c, observation.Headers(c.Provider, response.Headers, p.now()))
 		}
 	}
-	p.metricError(p.windowStarts.Finish(c.Account, started, p.now(), dispatched, status))
+	p.metricError(p.windowStarts.Finish(c.Account, started, p.now(), result))
 	// Preserve the observer's shared endpoint pacing and Retry-After budgets.
 	p.metricError(p.observer.Queue(c.Account, observation.Endpoint(c.Provider), observation.ReasonManual, time.Time{}))
 	p.usageChanges.notify()
@@ -214,6 +224,7 @@ func (p *Plugin) windowStartView(c credential) map[string]any {
 		return view
 	}
 	view["state"] = a.State
+	view["max_attempts"] = windowstart.MaxAttempts
 	if !a.Started.IsZero() {
 		view["attempt"] = a
 	}
@@ -224,11 +235,17 @@ func (p *Plugin) windowStartView(c credential) map[string]any {
 		view["reason"] = "provider_confirmation_required"
 		return view
 	}
+	if a.State == "blocked" {
+		view["reason"] = a.Reason
+		return view
+	}
 	windows, err := p.observer.ReadWindows(c.Account)
 	if err != nil {
 		view["reason"] = "fresh_quota_required"
 	} else if reason := windowstart.Eligible(windows, p.readCredits(c.Account), model, p.now()); reason != "" {
 		view["reason"] = reason
+	} else if a.State == "retry_wait" {
+		view["reason"] = a.Reason
 	}
 	return view
 }

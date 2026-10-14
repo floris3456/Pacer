@@ -49,9 +49,19 @@ requires an idle reload. Never delete or roll back its private
 - A successful HTTP response is **not** proof of a started timer. Only a newer,
   absolute provider reset confirms it. The existing quota UI displays that real
   reset; no five-hour deadline is fabricated.
-- Ambiguous errors and interrupted dispatches remain unconfirmed. Another
-  request requires observing an active window, its expiration, then fresh
-  dormant evidence. Only a proven non-dispatch may retry after 15 minutes.
+- A received HTTP429 is a refusal, including when its error body is truncated.
+  It may retry after 15 minutes, then 30 minutes; a longer `Retry-After` always
+  wins. An explicit provider spend-cap error blocks retries. Proven non-dispatch
+  follows the same schedule. Each verified billing account has a durable budget
+  of three attempts per five hours; the global 30-second spacing still applies.
+  Every retry requires eligible dormant evidence newer than the previous finish.
+- Ambiguous network errors, interrupted dispatches without a response, HTTP5xx
+  and successful responses without timer confirmation remain fenced. Time alone
+  never authorizes their replay. A new start requires observing an active window,
+  its expiration, then fresh dormant evidence.
+- On upgrade, completed legacy HTTP429 attempts become retryable without
+  deleting their original timestamps or budget. Already confirmed attempts are
+  unchanged. The server persists bounded diagnostic codes, never response bodies.
 - Ordinary quota polling retains its shared pacing and provider backoff. This
   feature does not create a separate aggressive quota-polling loop. Detection
   therefore follows the existing poll schedule, not an exact reset-time alarm.
@@ -60,6 +70,11 @@ The authenticated usage API adds `quota_window_start` to each already-authorized
 account row, including state and the last attempt. Management quota reads expose
 the same status. Clients cannot trigger a start. Feature discovery advertises
 `claude_quota_window_start` independently of cache keepalive.
+
+Clients can display the retry deadline and attempt budget separately from the
+provider reset. For example, `Start: Retry in 15m · 429` describes a refused start,
+not a running five-hour window. A retry deadline is a minimum: fresh quota and
+the other dispatch conditions are still required when it expires.
 
 ## Provider scope
 

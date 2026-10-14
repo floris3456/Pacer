@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise automatic quota starts through actual CPA + Pacer binaries.
 
-Usage: native-window-start.py CPA_BINARY PACER_SO PACER_STATE_BINARY
+Usage: native-window-start.py CPA_BINARY PACER_SO PACER_STATE_BINARY [--retry]
 Only synthetic credentials and a nonforwarding local provider are used.
 Quota evidence is seeded offline; each boot exercises the real 30-second worker.
 """
@@ -59,6 +59,19 @@ class Handler(native.FixtureHandler):
         with self.server.lock:
             self.server.attempts.append({"token": token, "body": body,
                 "private_headers": [k for k in self.headers if k.lower().startswith("x-pacer-")]})
+            attempt = len(self.server.attempts)
+        if getattr(self.server, "retry_case", False) and attempt == 1:
+            # Authoritative 429 headers survive an interrupted error body.
+            data = b'{"type":"error"'
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data) + 100))
+            self.send_header("Retry-After", "001800")
+            self.end_headers()
+            self.wfile.write(data)
+            self.wfile.flush()
+            self.close_connection = True
+            return
         data = json.dumps({"id": "msg_window_fixture", "type": "message", "role": "assistant",
             "model": MODEL, "content": [{"type": "text", "text": "."}], "stop_reason": "max_tokens",
             "usage": {"input_tokens": 9, "output_tokens": 1,
@@ -100,9 +113,10 @@ def seed(work):
 
 
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5) or (len(sys.argv) == 5 and sys.argv[4] != "--retry"):
         raise SystemExit(__doc__)
-    binary, plugin, initializer = [pathlib.Path(p).resolve() for p in sys.argv[1:]]
+    retry_case = len(sys.argv) == 5
+    binary, plugin, initializer = [pathlib.Path(p).resolve() for p in sys.argv[1:4]]
     check(all(p.is_file() for p in (binary, plugin, initializer)), "missing test artifact")
     root = pathlib.Path(tempfile.mkdtemp(prefix="pacer-native-window-start-"))
     print("Evidence: " + str(root), flush=True)
@@ -124,6 +138,7 @@ def main():
     tls.load_cert_chain(work / "fixture.crt", work / "fixture.key")
     native.FixtureHandler = Handler
     fixture = native.Fixture(tls)
+    fixture.retry_case = retry_case
     threading.Thread(target=fixture.serve_forever, daemon=True).start()
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[name] = fixture.base
@@ -158,14 +173,22 @@ def main():
 
     process = None
     try:
-        for boot in range(2):
+        boots = 4 if retry_case else 2
+        for boot in range(boots):
+            if retry_case and boot == 2:
+                # Advance only this stopped, disposable fixture's retry clock.
+                # Production ledgers are never edited to expedite a retry.
+                with sqlite3.connect(work / "pacer.sqlite.window-start.sqlite") as db:
+                    shift = 31 * 60 * 1_000_000_000
+                    db.execute("UPDATE quota_window_starts SET started=started-?,finished=finished-?,cycle_started=cycle_started-?,retry_at=retry_at-? WHERE state='retry_wait'", (shift, shift, shift, shift))
             seed(work)
             with (root / f"server-{boot}.log").open("w") as log:
                 process = subprocess.Popen([str(binary), "--config", str(work / "config.yaml"), "--local-model"],
                     cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT)
             # CPA loads OAuth files after registering plugins. The first tick
             # discovers them; the following tick can start the dormant account.
-            deadline = time.monotonic() + (75 if boot == 0 else 40)
+            expect_dispatch = boot == 0 or (retry_case and boot == 2)
+            deadline = time.monotonic() + (75 if expect_dispatch else 40)
             ready = False
             while time.monotonic() < deadline:
                 check(process.poll() is None, "fixture CPA exited")
@@ -173,17 +196,26 @@ def main():
                     view = usage()
                     (root / f"usage-{boot}.json").write_text(json.dumps(view, indent=2))
                     state = next(r for r in view["credentials"] if r["id"] == IDS[0])["quota_window_start"]["state"]
-                    ready = state == "confirmed"
-                    if ready and (boot == 0 or time.monotonic() > deadline - 10):
+                    ready = state == ("retry_wait" if retry_case and boot < 2 else "confirmed")
+                    if ready and (expect_dispatch or time.monotonic() > deadline - 10):
                         break
                 except (OSError, KeyError, StopIteration):
                     pass
                 threading.Event().wait(2)
-            check(ready, "worker never confirmed the provider reset")
+            check(ready, "worker did not reach the expected retry/confirmation state")
             with fixture.lock:
                 attempts = list(fixture.attempts)
-            check(len(attempts) == 1, "duplicate start, alias failover or paid-account dispatch")
-            one = attempts[0]
+            expected = 2 if retry_case and boot >= 2 else 1
+            check(len(attempts) == expected, "duplicate start, alias failover or paid-account dispatch")
+            starter = next(r for r in view["credentials"] if r["id"] == IDS[0])["quota_window_start"]
+            check(starter["attempt"]["attempts"] == expected, "attempt budget lost across restart")
+            if retry_case and boot < 2:
+                attempt = starter["attempt"]
+                check(attempt["http_status"] == 429 and attempt["reason"] == "http_rate_limited", "HTTP refusal diagnostic lost")
+                started = dt.datetime.fromisoformat(attempt["started"].replace("Z", "+00:00"))
+                retry = dt.datetime.fromisoformat(attempt["retry_at"].replace("Z", "+00:00"))
+                check((retry - started).total_seconds() >= 1800, "Retry-After was shortened")
+            one = attempts[-1]
             check(one["token"] == native.PROVIDERS[0], "starter used a different billing account")
             check(not one["private_headers"], "internal coordination leaked upstream")
             body = one["body"]
@@ -198,20 +230,20 @@ def main():
                 records = [json.loads(body) for body, in db.execute("SELECT body FROM measurement_records")]
                 captures = list(db.execute("SELECT request_id,auth FROM pacer_usage_credentials WHERE request_id LIKE 'pacer-window-start:%'"))
             starts = [body for body in records if body.get("request_id", "").startswith("pacer-window-start:")]
-            check(len(starts) == 1, "starter usage.handle was not accepted exactly once")
-            record = starts[0]
+            check(len(starts) == expected, "starter usage.handle was not accepted exactly once per attempt")
+            record = max(starts, key=lambda record: record["usage"].get("output", 0))
             check((record["request_id"], IDS[0]) in captures, "starter lacked immutable credential capture")
             check(record["attribution"]["account_id"] == account_key(UUIDS[0]) and not record["attribution"].get("session_id"), "starter usage has wrong account or user session")
             check(not record["policy"].get("kind") and not record["activity"]["primary_prefix"], "starter polluted managed cache accounting")
-            check(record["usage"]["output"] == 1 and record["usage"]["cache_create"] == 0, "starter usage counters missing")
+            check(record["usage"]["output"] == (0 if retry_case and boot < 2 else 1) and record["usage"]["cache_create"] == 0, "starter usage counters missing")
             (root / f"measurement-{boot}.json").write_text(json.dumps(starts, indent=2))
             (root / f"usage-{boot}.json").write_text(json.dumps(view, indent=2))
-            print("PASS " + ("automatic exact-account start and provider confirmation" if boot == 0 else "restart deduplication and scoped status"), flush=True)
+            print(f"PASS boot {boot}: {state}, {expected} attempts; exact-account, scoped status and isolated usage", flush=True)
             process.terminate()
             process.wait(timeout=15)
             process = None
-        (root / "result.json").write_text(json.dumps({"passed": True, "fakeProviderCalls": 1,
-            "realProviderCalls": 0, "boots": 2, "artifacts": {str(p): native.file_sha256(p) for p in (binary, plugin, initializer)}}, indent=2))
+        (root / "result.json").write_text(json.dumps({"passed": True, "fakeProviderCalls": 2 if retry_case else 1,
+            "realProviderCalls": 0, "boots": boots, "retryCase": retry_case, "artifacts": {str(p): native.file_sha256(p) for p in (binary, plugin, initializer)}}, indent=2))
     finally:
         with fixture.lock:
             (root / "attempts.json").write_text(json.dumps(fixture.attempts, indent=2))

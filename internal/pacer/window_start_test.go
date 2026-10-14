@@ -221,6 +221,60 @@ func TestWindowStartAmbiguousCallbackNeverClaimsNonDispatch(t *testing.T) {
 	}
 }
 
+func TestWindowStartRetriesReceived429WithFreshEvidenceAndHonorsSpendCaps(t *testing.T) {
+	for _, reason := range []string{"rate_limit_error", "response_incomplete", "spend_limit_reached"} {
+		t.Run(reason, func(t *testing.T) {
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			var calls int
+			p := windowPlugin(t, filepath.Join(t.TempDir(), "state.sqlite"), &clock, windowHost(func(pluginapi.HostQuotaWindowStartRequest) (json.RawMessage, error) {
+				calls++
+				return json.Marshal(pluginapi.HostQuotaWindowStartResponse{Version: 1, Dispatched: true, StatusCode: 429, Reason: reason, Headers: http.Header{"Retry-After": {"3600"}}})
+			}))
+			dormantSnapshot(t, p)
+			p.startDormantWindows()
+			a, err := p.windowStarts.Read(p.creds["one"].Account)
+			if err != nil || calls != 1 || a.HTTPStatus != 429 || a.Attempts != 1 {
+				t.Fatal(a, calls, err)
+			}
+			if reason == "spend_limit_reached" {
+				clock.Add(int64(24 * time.Hour))
+				dormantSnapshot(t, p)
+				p.startDormantWindows()
+				if calls != 1 || a.State != "blocked" || !a.RetryAt.IsZero() {
+					t.Fatal("spend cap retried", a, calls)
+				}
+				return
+			}
+			if a.State != "retry_wait" || a.RetryAt.Sub(a.Finished) != time.Hour {
+				t.Fatal("Retry-After was lost", a)
+			}
+			clock.Add(int64(time.Hour - time.Second))
+			dormantSnapshot(t, p)
+			p.startDormantWindows()
+			if calls != 1 {
+				t.Fatal("retried before deadline")
+			}
+			clock.Add(int64(windowstart.MaxEvidenceAge))
+			p.startDormantWindows()
+			if calls != 1 {
+				t.Fatal("retried with stale quota")
+			}
+			dormantSnapshot(t, p)
+			p.requests["active-alias"] = attempt{Auth: "two"}
+			p.startDormantWindows()
+			if calls != 1 {
+				t.Fatal("retried while an alias was busy")
+			}
+			delete(p.requests, "active-alias")
+			p.startDormantWindows()
+			if calls != 2 {
+				t.Fatal("did not retry with fresh eligible evidence", calls)
+			}
+		})
+	}
+}
+
 func TestWindowStartQuiesceCancelsPendingOperation(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixNano())

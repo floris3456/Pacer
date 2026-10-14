@@ -124,7 +124,7 @@ func TestThreeCallersAndAliasesShareOneDurableAttempt(t *testing.T) {
 func TestOnlyConfirmedExpiredWindowRearmsAnUncertainDispatch(t *testing.T) {
 	s, _ := openStore(t, filepath.Join(t.TempDir(), "windows.sqlite"))
 	claim(t, s, "account", epoch, true)
-	if err := s.Finish("account", epoch, epoch.Add(time.Second), true, 503); err != nil {
+	if err := s.Finish("account", epoch, epoch.Add(time.Second), Result{Dispatched: true, HTTPStatus: 503}); err != nil {
 		t.Fatal(err)
 	}
 	claim(t, s, "account", epoch.Add(6*time.Hour), false)
@@ -133,7 +133,7 @@ func TestOnlyConfirmedExpiredWindowRearmsAnUncertainDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Late failure cannot erase independently observed provider confirmation.
-	if err := s.Finish("account", epoch, epoch.Add(2*time.Minute), true, 500); err != nil {
+	if err := s.Finish("account", epoch, epoch.Add(2*time.Minute), Result{Dispatched: true, HTTPStatus: 500}); err != nil {
 		t.Fatal(err)
 	}
 	a, err := s.Read("account")
@@ -149,13 +149,13 @@ func TestOnlyConfirmedExpiredWindowRearmsAnUncertainDispatch(t *testing.T) {
 func TestNonDispatchRetryIsDelayedAndRequiresNewEvidence(t *testing.T) {
 	s, _ := openStore(t, filepath.Join(t.TempDir(), "windows.sqlite"))
 	claim(t, s, "account", epoch, true)
-	if err := s.Finish("account", epoch, epoch, false, 0); err != nil {
+	if err := s.Finish("account", epoch, epoch, Result{Dispatched: false, HTTPStatus: 0}); err != nil {
 		t.Fatal(err)
 	}
 	claim(t, s, "account", epoch.Add(time.Minute), false)
 	claim(t, s, "account", epoch.Add(RetryDelay), true)
 	// Successful response still needs provider reset evidence.
-	if err := s.Finish("account", epoch.Add(RetryDelay), epoch.Add(RetryDelay+time.Second), true, 200); err != nil {
+	if err := s.Finish("account", epoch.Add(RetryDelay), epoch.Add(RetryDelay+time.Second), Result{Dispatched: true, HTTPStatus: 200}); err != nil {
 		t.Fatal(err)
 	}
 	claim(t, s, "account", epoch.Add(24*time.Hour), false)
