@@ -14,7 +14,7 @@ def validate_state(state):
     assert source['account_membership_complete'] is False
     assert source['physical_carry_in_proven'] is False
     assert source['calls'] >= 2
-    assert state['routing']['can_activate'] is False
+    assert state['routing']['modes'] == ['off', 'on']
     assert len(state['accounts']) == 2
     for account in state['accounts']:
         report = account['measurement']

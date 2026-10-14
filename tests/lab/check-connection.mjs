@@ -23,7 +23,7 @@ const server = http.createServer((req, res) => {
   if (req.url === '/v0/management/plugins/pacer/state') {
     requests.push(req.headers);
     res.writeHead(authorized ? 200 : 401, {'Content-Type': 'application/json'});
-    res.end(JSON.stringify(authorized ? {routing: {mode: 'dry-run', can_activate: false}, accounts: []} : {}));
+    res.end(JSON.stringify(authorized ? {routing: {mode: 'off', modes: ['off', 'on']}, accounts: []} : {}));
     return;
   }
   res.writeHead(404).end();

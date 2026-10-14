@@ -29,7 +29,7 @@ const server=http.createServer(async(req,res)=>{
   let raw='';for await(const part of req)raw+=part;
   const body=raw?JSON.parse(raw):{};
   let data;
-  if(req.url.endsWith('/state'))data={routing:{mode:'dry-run',can_activate:false},accounts:[]};
+  if(req.url.endsWith('/state'))data={routing:{mode:'off',modes:['off','on']},accounts:[]};
   else if(req.url==='/v8/management/config/access/api-keys')data=['synthetic-secret-one','synthetic-secret-two'];
   else if(req.url.endsWith('/keys'))data={keys:[],groups:[],revision:0,editable:false};
   else if(req.url==='/v8/management/oauth/settings/models')data={models:[model],'thinking-levels':['low','medium','high','xhigh','max'],'channel-info':[{id:'claude',label:'Anthropic'}]};

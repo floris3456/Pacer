@@ -85,11 +85,13 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	now := p.now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	view := nextUseView{Version: 1, AtMS: now.UnixMilli(), ExpiresMS: now.Add(30 * time.Second).UnixMilli(), Mode: p.cfg.Routing.Mode, Provider: binding.Provider, Model: binding.Model, Reason: "unavailable"}
+	// Clients know the modes off, dry-run and active: routing on is "active".
+	view := nextUseView{Version: 1, AtMS: now.UnixMilli(), ExpiresMS: now.Add(30 * time.Second).UnixMilli(), Mode: "off", Provider: binding.Provider, Model: binding.Model, Reason: "unavailable"}
 	if !p.cfg.Enabled || p.cfg.Routing.Mode != "on" {
 		view.Reason = "routing_off"
 		return view
 	}
+	view.Mode = "active"
 	enabled := false
 	for _, provider := range p.cfg.Routing.Providers {
 		enabled = enabled || provider == binding.Provider

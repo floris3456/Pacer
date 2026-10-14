@@ -86,7 +86,7 @@ func TestNextUseReevaluatesColdCacheWithoutChangingBinding(t *testing.T) {
 	// No model request occurs: the next UI poll sees that cache protection ended.
 	f.clock.Add(int64(6 * time.Minute))
 	value := previewUsage(t, f)
-	if value.Auth != "b" || value.Reason != routing.ColdMove || value.Mode != "on" || value.Forced || value.ExpiresMS <= value.AtMS {
+	if value.Auth != "b" || value.Reason != routing.ColdMove || value.Mode != "active" || value.Forced || value.ExpiresMS <= value.AtMS {
 		t.Fatal(value)
 	}
 	if after := f.binding(t); after != before {

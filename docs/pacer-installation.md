@@ -117,6 +117,6 @@ never installs, restarts, promotes or publishes them. Use focused race tests for
 `routing`, `tracker`, and the relevant history/CLI tests. Native registration,
 authentication, final TTL and browser/TUI acceptance remain distinct checks.
 
-Active routing is unavailable in this candidate until the required observed dry-run
-period and integrated acceptance are actually completed. A fake clock is appropriate
-for unit tests, not a substitute for the 24–48-hour rollout observation.
+Routing is `off` or `on` (`routing.mode` in YAML, or `PATCH
+/v0/management/plugins/pacer/routing`, which persists). `off` restores CPA's own
+routing for the next request. The former `dry-run` mode reads as `off`.

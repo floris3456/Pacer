@@ -1,9 +1,8 @@
 # Pacer
 
 **Candidate implementation; not a production release.** The executable is
-`cmd/plugin` → `internal/pacer`. Current configuration accepts routing `off` or
-`dry-run`, never active routing before the integration and 24–48-hour observation
-gates. Per-chat Claude cache policy is independent of routing mode and requires
+`cmd/plugin` → `internal/pacer`. Routing is `off` (CPA routes) or `on` (pace
+routing, [docs/pace-routing.md](docs/pace-routing.md)). Per-chat Claude cache policy is independent of routing mode and requires
 the schema-7 CPA boundary, explicit durable-store initialization and a compatible
 client. Missing policy state never means empty history.
 
@@ -13,7 +12,7 @@ client. Missing policy state never means empty history.
 - [Passive observation](docs/observation-contract.md)
 - [Native usage and conservative measurement](internal/measurement/README.md)
 - [Capacity lower bound (never a known size)](docs/capacity-lower-bound.md)
-- [Daily dry-run report](docs/dry-run-report.md)
+- [Pace routing](docs/pace-routing.md)
 - [Frozen history preservation](docs/history-import.md)
 
 The `tests/lab/` scripts test an isolated CPA + fake TLS upstream, not real provider

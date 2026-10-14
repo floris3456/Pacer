@@ -1,7 +1,7 @@
 # Pace routing
 
-Status: **design**, branch `pace-routing`. Replaces the dry-run router (`internal/routing`) and its
-activation gates. By the owner's decision there is no dry-run phase: routing is `off` or `on`.
+Status: **implemented**, branch `pace-routing`. Replaced the dry-run router (`internal/routing`), its
+activation gates and the dry-run report. By the owner's decision there is no dry-run phase: routing is `off` or `on`.
 
 ## Goal
 

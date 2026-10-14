@@ -85,9 +85,6 @@ func (p *Plugin) observeCaptured(auth string, headers http.Header, captured map[
 
 func (p *Plugin) startWorker() {
 	p.workerOnce.Do(func() {
-		// Mode marks run apart from the loop below, so slow provider reads never
-		// leave a dry-run interval unproven.
-		p.startDryRunHeartbeat()
 		p.startUsageLive()
 		p.workerWait.Add(1)
 		go func() {

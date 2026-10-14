@@ -11,8 +11,7 @@ on a loopback host port. This tests actual CPA/native-plugin dispatch and browse
 authentication separately from source package tests. A fixture summary does not
 establish OpenCode's committed-compaction behavior; that needs the client lab.
 
-The candidate stays routing-off until integrated acceptance and the documented
-24–48 hour dry run. Keep all live services and the CPAMP database untouched.
+Keep all live services and the CPAMP database untouched.
 
 The CPA host must be built with **`CGO_ENABLED=1`** on Linux for native dynamic
 plugins. A `CGO_ENABLED=0` server can start and serve management endpoints while

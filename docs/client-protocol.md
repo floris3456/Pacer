@@ -114,17 +114,17 @@ returned. Older clients can ignore this additive field.
 
 ```json
 {"v":1,"at_ms":1791587233865,"expires_ms":1791587263865,
- "candidates_at_ms":1791587200000,"mode":"dry-run","provider":"claude",
+ "candidates_at_ms":1791587200000,"mode":"active","provider":"claude",
  "model":"claude-opus-5-5","reason":"cold_move","auth":"claude-y.json",
  "alias":"Y","forced":false}
 ```
 
-This is a **proposal, not a reservation or a promise of CPA's next selection**.
-Each read reruns the same routing scorer with current observed quotas, measured
-capacity/runway, and the chat's real cache protection and in-flight state. Economic
-changes (`cold_move`) are hidden while protection is warm or unknown. Exhaustion
-at the scorer's hard floors can yield `forced_move` even while warm. It does not
-invent an exhaustion forecast from missing measurements.
+`mode` is `active` when routing is on and `off` otherwise (older Pacer versions
+also sent `dry-run`). This is a **proposal, not a reservation or a promise of
+CPA's next selection**. Each read reruns the same pace routing rule with current
+observed quotas and the chat's real cache warmth and in-flight state. Moves of a
+cold chat (`cold_move`) are hidden while its cache may be warm. An account at its
+floor can yield `forced_move` even while warm. Missing meters never become a move.
 
 Candidate eligibility comes from that chat's last primary scheduler invocation
 (`candidates_at_ms`), intersected with the current discovered credential inventory.
@@ -133,8 +133,7 @@ No candidate snapshot after restart, one older than 24 hours, missing quota
 evidence, or routing off means no target. The in-memory snapshot cache is bounded.
 The `auth` and `alias` fields are absent whenever no replacement is proposed.
 
-Render **NEXT USE** separately from **LAST USED**, and explicitly label `dry-run`
-proposals: routing in this mode remains CPA's choice. Hide a preview after
+Render **NEXT USE** separately from **LAST USED**. Hide a preview after
 `expires_ms`, on a failed read, or when switching chat/model. Visible sidebars may
 refresh every 15 seconds. Reads only consult local state: they do not enroll,
 admit, move, compact, reserve capacity or fetch provider quotas.

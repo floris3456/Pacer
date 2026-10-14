@@ -56,12 +56,12 @@ async function scenario(status, action){
       assert.equal(opts.headers.Authorization,undefined);
       if(calls.length===1&&(action==='disconnect'||action==='bridge'))await new Promise(r=>release=r);
       const code=calls.length===1?status:200;
-      return {ok:code===200,status:code,json:async()=>({routing:{mode:'dry-run',can_activate:false},accounts:[]})};
+      return {ok:code===200,status:code,json:async()=>({routing:{mode:'on',modes:['off','on'],providers:['claude']},accounts:[]})};
     }};
   sandbox.window={addEventListener(type,fn){if(type==='message')onMessage=fn}};
   sandbox.window.parent=action==='iframe'||action==='bridge'?{postMessage:m=>{
     messages.push(m);
-    if(m.type==='pacer:request')setImmediate(()=>onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:response',version:1,id:m.id,ok:true,data:{routing:{mode:'dry-run',can_activate:false},accounts:[]}}}));
+    if(m.type==='pacer:request')setImmediate(()=>onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:response',version:1,id:m.id,ok:true,data:{routing:{mode:'on',modes:['off','on'],providers:['claude']},accounts:[]}}}));
   }}:sandbox.window;
   for(const k of ['localStorage','sessionStorage'])Object.defineProperty(sandbox,k,{get(){throw Error('credential persistence forbidden')}});
   vm.runInNewContext(script,sandbox,{timeout:5000});
@@ -75,7 +75,7 @@ async function scenario(status, action){
   assert.equal(calls.length,1,'exactly one automatic probe, no polling or duplicate state fetch');
   const authorized=status===200&&action!=='disconnect';
   assert.equal(el('login').hidden,authorized);assert.equal(el('workspace').hidden,!authorized);
-  if(authorized){assert.equal(el('mode').value,'dry-run');el('disconnect').onclick();await settle();assert.equal(calls.length,1);assert.equal(el('workspace').hidden,true)}
+  if(authorized){assert.equal(el('mode').value,'on');el('disconnect').onclick();await settle();assert.equal(calls.length,1);assert.equal(el('workspace').hidden,true)}
   if(status!==200){
     assert.equal(el('message').hidden,false);
     assert.equal(el('reconnect').disabled,false);

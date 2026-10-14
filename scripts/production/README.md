@@ -1,5 +1,9 @@
 # Pacer Phase 1+2 on CT104
 
+> Historical. Pace routing removed the dry-run mode and its report route
+> (`/v0/management/plugins/pacer/dry-run-report` now answers 404), so `dry-run-daily.py` and
+> `pacer-dry-run-daily.timer` are retired: disable the timer when deploying pace routing.
+
 `phase1.py` swaps CT104 from quota-handoff 0.1.5-local.1 to Pacer `55fa5ac` in routing `dry-run` on the
 pacer-boundary CPA host `bb27d121`. `dry-run-daily.py` archives Pacer's authoritative daily report route
 (`GET /v0/management/plugins/pacer/dry-run-report`, see `docs/dry-run-report.md`) verbatim. `rehearse.sh`

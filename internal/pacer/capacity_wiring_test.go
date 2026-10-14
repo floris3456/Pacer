@@ -414,7 +414,7 @@ func TestCapacityMutationGuardNoSettingSeedsSizeOrKnown(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeOf(Config{}), "")
-	for _, config := range []string{"", "routing:\n  mode: dry-run\n", "compact_on_switch: true\npriority: 7\n"} {
+	for _, config := range []string{"", "routing:\n  mode: on\n", "compact_on_switch: true\npriority: 7\n"} {
 		h := newCapacityHost()
 		p := openCapacityPlugin(t, h, config)
 		admissibleCapacity(t, h, p)
