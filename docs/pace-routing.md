@@ -30,8 +30,8 @@ Per CPA-offered candidate (same provider, enabled, not cooling; CPA's list stays
 
 | Input | Source |
 | --- | --- |
-| `S`: 5-hour % left | `claude:all:18000` window; `dormant` counts as 100 |
-| `L`: 7-day % left, `R`: 7-day reset | `claude:all:604800` window, absolute reset |
+| `S`: 5-hour % left | `all` 5-hour window; `dormant` counts as 100. Claude requires it; a provider without one (Codex) skips the 5-hour conditions |
+| `L`: 7-day % left, `R`: 7-day reset | `all` 7-day window, absolute reset |
 
 A meter is usable when its balance is at most 1 h old (the scheduler reads idle accounts every 30 min
 and 30–90 s after each reset). A passed 5-hour reset without a confirming reading is not usable.
@@ -115,6 +115,9 @@ Pinning warm chats also stops CPA from moving them.
 
 ## Open points
 
-- The band (90 %) and the new-placement minimum (15 %) are first guesses.
-- Codex is not routed. Its idle 7-day window currently creates a new cycle on every read; fix this
-  before routing Codex.
+- The band (90 %) and the new-placement minimum (15 %) are accepted starting values.
+- Codex: the rule applies unchanged (only its 7-day window exists, so the 5-hour conditions are
+  skipped), but with one Codex account there is nothing to choose. It is worth enabling once a second
+  account exists. Codex reports a window that has not started as 100 % left with its reset 7 days after
+  each read, so every idle read opens a new cycle. That pollutes cycle history and reports, not routing:
+  an unstarted window has no deadline, and its low pace is correct. Treat it as dormant, like Claude.
