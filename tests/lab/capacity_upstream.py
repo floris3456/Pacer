@@ -86,7 +86,8 @@ class State:
 
     def usage(self, name):
         a = self.accounts[name]
-        out = {"five_hour": {"utilization": a["five_hour"], "resets_at": a["five_hour_reset"]},
+        # A 5-hour reset of 0 is a window that has not started (Anthropic: null).
+        out = {"five_hour": {"utilization": a["five_hour"], "resets_at": a["five_hour_reset"] or None},
                "seven_day": {"utilization": a["seven_day"], "resets_at": a["seven_day_reset"]}}
         if a["partial_window"]:
             # A scoped window with no reset keeps Pacer's scheduler on its
@@ -262,6 +263,8 @@ class Handler(BaseHTTPRequestHandler):
             a = state.accounts[account]
             state.sequence += 1
             request_id = "req_capacity_%s_%06d" % (account[4:], state.sequence)
+            if not a["five_hour_reset"]:
+                a["five_hour_reset"] = int(time.time()) + 18000  # the first request starts the window
             held = a["armed"]
             if held:
                 a["armed"] = False
@@ -343,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
         account = body.get("account")
         valid = (required <= set(body) <= required | {"partial_window"} and account in ACCOUNTS
                  and all(is_int(body[k]) and 0 <= body[k] <= 100 for k in ("five_hour", "seven_day"))
-                 and all(is_int(body[k]) and 0 < body[k] <= MAX_RESET for k in ("five_hour_reset", "seven_day_reset"))
+                 and all(is_int(body[k]) and 0 < body[k] <= MAX_RESET for k in ("five_hour_reset", "seven_day_reset") if not (k == "five_hour_reset" and body[k] == 0 and body["five_hour"] == 0))
                  and isinstance(body.get("partial_window", True), bool))
         if not valid:
             return self.reply(400, {"error": "invalid_fixture_usage"})

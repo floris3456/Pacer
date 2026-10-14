@@ -116,3 +116,26 @@ reads; a scheduler delay of more than 8 min past the 15 min gap, which expires
 case d's 600 s hold. Interrupting the checker during case d's hold makes CPA record a
 physical gap, which invalidates every proof in that CPA incarnation.
 `test_capacity_upstream.py` and `test_capacity_checker.py` run offline.
+
+## Pace routing lab
+
+`pace-lab.sh` runs a real CPA host with the native Pacer library and
+`capacity_upstream.py` (as `api.anthropic.com`, three dummy Claude logins) on an
+internal Docker network, all in Docker volumes. `check-pace.py` sets the meters of
+the docs/pace-routing.md example and checks, through CPA: the former `dry-run`
+YAML loading as `off`, pace from live meters including a dormant 5-hour window,
+switching routing on, new-chat placement, warm chats staying, reply headers
+updating a meter, band and running-window tie-break, forced moves, the
+`compact_on_switch` claim flow (409, then the compacted chat on the new account),
+routing off and the decision trace. It takes about 8 minutes: Pacer's first meter
+reads after startup are 1–5 minutes apart by design.
+
+Build CPA and Pacer for the Docker host's architecture with CGO, e.g. CPA from its
+checkout with `git archive HEAD | docker run -i golang:1.26-bookworm sh -c '... CGO_ENABLED=1
+go build -o /tmp/CLIProxyAPI ./cmd/server ...'` and Pacer with `scripts/build.sh`:
+
+```sh
+tests/lab/pace-lab.sh up <CLIProxyAPI> dist/linux_<arch>/pacer-v$(cat VERSION).so
+tests/lab/pace-lab.sh check
+tests/lab/pace-lab.sh down
+```

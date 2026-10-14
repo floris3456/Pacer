@@ -246,6 +246,16 @@ class Providers(Base):
         self.assertEqual({"five_hour": {"utilization": 1, "resets_at": 1_900_000_001},
                           "seven_day": {"utilization": 2, "resets_at": 1_900_000_002}}, body["usage"])
 
+    def test_an_unstarted_window_reads_null_until_the_first_message(self):
+        unstarted = {"account": "cap-a", "five_hour": 0, "seven_day": 40, "five_hour_reset": 0, "seven_day_reset": 1_900_000_002, "partial_window": False}
+        self.assertEqual(400, self.call("/_test/usage", {**unstarted, "five_hour": 5})[0])
+        body = self.json("/_test/usage", unstarted)
+        self.assertEqual({"utilization": 0, "resets_at": None}, body["usage"]["five_hour"])
+        before = int(time.time())
+        self.json("/v1/messages", {"model": "claude-opus-5-5", "messages": []}, token=fixture.access_token("cap-a"))
+        reset = self.json("/api/oauth/usage", token=fixture.access_token("cap-a"))["five_hour"]["resets_at"]
+        self.assertTrue(before + 18000 <= reset <= int(time.time()) + 18000, reset)
+
     def test_bodies_are_bounded_and_must_be_json(self):
         self.assertEqual(400, self.call("/v1/messages", raw=b"not json", token=fixture.access_token("cap-a"))[0])
         self.assertEqual(400, self.call("/v1/messages", raw=b"[1]", token=fixture.access_token("cap-a"))[0])
