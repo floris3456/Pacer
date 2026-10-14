@@ -3,6 +3,7 @@ package pacer
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -547,5 +548,41 @@ func TestHandleDormantWindowIsAvailable(t *testing.T) {
 	r := f.before(t, "new", "claude-opus-5-5")
 	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
 		t.Fatal("dormant account excluded", got, f.p.requests[r.RequestID].Decision)
+	}
+}
+
+// CPA reports affinity "unsupported" whenever a plugin scheduler is registered
+// (conductor_selection.go LookupSessionAffinity), so every new chat reads that
+// way in production. It is placed by pace; only an ambiguous answer or a failed
+// lookup leaves it to CPA.
+func TestHandleNewChatWhenCPAReportsAffinityUnsupported(t *testing.T) {
+	for _, status := range []string{"unsupported", "unbound", "ambiguous", "error"} {
+		t.Run(status, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			f.p.Host = func(method string, input any) (json.RawMessage, error) {
+				if method != "host.affinity.lookup" {
+					return testHost(method, input)
+				}
+				if status == "error" {
+					return nil, errors.New("host unavailable")
+				}
+				return json.Marshal(pluginapi.HostAffinityLookupResponse{Status: status})
+			}
+			// A session header makes Pacer ask CPA, as OpenCode's requests do.
+			raw, _ := json.Marshal(f.q)
+			r := pluginapi.RequestInterceptRequest{RequestID: "new", Model: "claude-opus-5-5", Headers: http.Header{controlHeader: {base64.RawURLEncoding.EncodeToString(raw)}, "X-Session-Id": {"new-" + status}}, Metadata: map[string]any{"caller_scope": "fixture-caller"}}
+			before := invoke(t, f.p, pluginabi.MethodRequestInterceptBefore, r).(pluginapi.RequestInterceptResponse)
+			for k, v := range before.Headers {
+				r.Headers[k] = v
+			}
+			if f.p.requests["new"].Session == "" {
+				t.Fatal("fixture: no session")
+			}
+			got := f.pick(t, r, "a", "b")
+			placed := status == "unsupported" || status == "unbound"
+			if got.Handled != placed || placed && got.AuthID != "b" {
+				t.Fatal(got)
+			}
+		})
 	}
 }

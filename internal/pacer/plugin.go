@@ -621,7 +621,10 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	if b.Key == "" && p.Host != nil && t.Session != "" {
 		raw, lookupErr := p.Host("host.affinity.lookup", pluginapi.HostAffinityLookupRequest{Provider: provider, Model: req.Model, SessionID: t.Session})
 		var affinity pluginapi.HostAffinityLookupResponse
-		if lookupErr != nil || json.Unmarshal(raw, &affinity) != nil || affinity.Status == "ambiguous" || affinity.Status == "unsupported" {
+		// CPA answers "unsupported" whenever a plugin scheduler (Pacer) is
+		// registered: it reports no binding for Pacer to adopt, so the chat is
+		// new to Pacer and placed by pace like any other.
+		if lookupErr != nil || json.Unmarshal(raw, &affinity) != nil || affinity.Status == "ambiguous" {
 			return pluginapi.SchedulerPickResponse{}
 		}
 		if affinity.Status == "bound" {
