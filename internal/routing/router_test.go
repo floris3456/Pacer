@@ -189,3 +189,42 @@ func TestTiesBreakOnLowestAuth(t *testing.T) {
 	alias.Auth = "0-alias"
 	want(t, pick(Chat{Account: "acct-a"}, b, a, alias), "0-alias", ColdStay, false)
 }
+
+func TestPreviewNamesTheColdMoveAndAComingForcedMove(t *testing.T) {
+	low := claude("low", short(80, 3*time.Hour), weekly(30, 96*time.Hour))
+	high := claude("high", short(80, 3*time.Hour), weekly(80, 96*time.Hour))
+	next, force := Preview(Default(), now, "acct-low", []Account{low, high}, 5)
+	want(t, next, "high", ColdMove, false)
+	if force.Handled {
+		t.Fatalf("no floor is near: %+v", force)
+	}
+	// Within the band the chat stays: no NEXT USE.
+	if next, _ := Preview(Default(), now, "acct-high", []Account{low, high}, 5); next.Reason != ColdStay || next.Auth != "high" {
+		t.Fatalf("%+v", next)
+	}
+	// 7-day 5 % left with a 1 % floor: within 5 points, the forced move is near.
+	high.Budgets[1] = weekly(5, 2*time.Hour)
+	next, force = Preview(Default(), now, "acct-high", []Account{low, high}, 5)
+	want(t, next, "high", ColdStay, false)
+	want(t, force, "low", ForcedMove, true)
+	// At the 5-hour floor it is due: both name the forced move.
+	high.Budgets[0] = short(2, time.Hour)
+	next, force = Preview(Default(), now, "acct-high", []Account{low, high}, 0)
+	want(t, next, "low", ForcedMove, true)
+	want(t, force, "low", ForcedMove, true)
+	// Left out by CPA but able to serve: a warm chat waits for it, nothing forced.
+	high.Budgets[0], high.NotOffered = short(80, time.Hour), true
+	high.Budgets[1] = weekly(80, 96*time.Hour)
+	next, force = Preview(Default(), now, "acct-high", []Account{low, high}, 5)
+	want(t, next, "high", ColdStay, false)
+	if force.Handled {
+		t.Fatalf("transient absence warned: %+v", force)
+	}
+	// No other account can take the chat: nothing to show.
+	low.Budgets[0] = short(1, time.Hour)
+	high.NotOffered = false
+	high.Budgets[1] = weekly(3, time.Hour)
+	if _, force = Preview(Default(), now, "acct-high", []Account{low, high}, 5); force.Handled {
+		t.Fatalf("%+v", force)
+	}
+}

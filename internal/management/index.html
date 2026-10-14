@@ -285,6 +285,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <fieldset><legend>Warm chats</legend>
 <label class="setting"><input type="number" id="set-warm" min="0" max="1440" step="1" required aria-labelledby="set-warm-name" aria-describedby="set-warm-help"> <span><b id="set-warm-name">Warm for (minutes after the last request)</b><small id="set-warm-help">A chat counts as warm this long after its last request when Pacer has no cache evidence, and warm chats are never moved without need. 60 matches Claude’s 1-hour cache; 5 matches the 5-minute cache and frees chats sooner.</small></span></label>
 <label class="setting"><input type="number" id="set-retries" min="0" max="10" step="1" required aria-labelledby="set-retries-name" aria-describedby="set-retries-help"> <span><b id="set-retries-name">Retries before moving a warm chat</b><small id="set-retries-help">When a warm chat’s account fails briefly (an upstream 5xx) while its meters are fine, the request ends with that retryable error this many times (within 2 minutes) instead of moving the chat; the client retries by itself. 0 moves at once.</small></span></label>
+<label class="setting"><input type="number" id="set-force-warning" min="0" max="50" step="0.5" required aria-labelledby="set-force-warning-name" aria-describedby="set-force-warning-help"> <span><b id="set-force-warning-name">Forced move warning (points above a floor)</b><small id="set-force-warning-help">When a chat’s account is this close to its 5-hour or 7-day floor, clients mark the account the chat will be forced to as FORCE USE. 0 shows it only once the move is due.</small></span></label>
 </fieldset>
 <fieldset><legend>Providers</legend><span class="setting-block"><small>Pace routing applies to these providers; others use CPA’s routing. Pause single accounts in the table above.</small></span>
 <label><input type="checkbox" id="set-claude"> Claude</label> <label><input type="checkbox" id="set-codex"> Codex</label></fieldset>
@@ -1954,7 +1955,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   // Settings: rendered from the state, saved as one PATCH. Auto-refresh does
   // not overwrite unsaved edits.
   let settings=null, settingsDirty=false, modelOptions=null;
-  const numberFields={'set-band':'band_percent','set-new-min':'new_chat_minimum_percent','set-short-floor':'short_floor_percent','set-long-floor':'long_floor_percent','set-warm':'warm_minutes','set-retries':'transient_retries'};
+  const numberFields={'set-band':'band_percent','set-new-min':'new_chat_minimum_percent','set-short-floor':'short_floor_percent','set-long-floor':'long_floor_percent','set-warm':'warm_minutes','set-retries':'transient_retries','set-force-warning':'force_warning_percent'};
   function renderSettings(view){
     if(!view?.settings)return;
     settings=view;el('set-models').dataset.max=view.limits?.compaction_models||8;
@@ -1965,7 +1966,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('set-claude').checked=(s.providers||[]).includes('claude');el('set-codex').checked=(s.providers||[]).includes('codex');
     renderModelList(s.compaction_models||[]);
     const changed=view.changed||[];
-    const names={compact_on_switch:'compact on switch',compaction_models:'summary models',band_percent:'equal pace band',new_chat_minimum_percent:'new-chat minimum',short_floor_percent:'5-hour floor',long_floor_percent:'7-day floor',warm_minutes:'warm for',transient_retries:'retries',providers:'providers',paused_accounts:'paused accounts'};
+    const names={compact_on_switch:'compact on switch',compaction_models:'summary models',band_percent:'equal pace band',new_chat_minimum_percent:'new-chat minimum',short_floor_percent:'5-hour floor',long_floor_percent:'7-day floor',warm_minutes:'warm for',transient_retries:'retries',force_warning_percent:'forced move warning',providers:'providers',paused_accounts:'paused accounts'};
     el('settings-status').textContent=changed.length?'Changed here (differs from config.yaml or the default): '+changed.map(n=>names[n]||n).join(', ')+'.':'All settings follow config.yaml or the defaults.';
     loadModelOptions();
   }

@@ -76,7 +76,8 @@ Pacer decides only when the prompt cache is cold on every account, or the curren
 | Compaction request whose model differs from the chat's model (cache is per model) | rule; only the compaction is routed, the binding is unchanged |
 | First primary request with a new checkpoint (after compaction) | rule |
 | Current account not offered, or below a floor | rule, as a forced move; declared clients keep the `409 quota_compact_required` contract |
-| Anything else (warm, in flight, same-model compaction, title, generate) | warm chats are pinned to their account (`Handled:true`, current auth); auxiliaries `Handled:false` |
+| Anything else (warm, in flight, same-model compaction) | warm chats are pinned to their account (`Handled:true`, current auth) |
+| Title or generation (a warming ping) on the chat's model | pinned to the chat's account (`warm_auxiliary`), when CPA offers it; other auxiliaries `Handled:false` |
 
 A cold move needs no compaction and costs nothing extra: the cache must be rebuilt on any account.
 Pinning warm chats also stops CPA from moving them.
@@ -145,7 +146,22 @@ Pinning warm chats also stops CPA from moving them.
 - Settings on the Pacer page (`PATCH /plugins/pacer/settings`), each kept until its YAML seed changes:
   compact on switch, summary models (sent in order with the 409 as `compaction_models`; OpenCodePlus
   uses them for the switch summary), equal pace band, new-chat minimum, 5-hour and 7-day floors, warm
-  minutes, transient retries, providers, accounts paused for new chats.
+  minutes, transient retries, forced-move warning, providers, accounts paused for new chats.
+
+- Warming pings (2026-10-14, production): pings are `generate` requests on the chat's model. They were
+  left to CPA, whose session affinity does not know where Pacer put the chat, so they warmed another
+  account, and the chat's next step missed the cache. Now a title or generation of a bound chat on its
+  model is pinned to the chat's account (`warm_auxiliary`, recorded in the decision trace). A
+  generation admitted there with the chat's checkpoint renews its warmth (`last_used`, and its cache
+  evidence when CPA reports it), so a chat kept warm by pings is not moved as cold.
+
+## Next and forced use
+
+The usage view's `next_use` (client-protocol.md) runs the rule for the chat's next routing moments:
+NEXT USE is the pick once the chat is cold, shown while it is still warm and only when it names
+another account. FORCE USE is the forced move: `now` when the chat's account cannot serve, `soon`
+when its 5-hour or 7-day meter is within the forced-move warning (setting, default 5 points) of its
+floor. An account CPA left out whose meters can serve is waited for and yields neither.
 
 ## Not planned
 

@@ -27,9 +27,18 @@ type nextUseView struct {
 	Provider       string `json:"provider"`
 	Model          string `json:"model"`
 	Reason         string `json:"reason"`
-	Auth           string `json:"auth,omitempty"`
-	Alias          string `json:"alias,omitempty"`
-	Forced         bool   `json:"forced"`
+	// Warm: the chat's cache may still be warm, so NEXT USE waits until it is cold.
+	Warm bool `json:"warm"`
+	// NEXT USE: the account the chat moves to once its cache is cold, only
+	// when that is another account.
+	Auth   string `json:"auth,omitempty"`
+	Alias  string `json:"alias,omitempty"`
+	Forced bool   `json:"forced"`
+	// FORCE USE: the account a forced move sends the chat to, "now" when its
+	// account cannot serve, "soon" when a meter is near its floor.
+	ForceAuth   string `json:"force_auth,omitempty"`
+	ForceAlias  string `json:"force_alias,omitempty"`
+	ForceReason string `json:"force_reason,omitempty"`
 }
 
 const previewRetention = 24 * time.Hour
@@ -125,16 +134,27 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 		return view
 	}
 	accounts, candidates := p.routingInputsLocked(input, now, current.Account)
-	d := routing.Pick(p.settings.routing(), now, routing.Chat{Account: current.Account, Warm: warm(current, active, now, p.settings.warmFor())}, accounts)
-	view.Reason = d.Reason
-	// An unoffered but usable account is waited for (transient retries), not left.
-	if !d.Handled || (d.Unoffered && p.settings.TransientRetries > 0) || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
-		return view
+	next, force := routing.Preview(p.settings.routing(), now, current.Account, accounts, p.settings.ForceWarning)
+	// While warm too: where the chat goes once it is cold.
+	view.Reason, view.Warm = next.Reason, warm(current, active, now, p.settings.warmFor())
+	alias := func(d routing.Decision) (string, string) {
+		if !d.Handled || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
+			return "", ""
+		}
+		for _, c := range candidates {
+			if c.ID == d.Auth {
+				return c.ID, c.Alias
+			}
+		}
+		return "", ""
 	}
-	for _, c := range candidates {
-		if c.ID == d.Auth {
-			view.Auth, view.Alias, view.Forced = c.ID, c.Alias, d.Forced
-			break
+	if view.Auth, view.Alias = alias(next); view.Auth != "" {
+		view.Forced = next.Forced
+	}
+	if view.ForceAuth, view.ForceAlias = alias(force); view.ForceAuth != "" {
+		view.ForceReason = "soon"
+		if next.Forced {
+			view.ForceReason = "now"
 		}
 	}
 	return view

@@ -626,9 +626,13 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	if t.Claim != nil {
 		kind = t.Claim.Kind
 	}
-	// A managed cache policy selects only primary requests for routing.
-	if !cfg.Enabled || cfg.Routing.Mode != "on" || !enabled || !tracked || (kind != "primary" && kind != "compaction") || (managed && selection.Kind != "primary") {
+	if !cfg.Enabled || cfg.Routing.Mode != "on" || !enabled || !tracked {
 		return pluginapi.SchedulerPickResponse{}
+	}
+	// Other auxiliaries, and whatever a managed cache policy does not select as
+	// primary, are never placed by pace; on the chat's model they stay with it.
+	if (kind != "primary" && kind != "compaction") || (managed && selection.Kind != "primary") {
+		return p.pinAuxiliary(id, t, req, provider)
 	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
 	if key == "" {
@@ -712,6 +716,47 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		p.recordDecision(id, t, credential{Provider: provider}, TransientWait)
 	}
 	return t.RoutingChoice
+}
+
+// pinAuxiliary keeps an auxiliary request on the chat's model (a warming ping,
+// a generation from the chat's context) on the chat's account, where it reads
+// and renews the chat's prompt cache. Left to CPA, it would follow CPA's own
+// session affinity, which does not know where Pacer put the chat, and warm
+// another account. It never places or rebinds a chat: without a binding on
+// this model, or when CPA does not offer the chat's account, CPA decides.
+func (p *Plugin) pinAuxiliary(id string, t attempt, req pluginapi.SchedulerPickRequest, provider string) pluginapi.SchedulerPickResponse {
+	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
+	if key == "" {
+		return pluginapi.SchedulerPickResponse{}
+	}
+	b, _, err := p.chats.Get(key)
+	if err != nil || b.Key == "" || b.Provider != provider || b.Model != req.Model {
+		return pluginapi.SchedulerPickResponse{}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// The chat's own credential, else an offered alias of its account.
+	auth := ""
+	candidates := make([]credential, 0, len(req.Candidates))
+	for _, candidate := range req.Candidates {
+		c, ok := p.creds[candidate.ID]
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, c)
+		if c.Account == b.Account && (auth == "" || c.ID == b.Auth || (auth != b.Auth && c.ID < auth)) {
+			auth = c.ID
+		}
+	}
+	d := routing.Decision{Handled: auth != "", Auth: auth, Account: b.Account, Reason: routing.WarmAuxiliary}
+	choice := routingAction(req, d, candidates)
+	if !choice.Handled {
+		return pluginapi.SchedulerPickResponse{}
+	}
+	t.Key, t.Decision, t.RoutingChoice = key, d, choice
+	t.Model, t.PreviousAccount, t.RoutingProvider = req.Model, b.Account, provider
+	p.requests[id] = t
+	return choice
 }
 
 // TransientWait: a warm chat's account was left out although its meters can

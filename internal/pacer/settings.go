@@ -87,6 +87,9 @@ type Settings struct {
 	// when its account is briefly unavailable (an upstream error) although its
 	// meters are fine, before the chat is moved. 0 moves at once.
 	TransientRetries int `json:"transient_retries"`
+	// ForceWarning: points above a floor from which clients show FORCE USE,
+	// the account a forced move will soon send the chat to.
+	ForceWarning float64 `json:"force_warning_percent"`
 	// Providers routed by pace.
 	Providers []string `json:"providers"`
 	// PausedAccounts take no new or moved chats; their warm chats stay.
@@ -103,7 +106,7 @@ const (
 var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+\- ]{0,127}$`)
 
 func defaultSettings() Settings {
-	return Settings{CompactionModels: []string{}, Band: 90, NewChatMinimum: 15, ShortFloor: 2, LongFloor: 1, WarmMinutes: 60, TransientRetries: 3, Providers: []string{"claude"}, PausedAccounts: []string{}}
+	return Settings{CompactionModels: []string{}, Band: 90, NewChatMinimum: 15, ShortFloor: 2, LongFloor: 1, WarmMinutes: 60, TransientRetries: 3, ForceWarning: 5, Providers: []string{"claude"}, PausedAccounts: []string{}}
 }
 
 // seedSettings: the YAML values where CPA's YAML has them, else the defaults.
@@ -134,6 +137,8 @@ func (s Settings) validate() error {
 		return errors.New("warm time is 0 to 1440 minutes")
 	case s.TransientRetries < 0 || s.TransientRetries > 10:
 		return errors.New("retries are 0 to 10")
+	case !in(s.ForceWarning, 0, 50):
+		return errors.New("force warning is 0 to 50 %")
 	case len(s.Providers) == 0:
 		return errors.New("route at least one provider")
 	case len(s.PausedAccounts) > maxPausedAccounts:

@@ -92,14 +92,17 @@ const (
 	ForcedMove   = "forced_move"
 	NoEligible   = "no_eligible"
 	NoUsableData = "no_usable_meters"
+	// WarmAuxiliary: a request on the chat's model besides its steps (a warming
+	// ping) stays on the chat's account, where it reads and renews the cache.
+	WarmAuxiliary = "warm_auxiliary"
 )
 
 type score struct {
 	Account
-	known, hard bool
-	pace, short float64
-	running     bool      // a short window is running (its capacity expires at its reset)
-	shortReset  time.Time // earliest reset of a running short window
+	known, hard       bool
+	pace, short, long float64
+	running           bool      // a short window is running (its capacity expires at its reset)
+	shortReset        time.Time // earliest reset of a running short window
 }
 
 func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
@@ -188,6 +191,53 @@ func Pace(cfg Config, now time.Time, a Account) (float64, bool) {
 	return s.pace, s.known
 }
 
+// Preview tells, without a request, where the chat's next routing moments send
+// it (docs/pace-routing.md, "Next and forced use"). next is the pick once the
+// chat's cache is cold. force is the forced move off its account: now, when the
+// account cannot serve (then force is next), or soon, when one of its meters is
+// within soon points of its floor. An account CPA left out whose meters can
+// serve still counts as serving: a warm chat waits for it. An unhandled
+// decision has nothing to show.
+func Preview(cfg Config, now time.Time, account string, accounts []Account, soon float64) (next, force Decision) {
+	offered, waiting := false, false
+	for _, a := range accounts {
+		if a.Account != account {
+			continue
+		}
+		s := evaluate(cfg, now, a)
+		offered = offered || !a.NotOffered
+		waiting = waiting || (a.NotOffered && s.known && !s.hard)
+	}
+	if !offered && waiting {
+		accounts = withOffer(accounts, account, false)
+	}
+	next = Pick(cfg, now, Chat{Account: account}, accounts)
+	if next.Forced {
+		return next, next
+	}
+	near := false
+	for _, a := range accounts {
+		if s := evaluate(cfg, now, a); a.Account == account && !a.NotOffered && s.known {
+			near = near || s.short <= cfg.ShortFloor+soon || s.long <= cfg.LongFloor+soon
+		}
+	}
+	if !near {
+		return next, Decision{}
+	}
+	return next, Pick(cfg, now, Chat{Account: account}, withOffer(accounts, account, true))
+}
+
+// withOffer copies accounts with the given account's NotOffered set.
+func withOffer(accounts []Account, account string, notOffered bool) []Account {
+	out := append([]Account(nil), accounts...)
+	for i := range out {
+		if out[i].Account == account {
+			out[i].NotOffered = notOffered
+		}
+	}
+	return out
+}
+
 func chosen(s score, reason string, forced bool, trace []Candidate) Decision {
 	return Decision{Handled: true, Auth: s.Auth, Account: s.Account.Account, Pace: s.pace, Reason: reason, Forced: forced, Candidates: trace}
 }
@@ -198,7 +248,7 @@ func chosen(s score, reason string, forced bool, trace []Candidate) Decision {
 // gate eligibility. An account is known when every window is usable and at
 // least one is paced.
 func evaluate(cfg Config, now time.Time, a Account) score {
-	s := score{Account: a, known: true, pace: math.Inf(1), short: math.Inf(1)}
+	s := score{Account: a, known: true, pace: math.Inf(1), short: math.Inf(1), long: math.Inf(1)}
 	paced := false
 	for _, b := range a.Budgets {
 		remaining := b.Remaining
@@ -213,6 +263,7 @@ func evaluate(cfg Config, now time.Time, a Account) score {
 		if b.Seconds >= LongSeconds {
 			paced = true
 			s.hard = s.hard || remaining <= cfg.LongFloor
+			s.long = math.Min(s.long, remaining)
 			horizon := time.Duration(b.Seconds) * time.Second
 			if !b.Dormant {
 				horizon = b.Reset.Sub(now)

@@ -115,25 +115,37 @@ returned. Older clients can ignore this additive field.
 ```json
 {"v":1,"at_ms":1791587233865,"expires_ms":1791587263865,
  "candidates_at_ms":1791587200000,"mode":"active","provider":"claude",
- "model":"claude-opus-5-5","reason":"cold_move","auth":"claude-y.json",
- "alias":"Y","forced":false}
+ "model":"claude-opus-5-5","reason":"cold_move","warm":true,
+ "auth":"claude-y.json","alias":"Y","forced":false,
+ "force_auth":"claude-z.json","force_alias":"Z","force_reason":"soon"}
 ```
 
 `mode` is `active` when routing is on and `off` otherwise (older Pacer versions
 also sent `dry-run`). This is a **proposal, not a reservation or a promise of
 CPA's next selection**. Each read reruns the same pace routing rule with current
-observed quotas and the chat's real cache warmth and in-flight state. Moves of a
-cold chat (`cold_move`) are hidden while its cache may be warm. An account at its
-floor can yield `forced_move` even while warm. Missing meters never become a move.
+observed quotas, as the chat's next routing moments would:
+
+- `auth`/`alias` (**NEXT USE**): the account the chat moves to once its cache is
+  cold (`cold_move`), or now when its account cannot serve (`forced_move`,
+  `forced:true`). Shown while the chat is still warm (`warm:true`, Pacer's view of
+  its cache); absent when the chat would stay.
+- `force_auth`/`force_alias`/`force_reason` (**FORCE USE**): the account a forced
+  move sends the chat to: `now` when its account cannot serve, `soon` when one of
+  its meters is within the page's forced-move warning (default 5 points) of its
+  floor. A forced move asks a declaring client to compact first.
+
+An account CPA left out whose meters can serve is waited for, not left, so it
+yields neither. Missing meters never become a move. Clients show FORCE USE instead
+of NEXT USE when both name the same account.
 
 Candidate eligibility comes from that chat's last primary scheduler invocation
 (`candidates_at_ms`), intersected with the current discovered credential inventory.
 CPA revalidates cooldowns, model eligibility and availability on actual dispatch.
 No candidate snapshot after restart, one older than 24 hours, missing quota
 evidence, or routing off means no target. The in-memory snapshot cache is bounded.
-The `auth` and `alias` fields are absent whenever no replacement is proposed.
+The `auth`, `alias` and `force_*` fields are absent whenever no replacement is proposed.
 
-Render **NEXT USE** separately from **LAST USED**. Hide a preview after
+Render **NEXT USE** and **FORCE USE** separately from **LAST USED**. Hide a preview after
 `expires_ms`, on a failed read, or when switching chat/model. Visible sidebars may
 refresh every 15 seconds. Reads only consult local state: they do not enroll,
 admit, move, compact, reserve capacity or fetch provider quotas.
