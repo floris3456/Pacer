@@ -78,6 +78,7 @@ Pacer decides only when the prompt cache is cold on every account, or the curren
 | Current account not offered, or below a floor | rule, as a forced move; declared clients keep the `409 quota_compact_required` contract |
 | Anything else (warm, in flight, same-model compaction) | warm chats are pinned to their account (`Handled:true`, current auth) |
 | Title or generation (a warming ping) on the chat's model | pinned to the chat's account (`warm_auxiliary`), when CPA offers it; other auxiliaries `Handled:false` |
+| Routing off: any request of a bound chat on its model | kept on the chat's account (`keep_account`), when CPA offers it; new chats, other models and an account CPA does not offer are CPA's |
 
 A cold move needs no compaction and costs nothing extra: the cache must be rebuilt on any account.
 Pinning warm chats also stops CPA from moving them.
@@ -86,7 +87,8 @@ Pinning warm chats also stops CPA from moving them.
 
 - Every refusal path falls back to CPA (`Handled:false`); missing evidence is never zero usage.
 - Only CPA-offered candidates are chosen; Pacer never resurrects a removed credential.
-- Setting `off` through management (persisted, no restart) restores CPA routing for the next request.
+- Setting `off` through management (persisted, no restart) restores CPA routing for the next request;
+  Pacer then only keeps a bound chat on its account (`keep_account`), so a CPA restart does not move it.
 - The decision trace (`pacer_decisions`) keeps each decision with its reason and the account CPA
   served; it will also record every candidate's pace, 5-hour and 7-day input.
 - Success is read directly from the meters, with no simulation: the 7-day % left at each reset per
@@ -122,7 +124,8 @@ Pinning warm chats also stops CPA from moving them.
   minimum, stale meters, and no eligible candidate.
 - `Plugin.Handle` tests: a warm chat is pinned; unknown warmth stays pinned until 1 h; a
   different-model compaction is routed; a same-model compaction is pinned; the first primary after
-  compaction is routed; a forced move keeps the 409 contract; `off` returns `Handled:false`.
+  compaction is routed; a forced move keeps the 409 contract; `off` keeps a bound chat on its account
+  and returns `Handled:false` for everything else.
 - Isolated lab run (`tests/lab/`) before deployment; afterwards, the 7-day % left at each reset.
 
 ## Implementation notes
@@ -154,6 +157,14 @@ Pinning warm chats also stops CPA from moving them.
   model is pinned to the chat's account (`warm_auxiliary`, recorded in the decision trace). A
   generation admitted there with the chat's checkpoint renews its warmth (`last_used`, and its cache
   evidence when CPA reports it), so a chat kept warm by pings is not moved as cold.
+
+- CPA restarts with routing off (2026-10-15, production): CPA keeps its session affinity in memory
+  only. After a restart it put a warm chat (on ilse) on jan, and another chat's warming ping (on jan)
+  on ilse, where it rewrote 574k tokens of cache. Pacer, which still knew both chats' accounts, made
+  each compact at its next step. By the owner's decision `off` now keeps a bound chat's requests on its
+  model on its account when CPA offers it (`keep_account`, recorded in the decision trace). It never
+  places a new chat or moves one: when CPA does not offer the account, CPA decides and the move stays
+  forced.
 
 ## Next and forced use
 

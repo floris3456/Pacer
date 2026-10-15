@@ -95,6 +95,10 @@ const (
 	// WarmAuxiliary: a request on the chat's model besides its steps (a warming
 	// ping) stays on the chat's account, where it reads and renews the cache.
 	WarmAuxiliary = "warm_auxiliary"
+	// KeepAccount: with routing off, a bound chat's request on its model stays
+	// on the chat's account. CPA keeps its own chat map only in memory, so
+	// after a CPA restart it would move the chat and its pings.
+	KeepAccount = "keep_account"
 )
 
 type score struct {

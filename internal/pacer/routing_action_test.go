@@ -222,6 +222,65 @@ func TestHandleRoutesOnlyWhenOn(t *testing.T) {
 	}
 }
 
+// Routing off (2026-10-15, production): a CPA restart cleared CPA's in-memory
+// session affinity; CPA put a warm chat and another chat's ping on other
+// accounts, and Pacer then made both chats compact. Off now keeps a bound
+// chat (steps, its pings and same-model compactions) on its account whenever
+// CPA offers it. It never places a new chat and never moves one.
+func TestOffKeepsABoundChatOnItsAccount(t *testing.T) {
+	f := newRoutingFixture(t, "off")
+	f.seed(t, 5*time.Minute)
+	before := f.binding(t)
+	step := func(id string, ids ...string) pluginapi.SchedulerPickResponse {
+		t.Helper()
+		r := f.before(t, id, "claude-opus-5-5")
+		choice := f.pick(t, r, ids...)
+		auth := choice.AuthID
+		if !choice.Handled {
+			auth = ids[0]
+		}
+		if got := f.after(t, r, auth); got.Terminate {
+			t.Fatal(string(got.ResponseBody))
+		}
+		f.complete(t, r.RequestID)
+		return choice
+	}
+	// CPA offers b first (its own pick after a restart); the chat stays on a.
+	if got := step("after-restart", "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("warm chat moved", got)
+	}
+	for _, kind := range []string{"generate", "title", "compaction"} {
+		f.q.Kind = kind
+		if got := step(kind, "b", "a"); !got.Handled || got.AuthID != "a" {
+			t.Fatalf("%s left the chat's account: %+v", kind, got)
+		}
+	}
+	f.q.Kind = "primary"
+	// Hours later, cold: off still does not move it.
+	f.clock.Add(int64(3 * time.Hour))
+	if got := step("cold", "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("off moved a cold chat", got)
+	}
+	if b := f.binding(t); b.Account != before.Account || b.Generation != before.Generation {
+		t.Fatal("kept chat rebound", before, b)
+	}
+	// Another model reads another cache, and a new chat is CPA's to place.
+	if f.pick(t, f.before(t, "other-model", "claude-sonnet-4-6"), "b", "a").Handled {
+		t.Fatal("off pinned another model")
+	}
+	f.q.Session = "new-chat"
+	if f.pick(t, f.before(t, "new", "claude-opus-5-5"), "b", "a").Handled {
+		t.Fatal("off placed a new chat")
+	}
+	// The chat's account not offered (cooling): CPA moves it; the move stays forced.
+	f.q.Session = "chat"
+	r := f.before(t, "not-offered", "claude-opus-5-5")
+	if f.pick(t, r, "b").Handled {
+		t.Fatal("off placed the chat on another account")
+	}
+	requireCompact(t, f.after(t, r, "b"))
+}
+
 func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t *testing.T) {
 	for _, forced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "forced"}[forced], func(t *testing.T) {
@@ -300,9 +359,10 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 					t.Fatal(got)
 				}
 			case "mode-off":
+				// Off never moves the chat: it keeps its account.
 				f.p.cfg.Routing.Mode = "off"
-				if f.pick(t, r, "a", "b").Handled {
-					t.Fatal("off acted")
+				if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+					t.Fatal("off moved the chat", got)
 				}
 			case "disabled":
 				f.p.cfg.Enabled = false
@@ -319,8 +379,8 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 		f.clock.Add(int64(6 * time.Minute))
 		f.observe(t)
 		r := f.before(t, "fallback", "claude-opus-5-5")
-		if f.pick(t, r, "a", "b").Handled {
-			t.Fatal("closed gate acted")
+		if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+			t.Fatal("closed gate moved the chat", got)
 		}
 		requireCompact(t, f.after(t, r, "b")) // CPA's own move stays forced.
 	}
@@ -521,14 +581,23 @@ func TestDecisionTraceRecordsEveryCandidate(t *testing.T) {
 			t.Fatalf("candidate inputs missing: %+v", c)
 		}
 	}
-	// Off records nothing.
+	// Off records only the chats it keeps on their account.
 	f.p.cfg.Routing.Mode = "off"
 	f.q.Session = "other"
 	r = f.before(t, "off", "claude-opus-5-5")
 	f.pick(t, r, "a", "b")
 	f.after(t, r, "a")
 	if decisions, _ = f.p.decisionView(); len(decisions) != 1 {
-		t.Fatal("off recorded a decision")
+		t.Fatal("off recorded a decision for a chat it left to CPA")
+	}
+	f.complete(t, r.RequestID)
+	r = f.before(t, "off-kept", "claude-opus-5-5")
+	if got := f.pick(t, r, "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("off did not keep the chat", got)
+	}
+	f.after(t, r, "a")
+	if decisions, _ = f.p.decisionView(); len(decisions) != 2 || decisions[0].Proposed.Reason != routing.KeepAccount || decisions[0].Outcome != "admitted" || decisions[0].ActualAuth != "a" {
+		t.Fatalf("kept chat not recorded: %+v", decisions)
 	}
 }
 

@@ -595,6 +595,7 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 // pick places a chat by 7-day pace (docs/pace-routing.md) when routing is on.
 // Primary requests and compactions are routed; other auxiliaries are left to
 // CPA. Warm chats stay on their account; a compaction never rebinds the chat.
+// When routing is off, CPA places chats, but a bound chat stays on its account.
 func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPickResponse {
 	p.mu.Lock()
 	cfg := p.cfg
@@ -626,13 +627,16 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	if t.Claim != nil {
 		kind = t.Claim.Kind
 	}
-	if !cfg.Enabled || cfg.Routing.Mode != "on" || !enabled || !tracked {
+	if !cfg.Enabled || !enabled || !tracked {
 		return pluginapi.SchedulerPickResponse{}
+	}
+	if cfg.Routing.Mode != "on" {
+		return p.pinToChat(id, t, req, provider, routing.KeepAccount)
 	}
 	// Other auxiliaries, and whatever a managed cache policy does not select as
 	// primary, are never placed by pace; on the chat's model they stay with it.
 	if (kind != "primary" && kind != "compaction") || (managed && selection.Kind != "primary") {
-		return p.pinAuxiliary(id, t, req, provider)
+		return p.pinToChat(id, t, req, provider, routing.WarmAuxiliary)
 	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
 	if key == "" {
@@ -718,13 +722,16 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	return t.RoutingChoice
 }
 
-// pinAuxiliary keeps an auxiliary request on the chat's model (a warming ping,
-// a generation from the chat's context) on the chat's account, where it reads
-// and renews the chat's prompt cache. Left to CPA, it would follow CPA's own
-// session affinity, which does not know where Pacer put the chat, and warm
-// another account. It never places or rebinds a chat: without a binding on
-// this model, or when CPA does not offer the chat's account, CPA decides.
-func (p *Plugin) pinAuxiliary(id string, t attempt, req pluginapi.SchedulerPickRequest, provider string) pluginapi.SchedulerPickResponse {
+// pinToChat keeps a request on the chat's model on the chat's account, where
+// it reads and renews the chat's prompt cache. With routing on it holds the
+// auxiliaries (a warming ping, a generation from the chat's context,
+// WarmAuxiliary): left to CPA, they would follow CPA's own session affinity,
+// which does not know where Pacer put the chat, and warm another account. With
+// routing off it holds every request of the chat (KeepAccount): CPA's affinity
+// lives in memory only, and after a CPA restart it would move warm chats.
+// It never places or rebinds a chat: without a binding on this model, or when
+// CPA does not offer the chat's account, CPA decides.
+func (p *Plugin) pinToChat(id string, t attempt, req pluginapi.SchedulerPickRequest, provider, reason string) pluginapi.SchedulerPickResponse {
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
 	if key == "" {
 		return pluginapi.SchedulerPickResponse{}
@@ -748,7 +755,7 @@ func (p *Plugin) pinAuxiliary(id string, t attempt, req pluginapi.SchedulerPickR
 			auth = c.ID
 		}
 	}
-	d := routing.Decision{Handled: auth != "", Auth: auth, Account: b.Account, Reason: routing.WarmAuxiliary}
+	d := routing.Decision{Handled: auth != "", Auth: auth, Account: b.Account, Reason: reason}
 	choice := routingAction(req, d, candidates)
 	if !choice.Handled {
 		return pluginapi.SchedulerPickResponse{}

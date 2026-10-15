@@ -115,8 +115,9 @@ func TestNativeDispatchForcedMoveStopsBeforeFakeUpstreamAndRecovers(t *testing.T
 			headers[k] = v
 		}
 		decision := invoke(t, p, pluginabi.MethodSchedulerPick, pluginapi.SchedulerPickRequest{Provider: "claude", Model: req.Model, Options: pluginapi.SchedulerOptions{Headers: headers, Metadata: req.Metadata}, Candidates: []pluginapi.SchedulerAuthCandidate{{ID: auth, Provider: "claude"}}}).(pluginapi.SchedulerPickResponse)
-		if decision.Handled {
-			t.Fatal("routing-off changed CPA's choice")
+		// Off may only keep the chat on its account; CPA offers just its choice here.
+		if decision.Handled && decision.AuthID != auth {
+			t.Fatal("routing-off changed CPA's choice", decision)
 		}
 		after := invoke(t, p, pluginabi.MethodRequestInterceptAfter, req).(pluginapi.RequestInterceptResponse)
 		defer invoke(t, p, pluginabi.MethodRequestComplete, pluginapi.RequestCompletion{RequestID: id})

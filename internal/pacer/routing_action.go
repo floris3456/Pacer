@@ -7,7 +7,8 @@ import (
 )
 
 // routingAction is the sole pace-decision -> CPA action boundary; the caller
-// acts only when routing is on. candidates is a value-only discovery snapshot
+// acts when routing is on, and when it is off only to keep a bound chat on its
+// account (routing.KeepAccount). candidates is a value-only discovery snapshot
 // taken under Plugin.mu. Neither it nor req's host-owned candidate slices/maps
 // are mutated or retained here.
 func routingAction(req pluginapi.SchedulerPickRequest, d routing.Decision, candidates []credential) pluginapi.SchedulerPickResponse {

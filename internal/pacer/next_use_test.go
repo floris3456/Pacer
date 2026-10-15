@@ -207,11 +207,15 @@ func TestWarmingPingsStayWithTheChatAndKeepItWarm(t *testing.T) {
 	if f.pick(t, f.before(t, "unknown", "claude-opus-5-5"), "a", "b").Handled {
 		t.Fatal("generation without a chat pinned")
 	}
-	// Routing off: CPA decides everything.
+	// Routing off: the chat's pings still stay on its account (keep_account);
+	// another model is CPA's.
 	f.q.Session = "chat"
 	f.p.cfg.Routing.Mode = "off"
-	if f.pick(t, f.before(t, "off", "claude-opus-5-5"), "a", "b").Handled {
-		t.Fatal("off pinned")
+	if got := f.pick(t, f.before(t, "off", "claude-opus-5-5"), "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("off left the chat's ping to CPA", got)
+	}
+	if f.pick(t, f.before(t, "off-other-model", "claude-haiku-4-5"), "a", "b").Handled {
+		t.Fatal("off pinned another model")
 	}
 }
 

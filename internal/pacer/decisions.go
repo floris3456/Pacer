@@ -31,7 +31,8 @@ func openDecisions(db *sql.DB) error {
 
 func (p *Plugin) recordDecision(request string, t attempt, c credential, outcome string) {
 	p.mu.Lock()
-	enabled := p.cfg.Routing.Mode == "on"
+	// With routing off, Pacer acts only to keep a chat on its account.
+	enabled := p.cfg.Routing.Mode == "on" || t.Decision.Reason == routing.KeepAccount
 	p.mu.Unlock()
 	if !enabled || t.Key == "" || t.Decision.Reason == "" {
 		return

@@ -170,6 +170,10 @@ def main():
     count = len(state()["decisions"])
     status, served, d = chat(run + "3")
     check("off: CPA routes and Pacer records no decision", status == 200 and len(served) == 1 and len(state()["decisions"]) == count, {"served": served})
+    # A claim chat carries no CPA session key: CPA alone would place it by
+    # fill-first, as after a CPA restart cleared its affinity. Off keeps it.
+    status, body, served, d = claim_chat(run + "claim", "c2", "r6")
+    check("off: a bound chat stays on its account", status == 200 and served == ["cap-c"] and d["proposed"]["reason"] == "keep_account" and d["actual_auth"] == "cap-c.json", {"status": status, "served": served, "decision": d["proposed"]})
     check("invalid mode refused", call(CPA + "/v0/management/plugins/pacer/routing", "PATCH", {"mode": "dry-run"}, key=ADMIN)[0] == 400)
     print(json.dumps({"passed": sum(c["pass"] for c in checks), "failed": sum(not c["pass"] for c in checks)}))
     raise SystemExit(0 if all(c["pass"] for c in checks) else 1)
