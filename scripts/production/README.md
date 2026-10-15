@@ -1,5 +1,28 @@
 # Pacer Phase 1+2 on CT104
 
+## Swapping the Pacer library (current)
+
+`swap.py` (run on CT104) registers a built library against a copy of production's Pacer data before
+anything live changes, then swaps it with one ordinary CPA restart:
+
+```sh
+python3 -B swap.py check <release-dir> --rollback /opt/cliproxyapi/plugins/linux/amd64/pacer-v0.2.0-dev.so
+python3 -B swap.py swap  <release-dir> --backup /opt/cliproxyapi/backups/pacer-<name>
+```
+
+`<release-dir>` holds a `scripts/build.sh` output (`pacer-v*.so`, `native-probe`). `check` copies every
+store in the state directory and the configured report stores, registers twice through the C ABI with
+CPA's schema 7, and then registers the rollback library on the upgraded copy. On 2026-10-15 a new table
+tripped the report feed's schema witness on the existing database and Pacer did not register; `check`
+reproduces that failure for `3cc4004` against the pre-swap database and passes for `7061a35`. `swap`
+re-runs `check`, backs up the library, `state.sqlite` and `config.yaml`, installs atomically, restarts
+CPA and restores the previous library (one more restart) if Pacer does not answer within `--wait`.
+
+A database backup made with SQLite's backup API restarts the copy's schema version at 1; the report feed
+reads that as a schema that went backwards and refuses it. `swap.py` keeps the source's schema version;
+an older backup must get `PRAGMA schema_version=<live value at backup time>` before it is restored.
+
+
 > Historical. Pace routing removed the dry-run mode and its report route
 > (`/v0/management/plugins/pacer/dry-run-report` now answers 404), so `dry-run-daily.py` and
 > `pacer-dry-run-daily.timer` are retired: disable the timer when deploying pace routing.

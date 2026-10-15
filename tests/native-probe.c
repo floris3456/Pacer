@@ -30,7 +30,8 @@ int main(int argc,char **argv) {
   assert(plugin.call("plugin.register",(const uint8_t*)payload,size,&response)==0);
   assert(response.ptr && response.len);
   json=calloc(response.len+1,1); memcpy(json,response.ptr,response.len);
-  assert(strstr(json,"\"ok\":true") && strstr(json,"\"schema_version\":6"));
+  if (!strstr(json,"\"ok\":true")) fprintf(stderr,"register: %.2000s\n",json);
+  assert(strstr(json,"\"ok\":true") && (strstr(json,"\"schema_version\":6") || strstr(json,"\"schema_version\":7")));
   char expected[128];
   assert(snprintf(expected,sizeof(expected),"\"Version\":\"%s\"",argv[3])<(int)sizeof(expected));
   assert(strstr(json,"\"Name\":\"pacer\"") && strstr(json,expected));
