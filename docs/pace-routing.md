@@ -169,7 +169,9 @@ Pinning warm chats also stops CPA from moving them.
   register, so Pacer's credential inventory was still empty. The chat's first step was left to CPA
   (cleared affinity, another account), and Pacer then refused the move with a compaction. When CPA
   offers a credential Pacer does not know, the pin now re-reads CPA's inventory once first, as the
-  after-hook already did.
+  after-hook already did. With routing on, a chat's own steps are routed, not pinned, and missed the
+  same window: routing without the inventory left a warm chat to CPA, which moved it, and the move
+  was forced. Routing re-reads the inventory the same way before it decides.
 - Meter after a large request (same day): a request's reply headers show the meter from before that
   request was charged, so the 574k write left Pacer at 64% for 4 minutes while the account was at 54%.
   A finished request with at least 100k uncached input tokens (`meterRereadTokens`) now asks for one

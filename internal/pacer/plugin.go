@@ -638,6 +638,19 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	if (kind != "primary" && kind != "compaction") || (managed && selection.Kind != "primary") {
 		return p.pinToChat(id, t, req, provider, routing.WarmAuxiliary)
 	}
+	p.mu.Lock()
+	unknown := false
+	for _, candidate := range req.Candidates {
+		_, known := p.creds[candidate.ID]
+		unknown = unknown || !known
+	}
+	p.mu.Unlock()
+	if unknown {
+		// As in pinToChat: CPA may finish loading credentials after plugin
+		// registration. Routing without them leaves the chat to CPA, whose
+		// affinity a restart cleared, and a warm chat would be moved.
+		p.discover(true)
+	}
 	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
 	if key == "" {
 		return pluginapi.SchedulerPickResponse{}
