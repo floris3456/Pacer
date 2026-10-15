@@ -281,6 +281,34 @@ func TestOffKeepsABoundChatOnItsAccount(t *testing.T) {
 	requireCompact(t, f.after(t, r, "b"))
 }
 
+// CPA loads its auth files after the plugins register (2026-10-15 17:11,
+// production): the first request after the restart found Pacer's inventory
+// empty, was left to CPA's cleared affinity (another account), and after()
+// then refused the move with a compaction.
+func TestOffKeepsABoundChatWhenCPALoadsCredentialsLate(t *testing.T) {
+	f := newRoutingFixture(t, "off")
+	f.seed(t, 5*time.Minute)
+	var loaded atomic.Bool
+	f.p.Host = func(method string, input any) (json.RawMessage, error) {
+		if method == "host.auth.list" && !loaded.Load() {
+			return json.Marshal(map[string]any{"files": []map[string]any{}})
+		}
+		return testHost(method, input)
+	}
+	f.p.discover(true)
+	if len(f.p.creds) != 0 {
+		t.Fatal("fixture: inventory not empty", f.p.creds)
+	}
+	loaded.Store(true)
+	r := f.before(t, "first-after-restart", "claude-opus-5-5")
+	if got := f.pick(t, r, "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("chat left to CPA while its inventory loaded", got)
+	}
+	if got := f.after(t, r, "a"); got.Terminate {
+		t.Fatal(string(got.ResponseBody))
+	}
+}
+
 func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t *testing.T) {
 	for _, forced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "forced"}[forced], func(t *testing.T) {

@@ -740,14 +740,39 @@ func (p *Plugin) pinToChat(id string, t attempt, req pluginapi.SchedulerPickRequ
 	if err != nil || b.Key == "" || b.Provider != provider || b.Model != req.Model {
 		return pluginapi.SchedulerPickResponse{}
 	}
+	auth, candidates, unknown := p.chatCredential(req, b)
+	if unknown {
+		// CPA may finish loading credentials after plugin registration (after()
+		// refreshes too). Left to CPA, whose affinity a restart cleared, the
+		// chat would move to another account.
+		p.discover(true)
+		auth, candidates, _ = p.chatCredential(req, b)
+	}
+	d := routing.Decision{Handled: auth != "", Auth: auth, Account: b.Account, Reason: reason}
+	choice := routingAction(req, d, candidates)
+	if !choice.Handled {
+		return pluginapi.SchedulerPickResponse{}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// The chat's own credential, else an offered alias of its account.
-	auth := ""
+	t.Key, t.Decision, t.RoutingChoice = key, d, choice
+	t.Model, t.PreviousAccount, t.RoutingProvider = req.Model, b.Account, provider
+	p.requests[id] = t
+	return choice
+}
+
+// chatCredential returns the chat's own credential among the offered ones,
+// else an offered alias of its account, the offered credentials Pacer knows,
+// and whether any offered ID is missing from its inventory.
+func (p *Plugin) chatCredential(req pluginapi.SchedulerPickRequest, b tracker.Binding) (string, []credential, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	auth, unknown := "", false
 	candidates := make([]credential, 0, len(req.Candidates))
 	for _, candidate := range req.Candidates {
 		c, ok := p.creds[candidate.ID]
 		if !ok {
+			unknown = true
 			continue
 		}
 		candidates = append(candidates, c)
@@ -755,15 +780,7 @@ func (p *Plugin) pinToChat(id string, t attempt, req pluginapi.SchedulerPickRequ
 			auth = c.ID
 		}
 	}
-	d := routing.Decision{Handled: auth != "", Auth: auth, Account: b.Account, Reason: reason}
-	choice := routingAction(req, d, candidates)
-	if !choice.Handled {
-		return pluginapi.SchedulerPickResponse{}
-	}
-	t.Key, t.Decision, t.RoutingChoice = key, d, choice
-	t.Model, t.PreviousAccount, t.RoutingProvider = req.Model, b.Account, provider
-	p.requests[id] = t
-	return choice
+	return auth, candidates, unknown
 }
 
 // TransientWait: a warm chat's account was left out although its meters can
