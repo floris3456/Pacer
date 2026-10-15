@@ -22,7 +22,11 @@ const (
 	IdleInterval = 30 * time.Minute
 	// ActivityQuiet is how long after its last request an account whose meter
 	// only a direct read reveals is read again.
-	ActivityQuiet  = 5 * time.Minute
+	ActivityQuiet = 5 * time.Minute
+	// SpendQuiet is how long after a large request ends its account's meter is
+	// read, unless a newer reply reading arrives first: that request's own
+	// reply headers show the meter from before it was charged.
+	SpendQuiet     = time.Minute
 	MaxBackoff     = 6 * time.Hour
 	ReasonSeed     = "seed"
 	ReasonPartial  = "partial"
@@ -30,6 +34,7 @@ const (
 	ReasonIdle     = "idle"
 	ReasonManual   = "manual"
 	ReasonActivity = "activity"
+	ReasonSpend    = "spend"
 )
 
 // directOnly names providers whose ordinary responses carry no quota: only a
@@ -62,7 +67,8 @@ type Job struct {
 	AccountNotBefore  time.Time `json:"account_not_before"`
 	EndpointNotBefore time.Time `json:"endpoint_not_before"`
 	Failures          int       `json:"failures"`
-	// Activity is the last request served by a direct-only account.
+	// Activity is the last request served by a direct-only account, or the
+	// last large request (Spend) of an account whose replies carry its quota.
 	Activity time.Time `json:"activity"`
 }
 
@@ -121,6 +127,8 @@ func queueDue(account, endpoint, reason string, due, now time.Time) time.Time {
 		return due.Add(IdleInterval)
 	case ReasonActivity:
 		return due.Add(ActivityQuiet)
+	case ReasonSpend:
+		return due.Add(SpendQuiet)
 	default:
 		return due
 	}
@@ -159,7 +167,9 @@ func putBudget(c *sql.Conn, kind, key string, b budget) error {
 // accidentally stand in for the main budget. A direct-only provider (no quota in
 // its responses) is covered by its last read while that is fresh; a request it
 // served after that read asks for one more read ActivityQuiet after the last
-// such request. Unknown adapters are never claimed complete.
+// such request. A large request on another provider asks for one read
+// SpendQuiet after it ended, unless a newer reading arrived since. Unknown
+// adapters are never claimed complete.
 func coverage(windows []Window, now, activity time.Time) (bool, time.Time, string) {
 	return coverageInterval(windows, now, activity, IdleInterval)
 }
@@ -211,9 +221,13 @@ func coverageInterval(windows []Window, now, activity time.Time, interval time.D
 			}
 		}
 	}
-	if direct && activity.After(read) {
-		if quiet := activity.Add(ActivityQuiet); quiet.Before(next) {
-			next, reason = quiet, ReasonActivity
+	if activity.After(read) {
+		quiet, why := activity.Add(SpendQuiet), ReasonSpend
+		if direct {
+			quiet, why = activity.Add(ActivityQuiet), ReasonActivity
+		}
+		if quiet.Before(next) {
+			next, reason = quiet, why
 		}
 	}
 	return (claude5 && claude7) || codex || direct, next, reason
@@ -340,6 +354,46 @@ func (s *Store) Activity(account, provider string, at time.Time) error {
 		}
 		if !exists {
 			_, err = c.ExecContext(context.Background(), "INSERT INTO observation_jobs(account,endpoint,reason,due,state,activity) VALUES(?,?,?,?,'queued',?)", account, endpoint, ReasonActivity, ns(queueDue(account, endpoint, ReasonActivity, at, now)), ns(at))
+		} else if at.After(j.Activity) {
+			_, err = c.ExecContext(context.Background(), "UPDATE observation_jobs SET activity=? WHERE account=?", ns(at), account)
+		}
+		if err != nil {
+			return err
+		}
+		return s.reconcileJob(c, account, now)
+	})
+}
+
+// Spend notes a large request that an account whose replies carry its quota
+// finished at the given time. That request's own reply showed the meter from
+// before it was charged, so the meter is read once SpendQuiet later unless a
+// newer reading arrives first, never sooner than the account and endpoint
+// floors allow. Direct-only providers are covered by Activity.
+func (s *Store) Spend(account, provider string, at time.Time) error {
+	if account == "" {
+		return errors.New("observation: account required")
+	}
+	if directOnly(provider) || Endpoint(provider) == "" {
+		return nil
+	}
+	endpoint, err := endpointKey(provider)
+	if err != nil {
+		return err
+	}
+	return s.write(func(c *sql.Conn) error {
+		now := s.clock().UTC()
+		if at.IsZero() || at.After(now) {
+			at = now
+		}
+		j, exists, err := getJob(c, account)
+		if err != nil {
+			return err
+		}
+		if exists && j.Endpoint != endpoint {
+			return errors.New("observation: account already uses a different endpoint budget")
+		}
+		if !exists {
+			_, err = c.ExecContext(context.Background(), "INSERT INTO observation_jobs(account,endpoint,reason,due,state,activity) VALUES(?,?,?,?,'queued',?)", account, endpoint, ReasonSpend, ns(queueDue(account, endpoint, ReasonSpend, at, now)), ns(at))
 		} else if at.After(j.Activity) {
 			_, err = c.ExecContext(context.Background(), "UPDATE observation_jobs SET activity=? WHERE account=?", ns(at), account)
 		}

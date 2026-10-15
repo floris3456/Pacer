@@ -120,6 +120,12 @@ func (p *Plugin) captureUsageCredentialTx(request string, c credential) error {
 	return tx.Commit()
 }
 
+// meterRereadTokens: a request that processed this many input tokens without a
+// cache read moves a 5-hour meter by a few points (a 574k-token cache write
+// moved one by 10 on 2026-10-15). Its own reply showed the meter from before,
+// so the account's meter is read again shortly after (observation.Spend).
+const meterRereadTokens = 100_000
+
 func (p *Plugin) recordUsage(raw []byte) error {
 	_, err := p.recordUsageCaptured(raw)
 	return err
@@ -193,6 +199,9 @@ func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error
 	record := observed.Record
 	if record.Attribution.AccountID != captured.Account {
 		return captured, errors.New("persisted native attribution mismatch")
+	}
+	if p.observer != nil && record.Final && record.Success && record.Usage.NonCacheInput+record.Usage.CacheCreate >= meterRereadTokens {
+		p.metricError(p.observer.Spend(captured.Account, captured.Provider, p.now()))
 	}
 	if p.policyEvidence != nil && record.Policy.SelectedTTL != "" {
 		_, evidenceErr := p.policyEvidence.Observe(context.Background(), record)

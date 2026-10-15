@@ -165,6 +165,11 @@ Pinning warm chats also stops CPA from moving them.
   model on its account when CPA offers it (`keep_account`, recorded in the decision trace). It never
   places a new chat or moves one: when CPA does not offer the account, CPA decides and the move stays
   forced.
+- Meter after a large request (same day): a request's reply headers show the meter from before that
+  request was charged, so the 574k write left Pacer at 64% for 4 minutes while the account was at 54%.
+  A finished request with at least 100k uncached input tokens (`meterRereadTokens`) now asks for one
+  meter read a minute later (`observation.Spend`, reason `spend`), unless a newer reply arrives first;
+  the 15-minute account and 30-second endpoint floors still apply.
 
 ## Next and forced use
 

@@ -159,6 +159,7 @@ prior schema changes remain refused; the feed identity and sequence are preserve
 | `ReasonDeadline` | reported reset + stable 30–90s jitter |
 | `ReasonIdle` | last evidence/base + 30m |
 | `ReasonActivity` | last request of a direct-only account + 5m |
+| `ReasonSpend` | end of a large request (`Spend`) of a Claude/Codex account + 1m, unless a newer reply reading arrived since |
 | `ReasonPartial`, `ReasonManual`, custom reason | requested time, subject to every shared floor |
 
 There is one inflight job per account **and** endpoint, at least 15m between account starts,
@@ -168,7 +169,9 @@ erase a pending seed's jitter. Passed-reset grace also survives manual requests.
 
 Fresh complete evidence cancels queued fallback work and retains a `waiting` idle/deadline
 wake-up. More fresh passive observations postpone it, so sustained complete passive traffic
-causes zero periodic direct calls. Freshness ages balances/status after 30m; an older, future
+causes zero periodic direct calls. The one exception is a large request: its own reply showed
+the meter from before it was charged, so it asks for one read (`ReasonSpend`) when no newer
+reply follows. Freshness ages balances/status after 30m; an older, future
 absolute reset remains evidence. Claude completeness requires both known shared 5h and 7d
 windows; explicit null counts. Codex can legitimately have only one shared weekly primary.
 Every already-known scoped window must also be complete. A scoped-only signal cannot prove
