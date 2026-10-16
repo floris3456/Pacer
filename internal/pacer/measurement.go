@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"sort"
 	"time"
 
@@ -254,14 +255,19 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 		p.metricError(err)
 		return
 	}
-	p.usageChanges.notify()
-	if usageOnlyProvider(c.Provider) {
-		return // usage page only: no measurement report, no routing evidence
-	}
 	after, err := p.observer.ReadWindows(c.Account)
 	if err != nil {
 		p.metricError(err)
 		return
+	}
+	// Audit-only replays and refused stale evidence leave the canonical view
+	// unchanged. Include evidence times and status, not just quota values:
+	// a fresh reading can make an unchanged balance usable again.
+	if !reflect.DeepEqual(before, after) {
+		p.usageChanges.notify()
+	}
+	if usageOnlyProvider(c.Provider) {
+		return // usage page only: no measurement report, no routing evidence
 	}
 	previous := map[string]observation.Window{}
 	for _, w := range before {

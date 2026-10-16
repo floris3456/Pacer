@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/floris3456/cliproxyapi-quota-handoff/internal/observation"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -122,6 +123,92 @@ func TestUsageWatchFansOutOtherCallersHeadersBeforeStreamFinishes(t *testing.T) 
 	}
 }
 
+func TestUsageWatchNotifiesOnlyCanonicalChanges(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newRoutingFixture(t, "off")
+			c := f.p.creds["a"]
+			c.Provider, c.Account = provider, provider+":watch-account"
+			left := 80.0
+			at := f.p.now()
+			sample := observation.Window{Provider: provider, Scope: "all", Seconds: 18000, Remaining: &left, Reset: at.Add(time.Hour), Usage: observation.Field{At: at, Source: "header"}, ResetEvidence: observation.Field{At: at, Source: "header", Quality: "absolute"}}
+			f.p.storeObservations(c, []observation.Window{sample})
+			for _, change := range []string{"evidence-time", "balance", "conflict", "dormant"} {
+				cursor, _ := f.p.usageChanges.wait("", 0, f.p.workerDone)
+				results := make(chan string, 3)
+				for range 3 {
+					go func() {
+						next, _ := f.p.usageChanges.wait(cursor, 20*time.Second, f.p.workerDone)
+						results <- next
+					}()
+				}
+				awaitUsageWaiters(t, &f.p.usageChanges, 3)
+				// Replayed and out-of-order readings stay in the history but leave the
+				// stored window unchanged, so they must not wake every viewer.
+				f.p.storeObservations(c, []observation.Window{sample})
+				f.p.storeObservations(c, []observation.Window{sample})
+				stale := sample
+				stale.Usage.At, stale.ResetEvidence.At = at.Add(-time.Second), at.Add(-time.Second)
+				f.p.storeObservations(c, []observation.Window{stale})
+				if got, _ := f.p.usageChanges.wait("", 0, f.p.workerDone); got != cursor {
+					t.Fatalf("%s: duplicate or stale observation woke viewers", change)
+				}
+				switch change {
+				case "evidence-time":
+					f.clock.Add(int64(time.Second))
+					sample.Usage.At = f.p.now()
+				case "balance":
+					f.clock.Add(int64(time.Second))
+					left = 70
+					sample.Usage.At = f.p.now()
+				case "conflict":
+					left = 60 // A contradiction at the same time changes the stored status.
+				case "dormant":
+					f.clock.Add(int64(time.Second))
+					sample = observation.Window{Provider: provider, Scope: "all", Seconds: 18000, Dormant: true, StatusEvidence: observation.Field{At: f.p.now(), Source: "api"}}
+				}
+				f.p.storeObservations(c, []observation.Window{sample})
+				next, _ := f.p.usageChanges.wait("", 0, f.p.workerDone)
+				if next == cursor {
+					t.Fatalf("%s: a changed window did not advance the cursor", change)
+				}
+				for range 3 {
+					select {
+					case got := <-results:
+						if got != next {
+							t.Fatalf("%s: viewer missed the change: %s != %s", change, got, next)
+						}
+					case <-time.After(3 * time.Second):
+						t.Fatalf("%s: a changed window did not wake the viewer", change)
+					}
+				}
+				awaitUsageWaiters(t, &f.p.usageChanges, 0)
+			}
+		})
+	}
+}
+
+func awaitUsageWaiters(t *testing.T, u *usageChanges, want int) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		u.mu.Lock()
+		waiting := u.waiters
+		u.mu.Unlock()
+		if waiting == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("usage waiters = %d, want %d", waiting, want)
+		}
+	}
+}
+
 func TestUsageWatchCursorRacesTimeoutAndShutdown(t *testing.T) {
 	var u usageChanges
 	done := make(chan struct{})
@@ -134,10 +221,15 @@ func TestUsageWatchCursorRacesTimeoutAndShutdown(t *testing.T) {
 	if got, ok := u.wait(next, time.Millisecond, done); !ok || got != next {
 		t.Fatal("heartbeat changed cursor")
 	}
+	awaitUsageWaiters(t, &u, 0)
 	close(done)
 	if _, ok := u.wait(next, 20*time.Second, done); ok {
 		t.Fatal("shutdown left wait alive")
 	}
+	if _, ok := u.wait("", 0, done); ok {
+		t.Fatal("shutdown accepted a new snapshot")
+	}
+	awaitUsageWaiters(t, &u, 0)
 	var restarted usageChanges
 	if got, ok := restarted.wait(next, 20*time.Second, make(chan struct{})); !ok || got == next {
 		t.Fatal("restart reused cursor")
