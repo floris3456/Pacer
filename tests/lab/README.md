@@ -13,6 +13,21 @@ establish OpenCode's committed-compaction behavior; that needs the client lab.
 
 Keep all live services and the CPAMP database untouched.
 
+## Standalone browser checks
+
+`check-settings.mjs`, `check-management.mjs` and `check-connection.mjs` serve the
+real management page on localhost with synthetic responses. They need Chromium
+and Playwright, but no CPA instance, credentials or Docker. Their container
+defaults can be overridden for an existing local Playwright installation:
+
+```sh
+PACER_PLAYWRIGHT=/path/to/playwright/index.mjs \
+PACER_EVIDENCE=/path/to/screenshots node tests/lab/check-management.mjs
+```
+
+Use the same environment for the other two scripts. `PACER_EVIDENCE` defaults to
+`/evidence`; the connection check does not save screenshots.
+
 The CPA host must be built with **`CGO_ENABLED=1`** on Linux for native dynamic
 plugins. A `CGO_ENABLED=0` server can start and serve management endpoints while
 rejecting every `.so`; its successful Go build is not native-plugin acceptance.

@@ -1,7 +1,39 @@
 # Quota consistency validation
 
-These changes build on upstream `d727bc84962c3b86f12bc39a885c0ee959282088`.
-They retain protocol 1 and the default shared credential pool and routing policy.
+These changes integrate upstream `routing-restart` at
+`9d542c1f7ddb633fd16ac8c94a1364f88162a212`, including `ping-affinity`.
+They retain protocol 1 and the default shared credential pool.
+
+## Pace routing integration (2026-10-16)
+
+The integration retains upstream's off/on pace routing, bounded waits for warm
+accounts, restart-safe affinity, persisted settings, compaction model hints,
+quota polling, dormant-window recovery and management interface.
+
+Regression cases cover the intersections with this contribution: quota safety
+cannot override a valid pace decision; routing and NEXT/FORCE USE share credit
+evidence; revoked grants cannot revive a previous account through pinning,
+previews or temporary waits. Confirmed exhausted Claude accounts are not pinned.
+Cycle retirement shares one transactional helper across observation and migration.
+
+The full Go race suite with FTS5, vet, SDK snapshot verification, SDK tests and
+native build/ABI probe pass. Chromium tests exercise settings, account pauses,
+connection/retry, model defaults, quota-window selection, polling and narrow
+layouts. The existing browser fixtures now follow the upstream interface rather
+than removed dropdowns and tabs; their security and behavior assertions remain.
+
+The lab's 58 Python checks, four preview checks and 14 forwarding UI scenarios
+also pass. The forwarding fixture uses the current session/bridge connection and
+disconnect events; it retains cancellation, escaping and exact-value checks.
+
+Native quota safety, Claude replay and quota-window start labs pass, including
+the real keepalive delay, token expiry, same-account cache replay, subagent ping
+denial, and window-start retry state surviving restarts. They use fake providers
+and the matching CPA build from `3e766e042020997ed38c0fe21b979cc2cbc6ea45`.
+This establishes the host/plugin boundary, not live provider billing. Required
+host additions remain separate from this plugin PR; unsupported hosts cannot
+enable the guarded capabilities. Nothing here deploys or changes a live routing
+configuration.
 
 ## Independent client contract (2026-10-12)
 
@@ -119,8 +151,9 @@ the subscription floor; mixed source timestamps cannot force a move.
 
 Affected observation/routing/Pacer suites pass with the Go race detector and vet.
 The associated client passes 292 tests (1,649 assertions), typecheck and standalone
-SDK build, including actual OpenTUI rendering at 37 columns. Existing quota
-scheduling is unchanged. This follow-up adds no paid inference test requests.
+SDK build, including actual OpenTUI rendering at 37 columns. This earlier
+follow-up left quota scheduling unchanged; the subsequent pace integration is
+described above. Neither adds paid inference test requests.
 
 An initial real upgrade exposed the main ledger's schema-cookie protection;
 fresh-database tests alone did not exercise that migration. Credit storage now

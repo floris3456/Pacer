@@ -1,6 +1,6 @@
 // Real Chromium and the production page, embedded by a panel without a legacy bridge.
 // Run in the Playwright image with its matching package installed under /b.
-import { chromium } from '/b/node_modules/playwright/index.mjs';
+const { chromium } = await import(process.env.PACER_PLAYWRIGHT || '/b/node_modules/playwright/index.mjs');
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';

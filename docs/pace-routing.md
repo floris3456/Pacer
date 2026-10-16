@@ -1,6 +1,6 @@
 # Pace routing
 
-Status: **implemented**, branch `pace-routing`. Replaced the dry-run router (`internal/routing`), its
+Status: **implemented**. Replaced the dry-run router (`internal/routing`), its
 activation gates and the dry-run report. By the owner's decision there is no dry-run phase: routing is `off` or `on`.
 
 ## Goal
@@ -52,6 +52,18 @@ Nothing else: no prices, no calibration, no expected request value.
    churn between equivalent accounts.
 4. **No usable input** for any candidate, or no eligible candidate: `Handled:false`, CPA decides.
 
+Subscription floors do not prove exhaustion while an account can use extra
+capacity. An offered current account with available Claude extra usage, or
+available/uncertain Codex credits, stays eligible for retention without an invented
+pace (`credit_status_unscored`). A fresh empty-credit flag cannot combine with an
+older exhausted meter to force a move. Pauses still apply to cold placements;
+warm chats may stay. This exception neither selects an unoffered account nor
+enables paid usage. NEXT/FORCE USE uses the same evidence.
+
+Configured caller grants filter both offered candidates and the temporarily
+unoffered current-account evidence. Revocation cannot restore an account through
+pinning or a preview. Automatic handoffs stay within the chat's provider.
+
 Example, 2026-10-14 20:00 UTC (live meters):
 
 | Account | 7d left | 7d reset | Pace |
@@ -85,10 +97,16 @@ Pinning warm chats also stops CPA from moving them.
 
 ## Safety without dry-run
 
-- Every refusal path falls back to CPA (`Handled:false`); missing evidence is never zero usage.
+- Missing routing evidence falls back to CPA (`Handled:false`); it is never zero usage.
+  Independent access and admission guards still apply. A warm account omitted
+  temporarily can produce a bounded retryable wait instead of a forced move.
 - Only CPA-offered candidates are chosen; Pacer never resurrects a removed credential.
 - Setting `off` through management (persisted, no restart) restores CPA routing for the next request;
   Pacer then only keeps a bound chat on its account (`keep_account`), so a CPA restart does not move it.
+- The Claude quota guard remains active when pace routing is off. It avoids an
+  observed exhausted account when an alternative exists and refuses admission
+  when both quota and extra capacity are confirmed unavailable. When routing is
+  on, it cannot override a valid pace decision.
 - The decision trace (`pacer_decisions`) keeps each decision with its reason and the account CPA
   served; it will also record every candidate's pace, 5-hour and 7-day input.
 - Success is read directly from the meters, with no simulation: the 7-day % left at each reset per
@@ -186,10 +204,12 @@ another account. FORCE USE is the forced move: `now` when the chat's account can
 when its 5-hour or 7-day meter is within the forced-move warning (setting, default 5 points) of its
 floor. An account CPA left out whose meters can serve is waited for and yields neither.
 
-## Not planned
+## Optional window starts
 
-- Keep-alive requests that start a window as soon as it resets: rejected by the owner, because they
-  add an automated request pattern to subscription accounts.
+Automatic window starts are disabled by default and separate from pace routing.
+The opt-in [quota-window starter](quota-window-start.md) requires an attested host,
+fresh quota and spending evidence, exact-account dispatch and durable retry limits.
+Enabling routing does not enable these requests.
 
 ## Open points
 

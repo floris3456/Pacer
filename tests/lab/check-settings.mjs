@@ -1,10 +1,11 @@
 // The Pacer page's routing settings in Chromium, against a stub of Pacer's
 // state and settings routes: render, the ordered summary-model list with
 // suggestions, saving, refusals and pausing an account for new chats.
-import { chromium } from '/b/node_modules/playwright/index.mjs';
+const { chromium } = await import(process.env.PACER_PLAYWRIGHT || '/b/node_modules/playwright/index.mjs');
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+const evidence = process.env.PACER_EVIDENCE || '/evidence';
 
 const html=fs.readFileSync(new URL('../../internal/management/index.html',import.meta.url));
 const defaults={compact_on_switch:false,compaction_models:[],band_percent:90,new_chat_minimum_percent:15,short_floor_percent:2,long_floor_percent:1,warm_minutes:60,transient_retries:3,force_warning_percent:5,providers:['claude'],paused_accounts:[]};
@@ -97,11 +98,11 @@ try{
   assert.deepEqual(patches.at(-1),{paused_accounts:['claude:ilse']});
   assert.equal(await page.getByLabel('New chats on ilse').isChecked(),false);
   assert.match(await page.locator('#accounts').innerText(),/Paused/);
-  fs.mkdirSync('/evidence',{recursive:true});
-  await page.locator('#pacer').screenshot({path:'/evidence/settings-wide.png'});
+  fs.mkdirSync(evidence,{recursive:true});
+  await page.locator('#pacer').screenshot({path:`${evidence}/settings-wide.png`});
   await page.setViewportSize({width:390,height:844});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)<=1,'no horizontal scroll');
-  await page.locator('#pacer').screenshot({path:'/evidence/settings-narrow.png'});
+  await page.locator('#pacer').screenshot({path:`${evidence}/settings-narrow.png`});
   assert.deepEqual(errors,[]);
   console.log('PASS: settings render; summary-model list opens a field per model, suggests CPA models, reorders/removes; save; refusals; revert; pause for new chats; narrow layout.');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

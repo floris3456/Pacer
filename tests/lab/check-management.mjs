@@ -1,14 +1,16 @@
 // Production UI in Chromium, with deterministic CPA/usage responses.
-import { chromium } from '/b/node_modules/playwright/index.mjs';
+const { chromium } = await import(process.env.PACER_PLAYWRIGHT || '/b/node_modules/playwright/index.mjs');
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+const evidence = process.env.PACER_EVIDENCE || '/evidence';
 
 const html=fs.readFileSync(new URL('../../internal/management/index.html',import.meta.url));
 const start=Date.parse('2026-10-11T09:00:00Z'),week=7*86400000;
 const rate={status:'available',usd_per_percent:{low:4,high:4},start_percent:0,end_percent:100,delta_pp:100,samples:2};
 const window=(id,scope,from,end,used,status='closed')=>({id,kind:'weekly',scope,label:'Test account',start_ms:from,end_ms:end,reset_ms:end,status,used_percent:used,rate:{...rate,end_percent:used,delta_pp:used},selected:{requests:1200,value_low_nano_usd:400e9,value_high_nano_usd:400e9},models:[{model:'gpt-6-astra',share_percent:100}]});
 const current=window('current','codex-main',start,start+week,4,'current');
+current.latest=true;
 const previous=window('previous','codex-main',start-week,start,100);
 const spark=window('spark','model:gpt-5.3-codex-spark',start-week,start,50);
 const profile={reference:'profile:test',name:'ChatGPT Pro 20x',provider:'codex',credentials:1,current:[],pools:[{kind:'weekly',scope:'codex-main',main:true,ended:false,windows:2,latest:current,average:rate},{kind:'weekly',scope:spark.scope,label:'Spark',main:false,ended:true,windows:1,latest:spark,average:rate}]};
@@ -71,35 +73,57 @@ try{
   await page.locator('#model-dialog').waitFor({state:'hidden'});
   assert.deepEqual(patches[1].setting,{'max-context-length':800000});
   await page.getByRole('button',{name:'Usage Quota',exact:true}).click();
-  const picker=page.getByLabel('ChatGPT Pro 20x window',{exact:true});
-  await picker.locator('option[value=previous]').waitFor({state:'attached'});
-  assert.equal(await picker.inputValue(),'');
-  assert.equal(await page.locator('.usage-pool-title').count(),0,'Ended Spark is hidden for latest');
-  assert.equal(await page.locator('.usage-col .usage-rate-big').first().innerText(),'96% left');
-  assert.equal(await page.locator('.usage-meter-pair').count(),2);
-  assert.equal(await page.locator('.usage-meter-pair').first().locator('.usage-meter-mini').first().innerText(),'7 day\n0% left');
-  assert.equal(await page.locator('.usage-meter-pair').first().locator('.usage-meter-mini').last().innerText(),'5 hour\n100% left');
+  const picker=page.getByRole('region',{name:'ChatGPT Pro 20x window selection',exact:true});
+  const latest=picker.locator('.usage-window-category').first().getByRole('checkbox').first();
+  const past=picker.locator('.usage-window-category').first().getByRole('checkbox').last();
+  const sparkWindow=picker.locator('.usage-window-category').last().getByRole('checkbox');
+  await sparkWindow.waitFor();
+  assert(await latest.isChecked());
+  assert(await latest.isDisabled(),'Latest window is always included');
+  assert(!(await past.isChecked()));
+  assert.equal(await page.locator('.usage-col-family').count(),0,'Ended Spark is hidden until selected');
+  assert.equal(await page.locator('.usage-col .usage-rate-big').first().innerText(),'37.5% left');
+  assert.deepEqual(await page.locator('.usage-meter-heading').allTextContents(),['Month','7-day','5-hour','Account']);
+  assert.deepEqual(await page.locator('.usage-meter-name').allTextContents(),['Account A','Account B']);
+  assert.deepEqual(await page.locator('.usage-meter-mini .usage-percent').allTextContents(),['—','0%','100%','90%','75%','50%']);
+  const weeklyA=page.getByRole('meter',{name:'Account A ·  7-day percent left',exact:true});
+  const weeklyB=page.getByRole('meter',{name:'Account B ·  7-day percent left',exact:true});
+  assert.equal(await weeklyA.getAttribute('aria-valuenow'),'0');
+  assert.equal(await weeklyB.getAttribute('aria-valuenow'),'75');
   assert.equal(await page.locator('.usage-bar.blocked>span').evaluate(e=>e.style.width),'100%');
   assert.equal(await page.locator('.usage-bar.blocked>span').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(133, 133, 133)');
-  assert.equal(await page.locator('.usage-meter-pair').last().locator('.usage-bar>span').first().evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(105, 185, 130)');
+  assert.equal(await weeklyB.locator('span').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(105, 185, 130)');
   await page.getByLabel('ChatGPT Pro 20x polling minutes').fill('15');
   await page.locator('.usage-polling').getByRole('button',{name:'Save',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.usage-polling input').value==='15'&&!document.querySelector('.usage-polling button').disabled);
   assert.deepEqual(polling,[{profile:'profile:test',seconds:900,revision:0}]);
-  await picker.selectOption('previous');
-  await page.locator('.usage-pool-title').getByText('Spark',{exact:true}).waitFor();
-  assert.equal(await page.locator('.usage-col .usage-rate-big').first().innerText(),'0% left');
-  await page.getByRole('button',{name:'Average',exact:true}).click();
-  assert.equal(await picker.count(),0);
-  assert.equal(await page.locator('.usage-pool-title').innerText(),'Spark');
-  assert(!(await page.locator('#usage-grid').innerText()).includes('Ended limits'));
-  await page.getByRole('button',{name:'Single window',exact:true}).click();
-  await picker.selectOption('');
-  fs.mkdirSync('/evidence',{recursive:true});
-  await page.screenshot({path:'/evidence/usage-wide.png',fullPage:true});
+  // Historical selection changes the rate inputs, never the current balance.
+  const select=async(action,ids)=>{
+    const [response]=await Promise.all([
+      page.waitForResponse(r=>r.url().endsWith('/usage/profiles')&&r.request().method()==='POST'),
+      action(),
+    ]);
+    assert.deepEqual(response.request().postDataJSON().selected_windows,{'profile:test':ids});
+  };
+  await picker.getByRole('button',{name:'Show more windows',exact:true}).click();
+  await select(()=>past.check(),['previous']);
+  assert.equal(await picker.getByRole('button',{name:'Show fewer windows'}).getAttribute('aria-expanded'),'true');
+  assert.equal(await page.locator('.usage-col .usage-rate-big').first().innerText(),'37.5% left');
+  await select(()=>sparkWindow.check(),['previous','spark']);
+  await page.locator('.usage-col-family').getByText('Spark',{exact:true}).waitFor();
+  await select(()=>picker.getByRole('button',{name:'Deselect all',exact:true}).click(),[]);
+  await page.locator('.usage-col-family').waitFor({state:'detached'});
+  assert(await latest.isChecked());
+  assert(!(await past.isChecked()));
+  await select(()=>picker.getByRole('button',{name:'Select all',exact:true}).click(),['previous','spark']);
+  await page.locator('.usage-col-family').getByText('Spark',{exact:true}).waitFor();
+  await select(()=>picker.getByRole('button',{name:'Deselect all',exact:true}).click(),[]);
+  await page.locator('.usage-col-family').waitFor({state:'detached'});
+  fs.mkdirSync(evidence,{recursive:true});
+  await page.screenshot({path:`${evidence}/usage-wide.png`,fullPage:true});
   await page.setViewportSize({width:390,height:844});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)<=1);
-  await page.screenshot({path:'/evidence/usage-narrow.png',fullPage:true});
+  await page.screenshot({path:`${evidence}/usage-narrow.png`,fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log('PASS: CPA keys; model defaults; window selection; compact paired remaining meters, green/blocked-gray fills, monthly meter, saved polling frequency; narrow/wide layouts.');
+  console.log('PASS: CPA keys; model defaults; window selection; aligned per-account remaining meters, green/blocked-gray fills, monthly meter, saved polling frequency; narrow/wide layouts.');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}
