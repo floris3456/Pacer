@@ -27,7 +27,7 @@ jobs:
           python3 - <<'PY'
           import os, pathlib
           version = pathlib.Path('VERSION').read_text().strip()
-          assert f'Version: "{version}"' in pathlib.Path('internal/bridge/bridge.go').read_text()
+          # scripts/build.sh verifies the linked version through the native ABI.
           if os.environ['GITHUB_REF_TYPE'] == 'tag':
               assert os.environ['GITHUB_REF_NAME'] == 'v' + version
           PY
