@@ -45,6 +45,10 @@ func testHost(method string, input any) (json.RawMessage, error) {
 	return json.Marshal(data)
 }
 
+func registerRaw(path string) ([]byte, error) {
+	return json.Marshal(map[string]any{"config_yaml": []byte("enabled: true\npriority: 1\nstate_path: " + path + "\ncompact_on_switch: true\nrouting:\n  mode: off\n")})
+}
+
 func startPlugin(t *testing.T, path string) *Plugin {
 	t.Helper()
 	p := New(testHost)
@@ -111,8 +115,9 @@ func TestNativeDispatchForcedMoveStopsBeforeFakeUpstreamAndRecovers(t *testing.T
 			headers[k] = v
 		}
 		decision := invoke(t, p, pluginabi.MethodSchedulerPick, pluginapi.SchedulerPickRequest{Provider: "claude", Model: req.Model, Options: pluginapi.SchedulerOptions{Headers: headers, Metadata: req.Metadata}, Candidates: []pluginapi.SchedulerAuthCandidate{{ID: auth, Provider: "claude"}}}).(pluginapi.SchedulerPickResponse)
-		if decision.Handled {
-			t.Fatal("routing-off changed CPA's choice")
+		// Off may only keep the chat on its account; CPA offers just its choice here.
+		if decision.Handled && decision.AuthID != auth {
+			t.Fatal("routing-off changed CPA's choice", decision)
 		}
 		after := invoke(t, p, pluginabi.MethodRequestInterceptAfter, req).(pluginapi.RequestInterceptResponse)
 		defer invoke(t, p, pluginabi.MethodRequestComplete, pluginapi.RequestCompletion{RequestID: id})
@@ -178,14 +183,14 @@ func TestNativeDispatchForcedMoveStopsBeforeFakeUpstreamAndRecovers(t *testing.T
 func TestPublicResourceCannotReadManagementStateOrChangeRouting(t *testing.T) {
 	p := startPlugin(t, filepath.Join(t.TempDir(), "pacer.sqlite"))
 	defer p.Close()
-	for _, req := range []pluginapi.ManagementRequest{{Method: "GET", Path: "/v0/resource/plugins/pacer/state"}, {Method: "PATCH", Path: "/v0/resource/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}, {Method: "GET", Path: "/v0/resource/plugins/pacer/events", Headers: http.Header{"Authorization": {"Bearer guessed"}}}} {
+	for _, req := range []pluginapi.ManagementRequest{{Method: "GET", Path: "/v0/resource/plugins/pacer/state"}, {Method: "PATCH", Path: "/v0/resource/plugins/pacer/routing", Body: []byte(`{"mode":"on"}`)}, {Method: "GET", Path: "/v0/resource/plugins/pacer/events", Headers: http.Header{"Authorization": {"Bearer guessed"}}}} {
 		response := invoke(t, p, pluginabi.MethodManagementHandle, req).(pluginapi.ManagementResponse)
 		if response.StatusCode == 200 {
 			t.Fatalf("public request reached private data: %s", req.Path)
 		}
 	}
 	response := invoke(t, p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "PATCH", Path: "/v0/management/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}).(pluginapi.ManagementResponse)
-	if response.StatusCode != 409 || p.cfg.Routing.Mode != "off" {
-		t.Fatal("rollout gate bypassed")
+	if response.StatusCode != 400 || p.cfg.Routing.Mode != "off" {
+		t.Fatal("invalid mode accepted")
 	}
 }

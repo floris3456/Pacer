@@ -55,7 +55,7 @@ func TestRequiredCachePolicyRejectsUnadmittedRequestsAtBothHooks(t *testing.T) {
 	for _, stage := range []string{"before", "after"} {
 		for _, scenario := range []string{"missing selection", "declaration only", "thinking suffix", "requested model", "missing caller", "foreign caller", "wrong route", "compaction", "title", "generate"} {
 			t.Run(stage+"/"+scenario, func(t *testing.T) {
-				f := newRoutingFixture(t, "off", false)
+				f := newRoutingFixture(t, "off")
 				p := f.p
 				p.cfg.CachePolicy = PolicyConfig{Enabled: true, RequireManaged: true, Routes: []PolicyRoute{{ID: "claude-main", Models: []string{"claude-opus-5-5"}}}}
 				r := grantRequest("unadmitted", caller, "a", nil)
@@ -109,7 +109,7 @@ func TestRequiredCachePolicyLeavesOptOutAndUnlistedHelpersAllowed(t *testing.T) 
 		required    bool
 	}{{"default opt-out", "claude-opus-5-5", false}, {"unlisted helper", "helper-model(high)", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newRoutingFixture(t, "off", false).p
+			p := newRoutingFixture(t, "off").p
 			p.cfg.CachePolicy = PolicyConfig{Enabled: true, RequireManaged: tc.required, Routes: []PolicyRoute{{ID: "claude-main", Models: []string{"claude-opus-5-5"}}}}
 			r := grantRequest(tc.name, clientCaller("managed-key"), "a", nil)
 			r.Model = tc.model
@@ -123,7 +123,7 @@ func TestRequiredCachePolicyLeavesOptOutAndUnlistedHelpersAllowed(t *testing.T) 
 
 func resolvedPolicyFixture(t *testing.T) (*routingFixture, pluginapi.CachePolicyResolveRequest) {
 	t.Helper()
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	p := f.p
 	scope := pluginapi.CachePolicyScope{CallerScope: clientCaller("managed-key"), InstallationID: "required-policy-test", SessionID: "session", ProviderRoute: "claude-main"}
 	p.cfg.CachePolicy = PolicyConfig{Enabled: true, RequireManaged: true, Routes: []PolicyRoute{{ID: scope.ProviderRoute, Models: []string{"claude-opus-5-5"}}}, TrustedEmptyInstallations: []TrustedEmptyInstallation{{CallerDigest: scope.CallerScope, Installation: scope.InstallationID}}}

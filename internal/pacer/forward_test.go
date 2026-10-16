@@ -124,7 +124,7 @@ func TestForwardHandlePreparedUsagePublicationReplayAndFaults(t *testing.T) {
 		return v.State == "ready" && !v.Active && v.Projected == h.Through && v.Latest != first.Latest
 	})
 	r := forwardReportAt(t, p, ready.Latest)
-	if r.Totals.UniqueAttempts == nil || *r.Totals.UniqueAttempts != 1 || r.Totals.SelectionValue == nil || r.Totals.SelectionValue.Low != 725e7 || r.Totals.SelectionValue.High != 725e7 || r.Capacity != "unavailable" || p.routingEligible {
+	if r.Totals.UniqueAttempts == nil || *r.Totals.UniqueAttempts != 1 || r.Totals.SelectionValue == nil || r.Totals.SelectionValue.Low != 725e7 || r.Totals.SelectionValue.High != 725e7 || r.Capacity != "unavailable" || p.cfg.Routing.Mode == "on" {
 		t.Fatal(r.Totals, r.Capacity)
 	}
 	var savedJSON, savedCSV bytes.Buffer
@@ -245,7 +245,7 @@ func TestForwardHandleFeedRollbackAndPostPrimaryPhysicalFailure(t *testing.T) {
 				return v.State == "ready" && !v.Active && v.Latest != initial.Latest && v.Projected == h.Through
 			})
 			r := forwardReportAt(t, p, ready.Latest)
-			if r.Totals.Rows != int64(expected) || r.Capacity != "unavailable" || p.routingEligible {
+			if r.Totals.Rows != int64(expected) || r.Capacity != "unavailable" || p.cfg.Routing.Mode == "on" {
 				t.Fatal(r)
 			}
 			if physical && (r.Totals.SelectionValue == nil || r.Totals.SelectionValue.Low != 725e7 || r.Totals.CoverageReasons["local_source_fault"] != 1) {

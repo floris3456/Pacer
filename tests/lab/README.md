@@ -11,8 +11,7 @@ on a loopback host port. This tests actual CPA/native-plugin dispatch and browse
 authentication separately from source package tests. A fixture summary does not
 establish OpenCode's committed-compaction behavior; that needs the client lab.
 
-The candidate stays routing-off until integrated acceptance and the documented
-24–48 hour dry run. Keep all live services and the CPAMP database untouched.
+Keep all live services and the CPAMP database untouched.
 
 The CPA host must be built with **`CGO_ENABLED=1`** on Linux for native dynamic
 plugins. A `CGO_ENABLED=0` server can start and serve management endpoints while
@@ -155,3 +154,33 @@ reads; a scheduler delay of more than 8 min past the 15 min gap, which expires
 case d's 600 s hold. Interrupting the checker during case d's hold makes CPA record a
 physical gap, which invalidates every proof in that CPA incarnation.
 `test_capacity_upstream.py` and `test_capacity_checker.py` run offline.
+
+## Pace routing lab
+
+`pace-lab.sh` runs a real CPA host with the native Pacer library and
+`capacity_upstream.py` (as `api.anthropic.com`, three dummy Claude logins) on an
+internal Docker network, all in Docker volumes. `check-pace.py` sets the meters of
+the docs/pace-routing.md example and checks, through CPA: the former `dry-run`
+YAML loading as `off`, pace from live meters including a dormant 5-hour window,
+switching routing on, new-chat placement, warm chats staying, reply headers
+updating a meter, band and running-window tie-break, forced moves, the
+`compact_on_switch` claim flow (409, then the compacted chat on the new account),
+routing off and the decision trace. It takes about 8 minutes: Pacer's first meter
+reads after startup are 1–5 minutes apart by design.
+
+Build CPA and Pacer for the Docker host's architecture with CGO, e.g. CPA from its
+checkout with `git archive HEAD | docker run -i golang:1.26-bookworm sh -c '... CGO_ENABLED=1
+go build -o /tmp/CLIProxyAPI ./cmd/server ...'` and Pacer with `scripts/build.sh`:
+
+```sh
+tests/lab/pace-lab.sh up <CLIProxyAPI> dist/linux_<arch>/pacer-v$(cat VERSION).so
+tests/lab/pace-lab.sh check
+tests/lab/pace-lab.sh down
+```
+
+The pace lab also checks the warm-chat wait: the fixture's `/_test/fail` makes an
+account's next messages answer a Cloudflare 502, as on 2026-10-14 in production.
+
+`check-settings.mjs` checks the Pacer page's settings in Chromium against a stub (as
+`check-management.mjs` does), e.g. in `mcr.microsoft.com/playwright:v1.63.0-noble` with
+Playwright under `/b/node_modules`.

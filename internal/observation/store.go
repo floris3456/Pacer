@@ -63,7 +63,13 @@ func Open(db *sql.DB, clock func() time.Time) (*Store, error) {
 		if err := addActivityColumn(c); err != nil {
 			return err
 		}
-		return migrateCodexPremium(c)
+		if err := openPollingSchema(c); err != nil {
+			return err
+		}
+		if err := migrateCodexPremium(c); err != nil {
+			return err
+		}
+		return migrateCodexResetDrift(c)
 	}); err != nil {
 		return nil, fmt.Errorf("observation schema: %w", err)
 	}
@@ -237,7 +243,9 @@ func (s *Store) Observe(account, provider string, samples []Window) error {
 // retireReplacedCycle must share the transaction that persists next. Keep both
 // reset anchors so accumulated same-cycle corrections cannot revive an old cycle.
 func retireReplacedCycle(c *sql.Conn, account, key string, old, next Window, disposition string) error {
-	if disposition != "accepted-cycle" || sameReset(old.Reset, next.Reset) {
+	replaced := disposition == "accepted-cycle" && !sameReset(old.Reset, next.Reset)
+	dormant := disposition == "accepted-status" && next.Dormant && !old.Dormant
+	if !replaced && !dormant {
 		return nil
 	}
 	for _, reset := range []time.Time{old.Reset, timestamp(old.Cycle)} {

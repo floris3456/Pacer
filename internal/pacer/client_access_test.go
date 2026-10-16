@@ -69,6 +69,33 @@ func TestClientAccessValidatesOperatorGrants(t *testing.T) {
 	}
 }
 
+func TestRoutingAndPinningCannotRestoreARevokedAccount(t *testing.T) {
+	for _, mode := range []string{"off", "on"} {
+		for _, kind := range []string{"primary", "generate"} {
+			t.Run(mode+"/"+kind, func(t *testing.T) {
+				f := newRoutingFixture(t, mode)
+				f.seed(t, 5*time.Minute)
+				f.p.hostGuard = requiredInterceptors{Version: 1, PluginID: "pacer", Required: true, RequestInterceptors: true, NestedModelInterceptors: true, RetryInterceptors: true, AuthPoolFiltering: true}
+				f.p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: "fixture-caller", AuthIDs: []string{"b"}}}}
+				f.q.Kind = kind
+				r := f.before(t, "revoked-affinity", "claude-opus-5-5")
+				choice := f.pick(t, r, "a", "b")
+				if choice.AuthID == "a" || choice.Reject {
+					t.Fatal("revoked account was selected or treated as temporarily unavailable", choice)
+				}
+				for _, candidate := range f.p.requests[r.RequestID].Decision.Candidates {
+					if candidate.Auth != "b" {
+						t.Fatal("routing exposed a foreign candidate", candidate)
+					}
+				}
+				if view := f.p.nextUse(f.binding(t)); view.Auth == "a" || view.ForceAuth == "a" {
+					t.Fatal("preview restored a revoked account", view)
+				}
+			})
+		}
+	}
+}
+
 func grantRequest(id, caller, auth string, q *tracker.Claim) pluginapi.RequestInterceptRequest {
 	r := pluginapi.RequestInterceptRequest{RequestID: id, Model: "claude-opus-5-5", Headers: http.Header{}, Metadata: map[string]any{"caller_scope": caller, "selected_auth_id": auth}}
 	if q != nil {
@@ -109,7 +136,7 @@ func TestClientAccessRefusesBeforeUpstreamAcrossRequestPaths(t *testing.T) {
 	caller := clientCaller("permitted-key")
 	for _, path := range []string{"empty grants", "missing caller", "foreign caller", "header spoof", "untracked", "missing selected account", "foreign account", "compaction", "title", "generate", "managed auxiliary", "retry"} {
 		t.Run(path, func(t *testing.T) {
-			f := newRoutingFixture(t, "off", false)
+			f := newRoutingFixture(t, "off")
 			p := f.p
 			p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: caller, AuthIDs: []string{"a"}}}}
 			var upstreamCalls atomic.Int64
@@ -182,7 +209,7 @@ func TestClientAccessUnavailableHooksExplicitlyTerminate(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			p := New(testHost)
 			if state != "uninitialized" {
-				p = newRoutingFixture(t, "off", false).p
+				p = newRoutingFixture(t, "off").p
 			}
 			p.cfg.ClientAccess = &ClientAccess{}
 			if state == "stopped" {
@@ -214,7 +241,7 @@ type grantUsageView struct {
 }
 
 func TestClientAccessScopesThreeCallersUsageAndAccountAliases(t *testing.T) {
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "on")
 	p := f.p
 	callers := []struct {
 		key, auth, token string
@@ -358,7 +385,7 @@ func TestClientAccessScopesThreeCallersUsageAndAccountAliases(t *testing.T) {
 }
 
 func TestClientAccessHeldUsageRechecksOrdinaryAPIKey(t *testing.T) {
-	p := newRoutingFixture(t, "off", false).p
+	p := newRoutingFixture(t, "off").p
 	key := "revoked-during-watch"
 	p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: clientCaller(key), AuthIDs: []string{"a"}}}}
 	var revoked atomic.Bool
@@ -391,7 +418,7 @@ func TestClientAccessHeldUsageRechecksOrdinaryAPIKey(t *testing.T) {
 }
 
 func TestClientAccessRestartPreservesOwnerAndDeniesOldOwnerlessCapabilities(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	p := f.p
 	caller := clientCaller("owned-api-key")
 	ownedToken, oldToken := strings.Repeat("owned-cap-", 6), strings.Repeat("legacy-cap-", 6)

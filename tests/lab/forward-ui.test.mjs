@@ -43,7 +43,7 @@ async function fixture(embedded=false){
   const el=id=>{assert(nodes.has(id),'Missing '+id);return nodes.get(id)};
   for(const m of html.matchAll(/<select\b[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g))for(const o of m[2].matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)){const n=new Element('option');n.value=o[1];n.textContent=o[2];el(m[1]).append(n)}
   let handle=async(path,body)=>{
-    if(path==='/v0/management/plugins/pacer/state')return {routing:{mode:'off',can_activate:false},accounts:[]};
+    if(path==='/v0/management/plugins/pacer/state')return {routing:{mode:'off',modes:['off','on']},accounts:[]};
     assert(path.startsWith(root),'forward fallback or unrelated operation: '+path);
     const op=path.slice(root.length);
     if(op==='status')return {version,state:'snapshot_available',projected_through:revision,bootstrap_through:'0',latest_generation:hash,runtime:{state:'lagging',target_through:'9223372036854775807'}};

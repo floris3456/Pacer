@@ -137,7 +137,7 @@ func TestClosedCreditStoreDoesNotHideQuotasAndConcurrentCloseIsSafe(t *testing.T
 }
 
 func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *testing.T) {
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "on")
 	p := f.p
 	c := credential{ID: "codex", Index: "codex-index", Provider: "codex", Account: "codex-account", Alias: "Codex"}
 	p.creds[c.ID] = c
@@ -259,14 +259,14 @@ func TestScheduledCreditsReachScopedUsageAndHeadersWithoutAdditionalReads(t *tes
 		}
 		input := routingPreviewInput{Caller: clientCaller("allowed-key"), Provider: "codex", Model: "gpt-fixture", Candidates: []string{c.ID, alias.ID, "a"}}
 		if state == "empty" {
-			old, _, _ := p.routingInputsLocked(input, p.now())
+			old, _ := p.routingInputsLocked(input, p.now(), c.Account)
 			if len(old) != 1 || !old[0].QuotaExhaustionUncertain {
 				t.Fatal("new empty credits combined with old subscription exhaustion", old)
 			}
 		}
 		windows, _ := observation.API("codex", body, p.now())
 		p.storeObservations(c, windows)
-		accounts, _, _ := p.routingInputsLocked(input, p.now())
+		accounts, _ := p.routingInputsLocked(input, p.now(), c.Account)
 		if len(accounts) != 1 || accounts[0].QuotaExhaustionUncertain != (state != "empty") {
 			t.Fatal(state, accounts)
 		}

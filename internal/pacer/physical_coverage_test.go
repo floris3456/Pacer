@@ -100,7 +100,7 @@ func TestPhysicalNativeHandleJoinsCapturedIdentityAndLeavesReportsUnknown(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Coverage.Observed || report.FiveHour.Known || report.SevenDay.Known || report.WarmBurn.Known || p.routingEligible {
+	if report.Coverage.Observed || report.FiveHour.Known || report.SevenDay.Known || report.WarmBurn.Known || p.cfg.Routing.Mode == "on" {
 		t.Fatal("local causal selection enabled numeric capacity or routing", report)
 	}
 	if hookCount(t, p, `SELECT count(*) FROM measurement_delivery_runs`) != 0 {

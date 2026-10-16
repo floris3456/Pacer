@@ -20,9 +20,13 @@ func routingBudgets(provider, model string, windows []observation.Window, now ti
 		if !w.Applies(model) || w.NotApplicable {
 			continue
 		}
-		b := routing.Budget{Seconds: w.Seconds, Reset: w.Reset, Known: w.FreshComplete(now, time.Hour) && !w.Dormant && w.Remaining != nil}
+		// A dormant window reset and has not started: 100 % left, no reset yet.
+		b := routing.Budget{Seconds: w.Seconds, Reset: w.Reset, Dormant: w.Dormant, Known: w.FreshComplete(now, time.Hour) && (w.Dormant || w.Remaining != nil)}
 		if w.Remaining != nil {
 			b.Remaining = *w.Remaining
+		}
+		if w.Dormant {
+			b.Remaining, b.Reset = 100, time.Time{}
 		}
 		result = append(result, b)
 	}
@@ -83,9 +87,6 @@ func (p *Plugin) observeCaptured(auth string, headers http.Header, captured map[
 
 func (p *Plugin) startWorker() {
 	p.workerOnce.Do(func() {
-		// Mode marks run apart from the loop below, so slow provider reads never
-		// leave a dry-run interval unproven.
-		p.startDryRunHeartbeat()
 		p.startUsageLive()
 		p.startWindowWorker()
 		p.workerWait.Add(1)
@@ -129,6 +130,9 @@ func (p *Plugin) reconcile() {
 	p.mu.Unlock()
 	if stopped {
 		return
+	}
+	if err := p.applyProfilePolling(creds); err != nil {
+		p.metricError(err)
 	}
 	for _, c := range creds {
 		select {

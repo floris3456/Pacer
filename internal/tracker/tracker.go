@@ -156,11 +156,14 @@ func (s *Store) Seed(key string, c Selection) error {
 	if err != nil || b.Key != "" {
 		return err
 	}
-	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true})
+	// CPA's affinity binding means the chat ran recently: its warmth is unknown
+	// from now, not from an unknown past.
+	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true, LastUsed: s.now()})
 }
 
 // Admit runs before the selected account receives a byte. A cold optimization
-// is not a forced move and never requests compaction. Auxiliaries never rebind.
+// is not a forced move and never requests compaction. Auxiliaries never rebind;
+// a generation on the chat's account renews its warmth (renews).
 func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,7 +186,17 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 	}
 	if kind != "primary" {
 		s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Started: s.now()}
-		return b, nil
+		if !renews(b, c, q) {
+			return b, nil
+		}
+		// A generation replays the chat's prefix on its model (a warming ping):
+		// on the chat's own account it renews the cache like a step does.
+		b.LastUsed = s.now()
+		if err = s.save(b); err != nil {
+			return Binding{}, err
+		}
+		s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Checkpoint: b.Consumed, Generation: b.Generation, Started: s.now()}
+		return b, s.recordActivityContext(id, c.Auth)
 	}
 	if q != nil && q.Auto && c.Caller != "" {
 		if err := s.automaticProviderLocked(c, *q); err != nil {
@@ -218,11 +231,7 @@ func (s *Store) Admit(id, key string, c Selection, q *Claim, gate bool) (Binding
 		return Binding{}, err
 	}
 	s.flights[id] = Flight{ID: id, Key: key, Auth: c.Auth, Account: c.Account, Kind: kind, Checkpoint: b.Consumed, Generation: b.Generation, Started: s.now()}
-	raw, err := json.Marshal(s.flights[id])
-	if err != nil {
-		return Binding{}, err
-	}
-	if _, err = s.db.Exec(`INSERT INTO pacer_activity_contexts(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, id, c.Auth, raw); err != nil {
+	if err = s.recordActivityContext(id, c.Auth); err != nil {
 		return Binding{}, err
 	}
 	return b, nil
@@ -258,6 +267,25 @@ func (s *Store) automaticProviderLocked(c Selection, q Claim) error {
 	return nil
 }
 
+// renews: a generation of a bound chat on its account, model and checkpoint.
+func renews(b Binding, c Selection, q *Claim) bool {
+	return q != nil && q.Kind == "generate" && b.Key != "" && b.PrimaryUsed && b.Account == c.Account && b.Model == c.Model && q.Checkpoint == b.Consumed
+}
+
+// recordActivityContext keeps the flight for usage that arrives after the
+// request completed (CacheActivityForAuth).
+func (s *Store) recordActivityContext(id, auth string) error {
+	raw, err := json.Marshal(s.flights[id])
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO pacer_activity_contexts(request_id,auth,body) VALUES(?,?,?) ON CONFLICT(request_id,auth) DO NOTHING`, id, auth, raw)
+	return err
+}
+
+// warming: a flight whose confirmed cache activity protects the chat.
+func warming(f Flight) bool { return f.Kind == "primary" || (f.Kind == "generate" && f.Generation > 0) }
+
 // CacheActivityForAuth is for asynchronous usage: the logical request may have
 // completed and another physical retry may have selected a different account.
 // Retained context fences late activity against the exact checkpoint/account.
@@ -279,7 +307,7 @@ func (s *Store) CacheActivityForAuth(id, auth string, started time.Time, success
 	if err = json.Unmarshal(raw, &flight); err != nil {
 		return err
 	}
-	if flight.Kind != "primary" || started.Before(flight.Started) {
+	if !warming(flight) || started.Before(flight.Started) {
 		return nil
 	}
 	b, err := s.read(flight.Key)
@@ -304,7 +332,7 @@ func (s *Store) CacheActivity(id string, success, qualifying bool, ttl time.Dura
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.flights[id]
-	if !ok || f.Kind != "primary" || !success || !qualifying || ttl <= 0 {
+	if !ok || !warming(f) || !success || !qualifying || ttl <= 0 {
 		return nil
 	}
 	b, err := s.read(f.Key)

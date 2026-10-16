@@ -101,6 +101,26 @@ An estimated reset can establish a new cycle over an older absolute reset when c
 evidence also shows replenishment with a later reset, or the preceding cycle has passed.
 It remains estimated. A relative-only correction does not downgrade an absolute deadline.
 
+Codex additionally accepts a complete, strictly newer reset correction within **60 seconds
+of the current cycle's original reset anchor**, while both deadlines remain in the future
+and remaining quota does not increase. It preserves cycle identity and source timestamps,
+stores the exact corrected deadline, and never downgrades absolute evidence to estimated
+evidence. The fixed anchor prevents successive corrections from walking the tolerance.
+This addresses observed weekly reset drift (`09:33:59` → `09:34:11` → `09:33:59`) that
+otherwise retires the live allowance and freezes its balance. Other providers retain the
+2-second rule. Replenishment, incomplete evidence and genuine retired-cycle replays do
+not qualify for this exception.
+
+On upgrade, `codex-reset-drift-v1` examines Codex windows with nearby retirement markers.
+It requires the original accepted/conflicting audit records to reconstruct the existing
+projection exactly. It removes only markers proved to have come from these corrections,
+preserving markers for genuine cycle changes and unexplained markers. Audit history is
+unchanged; the next live observation supplies the new balance. The repair and its completion
+record are committed in the same startup transaction, and repeated opens are idempotent.
+Creating the migration marker table checks the existing measurement feed schema generation
+first and advances it only for that exact additive DDL in the same transaction. Unrecognized
+prior schema changes remain refused; the feed identity and sequence are preserved.
+
 ### Verified parser coverage
 
 - Claude OAuth unified duration/scoped utilization and absolute reset headers; usage API
@@ -139,6 +159,7 @@ It remains estimated. A relative-only correction does not downgrade an absolute 
 | `ReasonDeadline` | reported reset + stable 30–90s jitter |
 | `ReasonIdle` | last evidence/base + 30m |
 | `ReasonActivity` | last request of a direct-only account + 5m |
+| `ReasonSpend` | end of a large request (`Spend`) of a Claude/Codex account + 1m, unless a newer reply reading arrived since |
 | `ReasonPartial`, `ReasonManual`, custom reason | requested time, subject to every shared floor |
 
 There is one inflight job per account **and** endpoint, at least 15m between account starts,
@@ -148,7 +169,9 @@ erase a pending seed's jitter. Passed-reset grace also survives manual requests.
 
 Fresh complete evidence cancels queued fallback work and retains a `waiting` idle/deadline
 wake-up. More fresh passive observations postpone it, so sustained complete passive traffic
-causes zero periodic direct calls. Freshness ages balances/status after 30m; an older, future
+causes zero periodic direct calls. The one exception is a large request: its own reply showed
+the meter from before it was charged, so it asks for one read (`ReasonSpend`) when no newer
+reply follows. Freshness ages balances/status after 30m; an older, future
 absolute reset remains evidence. Claude completeness requires both known shared 5h and 7d
 windows; explicit null counts. Codex can legitimately have only one shared weekly primary.
 Every already-known scoped window must also be complete. A scoped-only signal cannot prove

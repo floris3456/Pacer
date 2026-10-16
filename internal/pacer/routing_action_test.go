@@ -3,6 +3,7 @@ package pacer
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -18,22 +19,13 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
+func TestRoutingActionRequiresTheExactCurrentCandidate(t *testing.T) {
 	base := pluginapi.SchedulerPickRequest{Provider: "claude", Providers: []string{"claude"}, Model: "claude-opus-5-5", Candidates: []pluginapi.SchedulerAuthCandidate{{ID: "a", Provider: "claude", Attributes: map[string]string{"unchanged": "yes"}}, {ID: "b", Provider: "claude"}}}
 	known := []credential{{ID: "a", Provider: "claude", Account: "account-a"}, {ID: "b", Provider: "claude", Account: "account-b"}}
 	d := routing.Decision{Handled: true, Auth: "b", Account: "account-b", Reason: "cold_move"}
 	before, _ := json.Marshal(base)
-	for _, mode := range []string{"", "off", "dry-run", "active", "ACTIVE", "unknown"} {
-		for _, gate := range []bool{false, true} {
-			got := routingAction(base, mode, gate, d, known)
-			want := pluginapi.SchedulerPickResponse{}
-			if mode == "active" && gate {
-				want = pluginapi.SchedulerPickResponse{Handled: true, AuthID: "b"}
-			}
-			if got != want {
-				t.Fatalf("mode=%q eligible=%v: %+v", mode, gate, got)
-			}
-		}
+	if got := routingAction(base, d, known); got != (pluginapi.SchedulerPickResponse{Handled: true, AuthID: "b"}) {
+		t.Fatal(got)
 	}
 	for _, tc := range []struct {
 		name   string
@@ -72,7 +64,7 @@ func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
 			_ = json.Unmarshal(before, &r)
 			x, k := d, append([]credential(nil), known...)
 			tc.change(&r, &x, &k)
-			if got := routingAction(r, "active", true, x, k); got != (pluginapi.SchedulerPickResponse{}) {
+			if got := routingAction(r, x, k); got != (pluginapi.SchedulerPickResponse{}) {
 				t.Fatal(got)
 			}
 		})
@@ -83,7 +75,7 @@ func TestRoutingActionRequiresBothGatesAndExactCurrentCandidate(t *testing.T) {
 	}
 	inferred := base
 	inferred.Provider = ""
-	if !routingAction(inferred, "active", true, d, known).Handled {
+	if !routingAction(inferred, d, known).Handled {
 		t.Fatal("single inferred provider refused")
 	}
 }
@@ -94,9 +86,8 @@ type routingFixture struct {
 	q     tracker.Claim
 }
 
-// Active injection exists ONLY in this _test.go fixture. Runtime YAML, management,
-// durable settings and New never provide eligibility. No worker or provider HTTP.
-func newRoutingFixture(t *testing.T, mode string, eligible bool) *routingFixture {
+// The fixture sets the mode directly. No worker or provider HTTP.
+func newRoutingFixture(t *testing.T, mode string) *routingFixture {
 	t.Helper()
 	f := &routingFixture{q: tracker.Claim{Protocol: 1, Installation: "fixture", Session: "chat", Route: "claude/opus-alias", Request: "client-request", Kind: "primary", Capability: tracker.Digest("private-test-capability"), Checkpoint: "committed-old", Auto: true, CompactOnSwitch: true}}
 	f.clock.Store(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC).UnixNano())
@@ -108,7 +99,7 @@ func newRoutingFixture(t *testing.T, mode string, eligible bool) *routingFixture
 	}
 	t.Cleanup(f.p.Close)
 	f.p.discover()
-	f.p.cfg.Routing.Mode, f.p.routingEligible = mode, eligible
+	f.p.cfg.Routing.Mode = mode
 	f.observe(t)
 	return f
 }
@@ -202,53 +193,150 @@ func requireCompact(t *testing.T, r pluginapi.RequestInterceptResponse) {
 	}
 }
 
-func TestHandleActiveRequiresPrivateEligibilityAndRuntimeGatesStayClosed(t *testing.T) {
+func TestHandleRoutesOnlyWhenOn(t *testing.T) {
 	for _, tc := range []struct {
 		mode    string
-		gate    bool
 		handled bool
-	}{{"off", false, false}, {"off", true, false}, {"dry-run", true, false}, {"active", false, false}, {"active", true, true}} {
-		t.Run(tc.mode+"/"+map[bool]string{false: "ineligible", true: "eligible"}[tc.gate], func(t *testing.T) {
-			f := newRoutingFixture(t, tc.mode, tc.gate)
+	}{{"off", false}, {"dry-run", false}, {"on", true}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			f := newRoutingFixture(t, tc.mode)
 			r := f.before(t, "new", "claude-opus-5-5")
 			got := f.pick(t, r, "a", "b")
 			if got.Handled != tc.handled || got.Handled && got.AuthID != "b" {
 				t.Fatal(got)
 			}
-			// Injected active mode is not rollout evidence for management.
 			state := invoke(t, f.p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "GET", Path: "/v0/management/plugins/pacer/state"}).(pluginapi.ManagementResponse)
 			var body struct {
 				Routing struct {
-					CanActivate bool `json:"can_activate"`
+					Mode string `json:"mode"`
 				} `json:"routing"`
+				Accounts []struct {
+					ID   string   `json:"id"`
+					Pace *float64 `json:"pace"`
+				} `json:"accounts"`
 			}
-			if json.Unmarshal(state.Body, &body) != nil || state.StatusCode != 200 || body.Routing.CanActivate {
+			if json.Unmarshal(state.Body, &body) != nil || state.StatusCode != 200 || body.Routing.Mode != tc.mode || len(body.Accounts) != 2 || body.Accounts[1].Pace == nil || *body.Accounts[1].Pace != 80.0/96 {
 				t.Fatal(string(state.Body))
-			}
-			patch := invoke(t, f.p, pluginabi.MethodManagementHandle, pluginapi.ManagementRequest{Method: "PATCH", Path: "/v0/management/plugins/pacer/routing", Body: []byte(`{"mode":"active"}`)}).(pluginapi.ManagementResponse)
-			if patch.StatusCode != 409 || f.p.setMode("active") == nil {
-				t.Fatal("runtime activation gate opened")
 			}
 		})
 	}
-	for _, yaml := range []string{"routing:\n  mode: active\n", "routing_eligible: true\n", "routing:\n  eligible: true\n"} {
-		p := New(nil)
-		if p.routingEligible {
-			t.Fatal("New granted rollout authorization")
+}
+
+// Routing off (2026-10-15, production): a CPA restart cleared CPA's in-memory
+// session affinity; CPA put a warm chat and another chat's ping on other
+// accounts, and Pacer then made both chats compact. Off now keeps a bound
+// chat (steps, its pings and same-model compactions) on its account whenever
+// CPA offers it. It never places a new chat and never moves one.
+func TestOffKeepsABoundChatOnItsAccount(t *testing.T) {
+	f := newRoutingFixture(t, "off")
+	f.seed(t, 5*time.Minute)
+	before := f.binding(t)
+	step := func(id string, ids ...string) pluginapi.SchedulerPickResponse {
+		t.Helper()
+		r := f.before(t, id, "claude-opus-5-5")
+		choice := f.pick(t, r, ids...)
+		auth := choice.AuthID
+		if !choice.Handled {
+			auth = ids[0]
 		}
-		raw, _ := json.Marshal(map[string]any{"config_yaml": []byte("state_path: " + filepath.Join(t.TempDir(), "state.sqlite") + "\n" + yaml)})
-		_, err := p.Handle(pluginabi.MethodPluginRegister, raw)
-		p.Close()
-		if err == nil {
-			t.Fatal("runtime YAML allowed test injection", yaml)
+		if got := f.after(t, r, auth); got.Terminate {
+			t.Fatal(string(got.ResponseBody))
 		}
+		f.complete(t, r.RequestID)
+		return choice
+	}
+	// CPA offers b first (its own pick after a restart); the chat stays on a.
+	if got := step("after-restart", "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("warm chat moved", got)
+	}
+	for _, kind := range []string{"generate", "title", "compaction"} {
+		f.q.Kind = kind
+		if got := step(kind, "b", "a"); !got.Handled || got.AuthID != "a" {
+			t.Fatalf("%s left the chat's account: %+v", kind, got)
+		}
+	}
+	f.q.Kind = "primary"
+	// Hours later, cold: off still does not move it.
+	f.clock.Add(int64(3 * time.Hour))
+	if got := step("cold", "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("off moved a cold chat", got)
+	}
+	if b := f.binding(t); b.Account != before.Account || b.Generation != before.Generation {
+		t.Fatal("kept chat rebound", before, b)
+	}
+	// Another model reads another cache, and a new chat is CPA's to place.
+	if f.pick(t, f.before(t, "other-model", "claude-sonnet-4-6"), "b", "a").Handled {
+		t.Fatal("off pinned another model")
+	}
+	f.q.Session = "new-chat"
+	if f.pick(t, f.before(t, "new", "claude-opus-5-5"), "b", "a").Handled {
+		t.Fatal("off placed a new chat")
+	}
+	// The chat's account not offered (cooling): CPA moves it; the move stays forced.
+	f.q.Session = "chat"
+	r := f.before(t, "not-offered", "claude-opus-5-5")
+	if f.pick(t, r, "b").Handled {
+		t.Fatal("off placed the chat on another account")
+	}
+	requireCompact(t, f.after(t, r, "b"))
+}
+
+// CPA loads its auth files after the plugins register (2026-10-15 17:11,
+// production): the first request after the restart found Pacer's inventory
+// empty, was left to CPA's cleared affinity (another account), and after()
+// then refused the move with a compaction.
+func TestOffKeepsABoundChatWhenCPALoadsCredentialsLate(t *testing.T) {
+	f := newRoutingFixture(t, "off")
+	f.seed(t, 5*time.Minute)
+	var loaded atomic.Bool
+	f.p.Host = func(method string, input any) (json.RawMessage, error) {
+		if method == "host.auth.list" && !loaded.Load() {
+			return json.Marshal(map[string]any{"files": []map[string]any{}})
+		}
+		return testHost(method, input)
+	}
+	f.p.discover(true)
+	if len(f.p.creds) != 0 {
+		t.Fatal("fixture: inventory not empty", f.p.creds)
+	}
+	loaded.Store(true)
+	r := f.before(t, "first-after-restart", "claude-opus-5-5")
+	if got := f.pick(t, r, "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("chat left to CPA while its inventory loaded", got)
+	}
+	if got := f.after(t, r, "a"); got.Terminate {
+		t.Fatal(string(got.ResponseBody))
+	}
+}
+
+func TestOnKeepsAWarmChatWhenCPALoadsCredentialsLate(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, 5*time.Minute)
+	var loaded atomic.Bool
+	f.p.Host = func(method string, input any) (json.RawMessage, error) {
+		if method == "host.auth.list" && !loaded.Load() {
+			return json.Marshal(map[string]any{"files": []map[string]any{}})
+		}
+		return testHost(method, input)
+	}
+	f.p.discover(true)
+	if len(f.p.creds) != 0 {
+		t.Fatal("fixture: inventory not empty", f.p.creds)
+	}
+	loaded.Store(true)
+	r := f.before(t, "first-after-restart", "claude-opus-5-5")
+	if got := f.pick(t, r, "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("warm chat left to CPA while its inventory loaded", got)
+	}
+	if got := f.after(t, r, "a"); got.Terminate {
+		t.Fatal(string(got.ResponseBody))
 	}
 }
 
 func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t *testing.T) {
 	for _, forced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "forced"}[forced], func(t *testing.T) {
-			f := newRoutingFixture(t, "active", true)
+			f := newRoutingFixture(t, "on")
 			f.seed(t, 5*time.Minute)
 			before := f.binding(t)
 			f.clock.Add(int64(6 * time.Minute))
@@ -296,7 +384,7 @@ func TestHandleGracefulColdMoveKeepsCheckpointAndForcedMoveRequiresCompaction(t 
 func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 	for _, deviation := range []string{"different-auth-alias", "different-model", "retry-no-candidates", "retry-mixed", "mode-off", "disabled"} {
 		t.Run(deviation, func(t *testing.T) {
-			f := newRoutingFixture(t, "active", true)
+			f := newRoutingFixture(t, "on")
 			f.seed(t, 5*time.Minute)
 			f.clock.Add(int64(6 * time.Minute))
 			f.observe(t)
@@ -323,9 +411,10 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 					t.Fatal(got)
 				}
 			case "mode-off":
+				// Off never moves the chat: it keeps its account.
 				f.p.cfg.Routing.Mode = "off"
-				if f.pick(t, r, "a", "b").Handled {
-					t.Fatal("off acted")
+				if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+					t.Fatal("off moved the chat", got)
 				}
 			case "disabled":
 				f.p.cfg.Enabled = false
@@ -336,21 +425,21 @@ func TestHandleHostDeviationAndRetryKeepForcedContract(t *testing.T) {
 			requireCompact(t, f.after(t, r, auth))
 		})
 	}
-	for _, mode := range []string{"off", "dry-run", "active"} {
-		f := newRoutingFixture(t, mode, false)
+	for _, mode := range []string{"off", "dry-run"} {
+		f := newRoutingFixture(t, mode)
 		f.seed(t, 5*time.Minute)
 		f.clock.Add(int64(6 * time.Minute))
 		f.observe(t)
 		r := f.before(t, "fallback", "claude-opus-5-5")
-		if f.pick(t, r, "a", "b").Handled {
-			t.Fatal("closed gate acted")
+		if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+			t.Fatal("closed gate moved the chat", got)
 		}
-		requireCompact(t, f.after(t, r, "b")) // An advisory cold_move is never permission.
+		requireCompact(t, f.after(t, r, "b")) // CPA's own move stays forced.
 	}
 }
 
 func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
-	f := newRoutingFixture(t, "active", true)
+	f := newRoutingFixture(t, "on")
 	f.seed(t, time.Hour)
 	f.clock.Add(int64(6 * time.Minute))
 	f.observe(t)
@@ -358,7 +447,7 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 	// Same declared route/checkpoint with a changed model alias remains the same chat.
 	r := f.before(t, "warm-alias", "opus-public-alias")
 	choice := f.pick(t, r, "a", "b")
-	if !choice.Handled || choice.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != "protected" {
+	if !choice.Handled || choice.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != routing.Warm {
 		t.Fatal(choice)
 	}
 	if got := f.after(t, r, "a"); got.Terminate {
@@ -376,8 +465,10 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 	for _, kind := range []string{"compaction", "title", "generate"} {
 		f.q.Kind = kind
 		r := f.before(t, kind, "summary-model")
-		if f.pick(t, r, "a", "b").Handled {
-			t.Fatal("auxiliary routed", kind)
+		// A compaction on another model has no warm cache: it is placed by pace.
+		// Titles and generations are left to CPA.
+		if got := f.pick(t, r, "a", "b"); got.Handled != (kind == "compaction") || got.Handled && got.AuthID != "b" {
+			t.Fatal("auxiliary placement", kind, got)
 		}
 		if got := f.after(t, r, "b"); got.Terminate {
 			t.Fatal(string(got.ResponseBody))
@@ -399,7 +490,7 @@ func TestHandleWarmContextAliasAndAuxiliaryCoexist(t *testing.T) {
 
 func TestHandleUnknownWarmthAndInflightBindingsStay(t *testing.T) {
 	for _, inflight := range []bool{false, true} {
-		f := newRoutingFixture(t, "active", true)
+		f := newRoutingFixture(t, "on")
 		ttl := time.Duration(0)
 		if inflight {
 			ttl = 5 * time.Minute
@@ -446,5 +537,331 @@ func TestSelectionIntentRequiresTheWholeEmittedProposal(t *testing.T) {
 		if !selectionIntent(a, actual, "model").Forced {
 			t.Fatal("unmatched selection lost forced contract", a, actual)
 		}
+	}
+}
+
+// Routing moments (docs/pace-routing.md): a chat moves only when its prompt
+// cache is cold on every account, and then without compaction.
+func TestHandleColdMomentsMoveWithoutCompaction(t *testing.T) {
+	for _, moment := range []string{"unknown-warmth-expired", "new-checkpoint", "ttl-expired"} {
+		t.Run(moment, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			switch moment {
+			case "unknown-warmth-expired":
+				f.seed(t, 0)
+				f.clock.Add(int64(59 * time.Minute))
+				f.observe(t)
+				r := f.before(t, "within-hour", "claude-opus-5-5")
+				if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != routing.Warm {
+					t.Fatal("unknown warmth moved before an hour", got)
+				}
+				f.complete(t, r.RequestID)
+				f.clock.Add(int64(2 * time.Minute))
+			case "new-checkpoint":
+				f.seed(t, time.Hour)
+				f.clock.Add(int64(time.Minute))
+				f.q.Checkpoint = "committed-new"
+			case "ttl-expired":
+				f.seed(t, 5*time.Minute)
+				f.clock.Add(int64(6 * time.Minute))
+			}
+			f.observe(t)
+			before := f.binding(t)
+			r := f.before(t, "cold", "claude-opus-5-5")
+			got := f.pick(t, r, "a", "b")
+			d := f.p.requests[r.RequestID].Decision
+			if !got.Handled || got.AuthID != "b" || d.Reason != routing.ColdMove || d.Forced {
+				t.Fatal(got, d)
+			}
+			if after := f.after(t, r, "b"); after.Terminate {
+				t.Fatal("cold move asked for compaction", string(after.ResponseBody))
+			}
+			if b := f.binding(t); b.Account != f.p.creds["b"].Account || b.Generation != before.Generation+1 {
+				t.Fatal("binding not moved", b)
+			}
+		})
+	}
+}
+
+func TestHandleCompactionOnTheChatModelStaysOnItsAccount(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, 5*time.Minute)
+	f.clock.Add(int64(6 * time.Minute)) // cold: a primary request would move
+	f.observe(t)
+	before := f.binding(t)
+	f.q.Kind = "compaction"
+	r := f.before(t, "same-model", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("same-model compaction left the chat's cache", got)
+	}
+	f.complete(t, r.RequestID)
+	r = f.before(t, "other-model", "claude-haiku-4-5")
+	got := f.pick(t, r, "a", "b")
+	if d := f.p.requests[r.RequestID].Decision; !got.Handled || got.AuthID != "b" || d.Reason != routing.ColdMove {
+		t.Fatal("other-model compaction not placed by pace", got, d)
+	}
+	if after := f.after(t, r, "b"); after.Terminate {
+		t.Fatal(string(after.ResponseBody))
+	}
+	if f.binding(t) != before {
+		t.Fatal("compaction rebound the chat")
+	}
+	// A compaction for a chat Pacer has never seen is left to CPA.
+	f.q.Session = "unknown-chat"
+	if f.pick(t, f.before(t, "unknown", "claude-haiku-4-5"), "a", "b").Handled {
+		t.Fatal("compaction without a chat routed")
+	}
+}
+
+func TestDecisionTraceRecordsEveryCandidate(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	r := f.before(t, "new", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "b" {
+		t.Fatal(got)
+	}
+	f.after(t, r, "b")
+	decisions, err := f.p.decisionView()
+	if err != nil || len(decisions) != 1 {
+		t.Fatal(decisions, err)
+	}
+	d := decisions[0]
+	if d.Outcome != "admitted" || d.Proposed.Reason != routing.NewChat || len(d.Proposed.Candidates) != 2 {
+		t.Fatalf("%+v", d)
+	}
+	for _, c := range d.Proposed.Candidates {
+		if !c.Known || !c.Eligible || c.Pace <= 0 || len(c.Budgets) != 2 {
+			t.Fatalf("candidate inputs missing: %+v", c)
+		}
+	}
+	// Off records only the chats it keeps on their account.
+	f.p.cfg.Routing.Mode = "off"
+	f.q.Session = "other"
+	r = f.before(t, "off", "claude-opus-5-5")
+	f.pick(t, r, "a", "b")
+	f.after(t, r, "a")
+	if decisions, _ = f.p.decisionView(); len(decisions) != 1 {
+		t.Fatal("off recorded a decision for a chat it left to CPA")
+	}
+	f.complete(t, r.RequestID)
+	r = f.before(t, "off-kept", "claude-opus-5-5")
+	if got := f.pick(t, r, "b", "a"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("off did not keep the chat", got)
+	}
+	f.after(t, r, "a")
+	if decisions, _ = f.p.decisionView(); len(decisions) != 2 || decisions[0].Proposed.Reason != routing.KeepAccount || decisions[0].Outcome != "admitted" || decisions[0].ActualAuth != "a" {
+		t.Fatalf("kept chat not recorded: %+v", decisions)
+	}
+}
+
+// A dormant 5-hour window (reset, not started) is a usable, full meter.
+func TestHandleDormantWindowIsAvailable(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.clock.Add(int64(time.Minute)) // a newer meter read than the fixture's
+	now := f.p.now()
+	full, weekly := 100.0, 90.0
+	windows := []observation.Window{
+		{Provider: "claude", Scope: "all", Seconds: 18000, Remaining: &full, Dormant: true, Usage: observation.Field{At: now, Source: "api"}, StatusEvidence: observation.Field{At: now, Source: "api", Quality: "measured", Raw: "null"}},
+		{Provider: "claude", Scope: "all", Seconds: 604800, Remaining: &weekly, Reset: now.Add(96 * time.Hour), Usage: observation.Field{At: now, Source: "api"}, ResetEvidence: observation.Field{At: now, Source: "api", Quality: "absolute"}},
+	}
+	if err := f.p.observer.Observe(f.p.creds["a"].Account, "claude", windows); err != nil {
+		t.Fatal(err)
+	}
+	r := f.before(t, "new", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" {
+		t.Fatal("dormant account excluded", got, f.p.requests[r.RequestID].Decision)
+	}
+}
+
+// CPA reports affinity "unsupported" whenever a plugin scheduler is registered
+// (conductor_selection.go LookupSessionAffinity), so every new chat reads that
+// way in production. It is placed by pace; only an ambiguous answer or a failed
+// lookup leaves it to CPA.
+func TestHandleNewChatWhenCPAReportsAffinityUnsupported(t *testing.T) {
+	for _, status := range []string{"unsupported", "unbound", "ambiguous", "error"} {
+		t.Run(status, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			f.p.Host = func(method string, input any) (json.RawMessage, error) {
+				if method != "host.affinity.lookup" {
+					return testHost(method, input)
+				}
+				if status == "error" {
+					return nil, errors.New("host unavailable")
+				}
+				return json.Marshal(pluginapi.HostAffinityLookupResponse{Status: status})
+			}
+			// A session header makes Pacer ask CPA, as OpenCode's requests do.
+			raw, _ := json.Marshal(f.q)
+			r := pluginapi.RequestInterceptRequest{RequestID: "new", Model: "claude-opus-5-5", Headers: http.Header{controlHeader: {base64.RawURLEncoding.EncodeToString(raw)}, "X-Session-Id": {"new-" + status}}, Metadata: map[string]any{"caller_scope": "fixture-caller"}}
+			before := invoke(t, f.p, pluginabi.MethodRequestInterceptBefore, r).(pluginapi.RequestInterceptResponse)
+			for k, v := range before.Headers {
+				r.Headers[k] = v
+			}
+			if f.p.requests["new"].Session == "" {
+				t.Fatal("fixture: no session")
+			}
+			got := f.pick(t, r, "a", "b")
+			placed := status == "unsupported" || status == "unbound"
+			if got.Handled != placed || placed && got.AuthID != "b" {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+// A warm chat whose account CPA leaves out although its meters are fine (an
+// upstream error in this request, a transient-error cooldown) is refused as
+// retryable instead of moved, up to the retry setting; then it is moved.
+func TestWarmChatWaitsForItsBrieflyUnavailableAccount(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, time.Hour) // warm on a for an hour
+	key := tracker.Key("fixture-caller", "claude", f.q)
+	r := f.before(t, "retry", "claude-opus-5-5")
+	if got := f.pick(t, r, "a", "b"); !got.Handled || got.AuthID != "a" || f.p.requests[r.RequestID].Decision.Reason != "warm" {
+		t.Fatal(got)
+	}
+	// CPA retries the same request without a; then the client retries twice more.
+	for i := 1; i <= 3; i++ {
+		got := f.pick(t, r, "b")
+		if !got.Handled || !got.Reject || got.RejectCode != "auth_unavailable" || got.AuthID != "" || f.p.strikes[key].n != i {
+			t.Fatal(i, got)
+		}
+	}
+	decisions, err := f.p.decisionView()
+	if err != nil || len(decisions) == 0 || decisions[0].Outcome != TransientWait || decisions[0].Proposed.Unoffered != true {
+		t.Fatal("transient wait not traced", decisions)
+	}
+	// Past the setting: the chat is moved, compacting first.
+	got := f.pick(t, r, "b")
+	if !got.Handled || got.Reject || got.AuthID != "b" || !f.p.requests[r.RequestID].Decision.Forced {
+		t.Fatal(got)
+	}
+	requireCompact(t, f.after(t, r, "b"))
+	f.complete(t, r.RequestID)
+
+	// a recovers within the retries: the chat stays, and its strikes end.
+	f2 := newRoutingFixture(t, "on")
+	f2.seed(t, time.Hour)
+	r = f2.before(t, "blip", "claude-opus-5-5")
+	if got := f2.pick(t, r, "b"); !got.Reject {
+		t.Fatal(got)
+	}
+	if got := f2.pick(t, r, "a", "b"); got.AuthID != "a" {
+		t.Fatal(got)
+	}
+	if after := f2.after(t, r, "a"); after.Terminate || f2.binding(t).Account != f2.p.creds["a"].Account {
+		t.Fatal("blip moved the chat", string(after.ResponseBody))
+	}
+	// Admission precedes the upstream call: only a succeeded request ends strikes.
+	if len(f2.p.strikes) != 1 {
+		t.Fatal("admission cleared strikes")
+	}
+	f2.complete(t, r.RequestID)
+	if len(f2.p.strikes) != 0 {
+		t.Fatal("success kept strikes")
+	}
+
+	// A lasting outage: every attempt on a is admitted, then fails upstream.
+	f3 := newRoutingFixture(t, "on")
+	f3.seed(t, time.Hour)
+	s := f3.p.settings
+	s.TransientRetries = 1
+	if err := f3.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"hold", "move"} {
+		r := f3.before(t, "outage-"+want, "claude-opus-5-5")
+		if got := f3.pick(t, r, "a", "b"); got.AuthID != "a" {
+			t.Fatal(i, got)
+		}
+		if after := f3.after(t, r, "a"); after.Terminate {
+			t.Fatal(string(after.ResponseBody))
+		}
+		got := f3.pick(t, r, "b") // a's upstream answered 502
+		if (want == "hold") != got.Reject || (want == "move" && got.AuthID != "b") {
+			t.Fatal(want, got)
+		}
+		invoke(t, f3.p, pluginabi.MethodRequestComplete, pluginapi.RequestCompletion{RequestID: r.RequestID, Outcome: pluginapi.RequestCompletionFailed})
+	}
+}
+
+func TestTransientWaitNeedsUsableMetersAWarmChatAndRetries(t *testing.T) {
+	for _, tc := range []string{"floor", "cold", "zero-retries", "expired"} {
+		t.Run(tc, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			f.seed(t, time.Hour)
+			switch tc {
+			case "floor":
+				left, short := 30.0, 1.0
+				now := f.p.now()
+				if err := f.p.observer.Observe(f.p.creds["a"].Account, "claude", []observation.Window{
+					{Provider: "claude", Scope: "all", Seconds: 18000, Remaining: &short, Reset: now.Add(3 * time.Hour), Usage: observation.Field{At: now, Source: "header"}, ResetEvidence: observation.Field{At: now, Source: "header", Quality: "absolute"}},
+					{Provider: "claude", Scope: "all", Seconds: 604800, Remaining: &left, Reset: now.Add(96 * time.Hour), Usage: observation.Field{At: now, Source: "header"}, ResetEvidence: observation.Field{At: now, Source: "header", Quality: "absolute"}},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "cold":
+				f.clock.Add(int64(2 * time.Hour))
+				f.observe(t)
+			case "zero-retries":
+				s := f.p.settings
+				s.TransientRetries = 0
+				if err := f.p.setSettings(s); err != nil {
+					t.Fatal(err)
+				}
+			case "expired":
+				r := f.before(t, "first", "claude-opus-5-5")
+				for i := 0; i < 3; i++ {
+					if !f.pick(t, r, "b").Reject {
+						t.Fatal("not held")
+					}
+				}
+				f.clock.Add(int64(transientWindow + time.Second))
+				f.observe(t)
+				if got := f.pick(t, r, "b"); !got.Reject {
+					t.Fatal("expired strikes still counted", got)
+				}
+				return
+			}
+			r := f.before(t, "move", "claude-opus-5-5")
+			if got := f.pick(t, r, "b"); !got.Handled || got.Reject || got.AuthID != "b" {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+// The forced move's 409 names the configured summary models, in order.
+func TestCompactRefusalCarriesTheCompactionModels(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, 5*time.Minute)
+	f.clock.Add(int64(6 * time.Minute))
+	f.observe(t)
+	s := f.p.settings
+	s.CompactionModels = []string{"claude-sonnet-4-6", "gemini-3.8-flash-high"}
+	if err := f.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	r := f.before(t, "move", "claude-opus-5-5")
+	f.pick(t, r, "b")
+	after := f.after(t, r, "b")
+	requireCompact(t, after)
+	var body struct {
+		Error struct {
+			Models []string `json:"compaction_models"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(after.ResponseBody, &body) != nil || strings.Join(body.Error.Models, ",") != "claude-sonnet-4-6,gemini-3.8-flash-high" {
+		t.Fatal(string(after.ResponseBody))
+	}
+	// compact_on_switch off on the page: the move is admitted without compaction.
+	f.complete(t, r.RequestID)
+	s.CompactOnSwitch = false
+	if err := f.p.setSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	r = f.before(t, "move-2", "claude-opus-5-5")
+	f.pick(t, r, "b")
+	if after = f.after(t, r, "b"); after.Terminate {
+		t.Fatal(string(after.ResponseBody))
 	}
 }

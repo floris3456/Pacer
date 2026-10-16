@@ -232,6 +232,20 @@ class Providers(Base):
         held = [e["held"] for e in self.attempts()["log"] if e["path"] == "/v1/messages"]
         self.assertEqual([False, True], held)
 
+    def test_fail_answers_the_next_messages_with_a_cloudflare_502(self):
+        self.json("/_test/fail", {"account": "cap-a", "count": 2})
+        for _ in range(2):
+            code, raw, headers = self.message("cap-a")
+            self.assertEqual((502, "text/html"), (code, headers["Content-Type"]))
+            self.assertIn(b"cloudflare", raw)
+        self.assertEqual(200, self.message("cap-b")[0])
+        self.assertEqual(200, self.message("cap-a")[0])
+        statuses = [(e["account"], e["status"]) for e in self.attempts()["log"] if e["path"] == "/v1/messages"]
+        self.assertEqual([("cap-a", 502), ("cap-a", 502), ("cap-b", 200), ("cap-a", 200)], statuses)
+        for bad in ({"account": "cap-z", "count": 1}, {"account": "cap-a"}, {"account": "cap-a", "count": -1},
+                    {"account": "cap-a", "count": True}, {"account": "cap-a", "count": 1, "extra": 1}):
+            self.assertEqual(400, self.call("/_test/fail", bad)[0], bad)
+
     def test_control_inputs_are_validated(self):
         good = {"account": "cap-a", "five_hour": 1, "seven_day": 2, "five_hour_reset": 1_900_000_001, "seven_day_reset": 1_900_000_002}
         for bad in ({**good, "account": "cap-z"}, {**good, "five_hour": 101}, {**good, "seven_day": -1},
@@ -245,6 +259,16 @@ class Providers(Base):
         body = self.json("/_test/usage", {**good, "partial_window": False})
         self.assertEqual({"five_hour": {"utilization": 1, "resets_at": 1_900_000_001},
                           "seven_day": {"utilization": 2, "resets_at": 1_900_000_002}}, body["usage"])
+
+    def test_an_unstarted_window_reads_null_until_the_first_message(self):
+        unstarted = {"account": "cap-a", "five_hour": 0, "seven_day": 40, "five_hour_reset": 0, "seven_day_reset": 1_900_000_002, "partial_window": False}
+        self.assertEqual(400, self.call("/_test/usage", {**unstarted, "five_hour": 5})[0])
+        body = self.json("/_test/usage", unstarted)
+        self.assertEqual({"utilization": 0, "resets_at": None}, body["usage"]["five_hour"])
+        before = int(time.time())
+        self.json("/v1/messages", {"model": "claude-opus-5-5", "messages": []}, token=fixture.access_token("cap-a"))
+        reset = self.json("/api/oauth/usage", token=fixture.access_token("cap-a"))["five_hour"]["resets_at"]
+        self.assertTrue(before + 18000 <= reset <= int(time.time()) + 18000, reset)
 
     def test_bodies_are_bounded_and_must_be_json(self):
         self.assertEqual(400, self.call("/v1/messages", raw=b"not json", token=fixture.access_token("cap-a"))[0])

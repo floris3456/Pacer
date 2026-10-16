@@ -9,10 +9,10 @@ import (
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 )
 
-func TestDryRunTracePreservesActualVersusProposedWithoutPrivateHeaders(t *testing.T) {
+func TestDecisionTracePreservesActualVersusProposedWithoutPrivateHeaders(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.sqlite")
 	p := startPlugin(t, path)
-	if err := p.setMode("dry-run"); err != nil {
+	if err := p.setMode("on"); err != nil {
 		t.Fatal(err)
 	}
 	ticket := attempt{Key: "opaque-chat-digest", Caller: "private-caller", Session: "private-session", Model: "claude-opus-5-5", PreviousAccount: "prior-account", Decision: routing.Decision{Auth: "a", Account: p.creds["a"].Account, Handled: true, Reason: "cold_move"}}

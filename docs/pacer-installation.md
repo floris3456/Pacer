@@ -70,7 +70,11 @@ clients. Configuration changes require an idle reload.
 ## Management, observation and history
 
 - Public shell: `/v0/resource/plugins/pacer/index.html` (no credentials in its URL).
-- CPA management key stays in browser memory; inference keys cannot administer it.
+- The page connects through the authenticated reverse-proxy session; the proxy keeps
+  the CPA management key server-side. There is no browser management-key prompt.
+  Apply the same SSO gate and server-side key injection to both `/v0/management/*`
+  and `/v8/management/*` (including their bare prefix paths). The latter serves
+  model settings and forward reports. Never inject the key into inference routes.
 - CPAMP embedding uses the restricted same-origin frame bridge. No administrator
   credential is posted into the frame. The existing management API owns model settings
   through `/v8/management/oauth/settings/models` and `/v8/management/models/config`.
@@ -113,6 +117,6 @@ never installs, restarts, promotes or publishes them. Use focused race tests for
 `routing`, `tracker`, and the relevant history/CLI tests. Native registration,
 authentication, final TTL and browser/TUI acceptance remain distinct checks.
 
-Active routing is unavailable in this candidate until the required observed dry-run
-period and integrated acceptance are actually completed. A fake clock is appropriate
-for unit tests, not a substitute for the 24–48-hour rollout observation.
+Routing is `off` or `on` (`routing.mode` in YAML, or `PATCH
+/v0/management/plugins/pacer/routing`, which persists). `off` restores CPA's own
+routing for the next request. The former `dry-run` mode reads as `off`.

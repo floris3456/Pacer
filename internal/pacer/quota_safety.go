@@ -57,7 +57,7 @@ func (p *Plugin) observeClaudeExtraCaptured(c credential, headers http.Header, c
 	}
 }
 
-// This basic availability guard is independent of the experimental pace optimizer.
+// This basic availability guard is independent of the pace router.
 // It uses only observed Claude limits; Codex subscription limits alone cannot
 // establish exhaustion because an account may still have paid credits.
 func claudeExhausted(windows []observation.Window, model string, now time.Time) bool {
@@ -124,6 +124,9 @@ func (p *Plugin) pickClaudeQuota(req pluginapi.SchedulerPickRequest, t attempt) 
 		}
 		seen[candidate.ID] = true
 		if !p.clientAllowedLocked(t.Caller, c.ID) {
+			continue
+		}
+		if p.cfg.Routing.Mode == "on" && p.settings.paused(c.Account) {
 			continue
 		}
 		if weight, err := strconv.Atoi(candidate.Attributes["weight"]); err == nil && weight <= 0 {

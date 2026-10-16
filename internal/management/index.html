@@ -58,6 +58,19 @@ tbody tr.empty:hover td{background:transparent}
 .pill{display:inline-block;background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r);padding:0 6px;font-size:12px}
 form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 fieldset{border:1px solid var(--line);border-radius:0;padding:10px 12px;margin:10px 0}
+form.settings{display:block;max-width:92ch}
+form.settings legend{color:var(--text);font-weight:600;font-size:13px}
+.setting{display:flex;gap:12px;align-items:flex-start;margin:10px 0;color:var(--text)}
+.setting input[type=number]{width:84px;flex:none}
+.setting input[type=checkbox]{margin-top:4px}
+.setting span,.setting-block{display:flex;flex-direction:column;gap:2px}
+.setting small,.setting-block small{color:var(--muted);font-size:12px;line-height:1.45}
+.setting-block{margin:10px 0;color:var(--text)}
+.model-list{margin:6px 0 0;padding-left:22px}
+.model-list li{margin:4px 0}
+.model-list input{width:min(100%,360px)}
+.model-list li::marker{color:var(--muted)}
+.changed::after{content:" · changed here";color:var(--muted);font-weight:400;font-size:12px}
 legend{color:var(--muted);font-size:12px;padding:0 4px}
 dialog{color:var(--text);background:var(--surface);border:1px solid var(--line-strong);border-radius:3px;max-width:600px;width:90%;padding:18px 20px}
 dialog h2{margin-top:0}
@@ -90,14 +103,72 @@ pre,code,kbd,samp{background:var(--field)}
 .usage-toggle button{border:none;border-radius:0;background:var(--raised);padding:4px 10px;min-height:28px}
 .usage-toggle button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .usage-toggle button+button{border-left:1px solid var(--line-strong)}
-.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin:12px 0}
-.usage-card{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.usage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:20px;margin:20px 0;align-items:start}
+.usage-card{border:1px solid var(--line-strong);background:var(--surface);color:var(--text);padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .usage-card-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;background:transparent;color:var(--text);border:0}
 .usage-provider{font-variant:all-small-caps;font-weight:600;color:var(--muted);letter-spacing:.05em}
-.usage-profile-name{font-weight:600;font-size:14px}
+.usage-profile-name{font-weight:650;font-size:18px}
 .usage-meta{color:var(--muted);font-size:12px}
-.usage-meters{font-size:12px;color:var(--muted);padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.usage-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px}
+.usage-meters{font-size:12px;color:var(--text);display:flex;flex-direction:column;gap:10px}
+.usage-meter-account{display:flex;flex-direction:column;gap:4px;min-width:0}
+.usage-meter-label{color:var(--muted);overflow-wrap:anywhere;font-size:11px}
+.usage-meter-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.usage-meter-mini{display:grid;grid-template-columns:minmax(24px,1fr) 42px;align-items:center;gap:6px;min-width:0;font-variant-numeric:tabular-nums}
+.usage-meter-table{display:grid;grid-template-columns:repeat(var(--meter-columns),minmax(0,1fr)) minmax(75px,.65fr);align-items:center;gap:8px 16px;width:100%}
+.usage-meter-heading{color:var(--muted);font-size:12px}
+.usage-meter-family{grid-column:1/-1;font-size:13px;font-weight:600;margin-top:2px}
+.usage-meter-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.usage-meter-mini .usage-percent{text-align:right}
+.usage-meter-group+.usage-meter-group{margin-top:14px}
+.usage-window-picker{margin:0;padding:0}
+.usage-window-options{height:95px;overflow:hidden;display:grid;grid-template-columns:repeat(var(--window-categories),minmax(0,1fr));gap:6px;border-top:1px solid var(--line);padding-top:8px;align-items:start;transition:height 900ms cubic-bezier(.4,0,.2,1);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.usage-window-picker:has(.usage-window-expand[aria-expanded=true]) .usage-window-options{overflow-y:auto}
+.usage-window-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 0}
+.usage-window-controls>button{padding:5px 7px;font-size:11px;white-space:nowrap}
+.usage-window-controls .usage-polling{margin-left:auto;flex-wrap:nowrap;gap:5px}
+.usage-window-controls .usage-polling label{display:flex;align-items:center;gap:4px;margin:0;white-space:nowrap;font-size:11px}
+.usage-window-controls .usage-polling input{width:52px}
+.usage-window-expand{display:flex;justify-content:center;align-items:center;width:100%;height:26px;border:0;border-top:1px solid var(--line-strong);background:transparent;padding:0;color:var(--muted);border-radius:0}
+.usage-window-expand:hover{color:var(--text);border-color:var(--muted);background:var(--raised)}
+.usage-window-expand span{display:block;width:8px;height:8px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform 900ms cubic-bezier(.4,0,.2,1)}
+.usage-window-expand[aria-expanded=true] span{transform:rotate(225deg)}
+@media(prefers-reduced-motion:reduce){.usage-window-options,.usage-window-expand span{transition:none}}
+@media(max-width:560px){.usage-window-controls{gap:4px}.usage-window-controls>button{font-size:10px;padding:4px}.usage-window-controls .usage-polling{gap:3px}.usage-window-controls .usage-polling label{font-size:10px;gap:2px}.usage-window-controls .usage-polling input{width:40px;padding:4px 2px}.usage-window-controls .usage-polling button{font-size:10px;padding:4px}}
+.usage-window-category{min-width:0}
+.usage-window-category h4{display:flex;flex-direction:column;justify-content:end;min-height:46px;margin:0 0 6px;padding:4px;font-size:11px;border-bottom:1px solid var(--line-strong)}
+.usage-window-category h4 span:first-child{color:var(--muted);font-weight:400}
+.usage-window-option{display:grid;grid-template-columns:13px minmax(0,1fr);gap:5px;align-items:center;height:34px;padding:1px 3px;font-size:10px;line-height:10px;border-bottom:1px solid var(--line);margin:0}
+.usage-window-option:has(input:checked){background:#27352c}
+.usage-window-option:hover{background:var(--hover)}
+.usage-window-text{display:grid;min-width:0;gap:0}
+.usage-window-account{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.usage-window-dates{font-size:10px}
+.usage-window-change{display:flex;align-items:center;white-space:nowrap;color:var(--text);font-variant-numeric:tabular-nums;font-size:10px;letter-spacing:-.2px}
+.usage-window-badge{color:#99cbaa;font-size:8px;margin-left:3px;white-space:nowrap}
+.usage-window-dates{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.usage-window-option input{margin:3px 0;width:auto}
+.usage-window-option small{display:block;color:var(--muted)}
+.usage-summary-note{font-size:12px;color:var(--muted)}
+.usage-details{margin:2px 0;font-size:12px}
+.usage-details summary{cursor:pointer;color:var(--muted)}
+.usage-meter-mini .usage-bar{height:7px;border-radius:2px}
+.usage-meter-mini .usage-percent{font-size:11px;white-space:nowrap}
+.usage-bar.blocked>span{background:#858585}
+.usage-polling{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.usage-polling input{width:76px;padding:4px 6px}
+.usage-polling button{padding:4px 8px}
+.usage-columns{display:grid;grid-template-columns:repeat(var(--summary-columns,2),minmax(0,1fr));gap:18px 12px}
+.usage-col-family{font-size:11px;color:var(--muted);font-weight:400}
+.usage-average{display:grid;gap:4px;padding-top:7px;border-top:1px solid var(--line);font-size:11px;line-height:1.45}
+.usage-average-count{color:var(--text);font-weight:500}
+.usage-average-tokens,.usage-average-delta,.usage-average-models{color:var(--muted);overflow-wrap:anywhere}
+.usage-window-picker{display:flex;align-items:stretch;flex-direction:column;gap:6px;min-width:0}
+.usage-window-picker select{width:100%;min-width:0}
+.usage-meter{display:flex;flex-direction:column;gap:6px}
+.usage-meter-title{display:flex;justify-content:space-between;gap:12px;font-weight:600}
+.usage-bar{height:5px;background:var(--line);overflow:hidden}
+.usage-bar>span{display:block;height:100%;background:#69b982}
+.usage-metric-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .usage-pool{display:flex;flex-direction:column;gap:6px}
 .usage-pool-title{font-size:12px;font-weight:650;color:var(--text);margin-top:4px}
 .usage-verified{border-color:#5f8f6a;color:#bfe3c6;cursor:help}
@@ -119,18 +190,41 @@ pre,code,kbd,samp{background:var(--field)}
 .manage-row select,.manage-row input{min-width:0;max-width:100%}
 .manage-logins{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid var(--line)}
 .manage-section{margin:14px 0}
+.manage-nav{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 22px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.manage-nav [aria-current=page]{background:var(--line-strong);color:var(--text)}
+.manage-intro{display:block;color:var(--muted);margin-bottom:18px;line-height:1.6}
+.manage-profile-row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:18px 0;border-bottom:1px solid var(--line)}
+.manage-profile-row>div{display:grid;gap:6px;min-width:0}
+.manage-profile-members{font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.manage-account{padding:16px 0;gap:12px}
+.manage-account-head{display:grid;gap:5px}
+.manage-row label,.manage-create-form>label{display:grid;gap:6px;font-size:13px;justify-content:stretch;margin:0}
+.manage-create-form input:not([type=checkbox]),.manage-create-form select{width:100%;max-width:100%}
+.manage-row{gap:12px;align-items:end}
+.manage-dates{flex-basis:100%;font-size:12px;color:var(--muted)}
+.manage-active{color:#8ed8a2}
+.manage-link-details{font-size:13px;margin-top:5px}
+.manage-link-details summary{cursor:pointer;color:var(--muted)}
+.manage-link-details[open]{display:grid;gap:12px;padding:12px;background:var(--surface)}
+.manage-link-details .muted{display:block;line-height:1.6;margin:12px 0}
+.manage-create-form{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.manage-create-form>button{justify-self:start}
+.manage-account-choices{grid-column:1/-1;border:1px solid var(--line);padding:14px;display:grid;gap:12px}
+.manage-account-choices label{display:flex;align-items:center;justify-content:flex-start;gap:10px;overflow-wrap:anywhere;margin:0;padding:5px 0}
+.manage-account-choices input{width:auto;margin:0}
+@media(max-width:560px){.manage-create-form{grid-template-columns:1fr}.usage-meter-table{gap:8px}.usage-meter-mini{grid-template-columns:minmax(12px,1fr) 36px;gap:3px}}
 .models-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
 .models-tabs button[aria-pressed=true]{background:var(--hover);color:#ffffff;font-weight:600}
 .model-harness{font-size:12px;color:var(--muted)}
 .price-cell{font-variant-numeric:tabular-nums;white-space:normal}
 .pill.price-missing{border-color:var(--err);color:var(--err-text)}
 #catalogue td{overflow-wrap:anywhere}
-.usage-col{display:flex;flex-direction:column;gap:4px;min-width:0}
-.usage-col-header{font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:2px}
-.usage-rate-big{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.3;color:var(--text)}
+.usage-col{display:flex;flex-direction:column;gap:7px;min-width:0;padding-top:4px}
+.usage-col-header{display:flex;flex-direction:column;justify-content:end;min-height:42px;font-size:14px;font-weight:650;color:var(--text);border-bottom:1px solid var(--line-strong);padding-bottom:6px}
+.usage-rate-big{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.35;color:var(--text)}
 .usage-rate-unavailable{color:var(--muted);font-weight:600}
-.usage-stat{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.usage-model-mix{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.usage-stat{font-size:13px;color:var(--text);overflow-wrap:anywhere;line-height:1.65}
+.usage-model-mix{font-size:13px;color:var(--muted);overflow-wrap:anywhere;line-height:1.65}
 .usage-col-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .usage-col-actions button{min-height:24px;padding:2px 8px;font-size:12px}
 .usage-other-limits{font-size:12px;margin:6px 0;border-top:1px solid var(--line);padding-top:4px}
@@ -173,12 +267,31 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 </style></head><body>
 <header><h1>Pacer</h1><nav aria-label="Main"><button data-tab="pacer" aria-current="page">Pacer</button><button data-tab="usage">Usage Quota</button><button data-tab="models">Model Settings</button><button data-tab="keys">Keys &amp; Groups</button></nav></header>
 <main>
-<section id="login"><h2>Connect to management</h2><p class="muted">Use your CPA management key, or the CPAMP administrator login when opening this page through CPAMP. Ordinary inference keys cannot administer Pacer.</p><form id="signin"><label>Management key <input id="key" type="password" autocomplete="off" required></label><button>Connect</button></form><small>The key stays in this page’s memory only. It is never stored in the browser or sent in a URL.</small></section>
+<section id="login"><h2>Connect to Pacer</h2><p class="muted">Pacer uses your existing authenticated session. If your session has expired, reload this page to sign in.</p><button id="reconnect" type="button">Retry connection</button></section>
 <div id="message" role="status" class="status" hidden></div>
-<section id="workspace" hidden><div class="toolbar"><button id="refresh">Refresh view</button><button id="disconnect">Disconnect</button><span id="updated" class="muted"></span></div>
-<section id="pacer"><h2>Routing</h2><p>Warm chats stay on their account. Cold chats move only for a clear quota advantage. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA affinity</option><option value="dry-run">Dry run · observe decisions</option><option value="active" disabled>Active · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th></tr></thead><tbody id="accounts"></tbody></table></div><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
+<section id="workspace" hidden><div class="toolbar"><span id="updated" class="muted" aria-live="off"></span></div>
+<section id="pacer"><h2>Routing</h2><p>Pace routing spends each account’s 7-day meter by its reset. Warm chats stay on their account; cold chats go to the account that must be spent fastest. Forced moves preserve the client’s compaction checkpoint.</p><div class="toolbar"><label>Routing mode <select id="mode"><option value="off">Off · CPA routing</option><option value="on">On · pace routing</option></select></label><button id="save-mode">Apply</button><span id="rollout" class="muted"></span></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Provider</th><th>Pace</th><th>Observation</th><th>New chats</th></tr></thead><tbody id="accounts"></tbody></table></div>
+<form id="settings-form" class="settings" novalidate><h3>Settings</h3><p class="muted">Changes apply at once and survive restarts. A setting that is also in CPA’s config.yaml follows config.yaml again when its value there changes.</p>
+<fieldset><legend>Account switches</legend>
+<label class="setting"><input type="checkbox" id="set-compact" aria-labelledby="set-compact-name" aria-describedby="set-compact-help"> <span><b id="set-compact-name">Compact on switch</b><small id="set-compact-help">When Pacer must move a chat to another account, a client that can compact (OpenCodePlus) summarises the chat first, so the new account receives a short summary instead of the whole history.</small></span></label>
+<div class="setting-block"><b>Summary models</b><small>Write the switch summary. The first is used; if it fails, the next, and so on. Empty: the client’s own compaction model. Adding a model opens a field for the next fallback.</small><ol id="set-models" class="model-list"></ol><datalist id="model-options"></datalist><span id="model-options-status" class="muted"></span></div>
+</fieldset>
+<fieldset><legend>Placement</legend>
+<label class="setting"><input type="number" id="set-band" min="50" max="100" step="1" required aria-labelledby="set-band-name" aria-describedby="set-band-help"> <span><b id="set-band-name">Equal pace band (%)</b><small id="set-band-help">Accounts within this % of the best pace count as equally good, so a cold chat stays on its account instead of moving for a small gain. Lower: fewer moves; 100: always the best account.</small></span></label>
+<label class="setting"><input type="number" id="set-new-min" min="0" max="100" step="1" required aria-labelledby="set-new-min-name" aria-describedby="set-new-min-help"> <span><b id="set-new-min-name">New-chat minimum (5-hour % left)</b><small id="set-new-min-help">An account needs this much of its 5-hour window to take a new or moved chat, so new chats do not start on a nearly empty window.</small></span></label>
+<label class="setting"><input type="number" id="set-short-floor" min="0" max="50" step="0.5" required aria-labelledby="set-short-floor-name" aria-describedby="set-short-floor-help"> <span><b id="set-short-floor-name">5-hour floor (% left)</b><small id="set-short-floor-help">At or below this, an account serves no chat, not even a warm one: its chats move (with a summary if compact on switch is on).</small></span></label>
+<label class="setting"><input type="number" id="set-long-floor" min="0" max="50" step="0.5" required aria-labelledby="set-long-floor-name" aria-describedby="set-long-floor-help"> <span><b id="set-long-floor-name">7-day floor (% left)</b><small id="set-long-floor-help">The same for the 7-day meter. Raise it to keep a reserve on every account.</small></span></label>
+</fieldset>
+<fieldset><legend>Warm chats</legend>
+<label class="setting"><input type="number" id="set-warm" min="0" max="1440" step="1" required aria-labelledby="set-warm-name" aria-describedby="set-warm-help"> <span><b id="set-warm-name">Warm for (minutes after the last request)</b><small id="set-warm-help">A chat counts as warm this long after its last request when Pacer has no cache evidence, and warm chats are never moved without need. 60 matches Claude’s 1-hour cache; 5 matches the 5-minute cache and frees chats sooner.</small></span></label>
+<label class="setting"><input type="number" id="set-retries" min="0" max="10" step="1" required aria-labelledby="set-retries-name" aria-describedby="set-retries-help"> <span><b id="set-retries-name">Retries before moving a warm chat</b><small id="set-retries-help">When a warm chat’s account fails briefly (an upstream 5xx) while its meters are fine, the request ends with that retryable error this many times (within 2 minutes) instead of moving the chat; the client retries by itself. 0 moves at once.</small></span></label>
+<label class="setting"><input type="number" id="set-force-warning" min="0" max="50" step="0.5" required aria-labelledby="set-force-warning-name" aria-describedby="set-force-warning-help"> <span><b id="set-force-warning-name">Forced move warning (points above a floor)</b><small id="set-force-warning-help">When a chat’s account is this close to its 5-hour or 7-day floor, clients mark the account the chat will be forced to as FORCE USE. 0 shows it only once the move is due.</small></span></label>
+</fieldset>
+<fieldset><legend>Providers</legend><span class="setting-block"><small>Pace routing applies to these providers; others use CPA’s routing. Pause single accounts in the table above.</small></span>
+<label><input type="checkbox" id="set-claude"> Claude</label> <label><input type="checkbox" id="set-codex"> Codex</label></fieldset>
+<div class="toolbar"><button id="save-settings">Save settings</button><button type="button" id="reset-settings">Revert unsaved changes</button><span id="settings-status" class="muted" role="status"></span></div></form><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
-<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><div class="usage-toggle" role="group" aria-label="Statistics view"><button type="button" id="usage-mode-latest" aria-pressed="true">Latest window</button><button type="button" id="usage-mode-average" aria-pressed="false">Average</button></div><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
+<div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
 <div id="usage-status" role="status" class="status" hidden></div>
 <p id="usage-asof" class="muted"></p>
 <div id="usage-grid" class="usage-grid"></div>
@@ -244,13 +357,15 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <script>
 (() => {
   'use strict';
-  let key = '', tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
+  let tab = 'pacer', models = [], editing = null, thinkingLevels = [], bridge = false, connected = false, generation = 0, sequence = 0;
   const pending = new Map();let allowBridge=true;
   let metadata={revision:0,keys:[],groups:[]}, metadataEdit=null;
   const root = '/v0/management/plugins/pacer';
   const forwardRoot='/v8/management/plugins/pacer/reports/forward';
   const el = id => document.getElementById(id);
-  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  const allowed = new Set(['GET '+root+'/state','PATCH '+root+'/routing','PATCH '+root+'/settings','GET '+root+'/keys','PATCH '+root+'/keys','GET /v8/management/oauth/settings/models','PATCH /v8/management/models/config']);
+  allowed.add('GET /v8/management/config/access/api-keys');
+  for(const channel of ['claude','codex','gemini','gemini-interactions','antigravity','aistudio','vertex','kimi','kimi-ai','kimi.ai','kimi.com','meta','muse','xai','x-ai','grok','devin'])allowed.add('GET /v8/management/routing/model-definitions/'+channel);
   for(const op of ['profiles','windows','inspect','accounts'])allowed.add('POST '+root+'/usage/'+op);
   for(const op of ['exclusions','links','profile'])allowed.add('PATCH '+root+'/usage/'+op);
   allowed.add('POST '+root+'/models/prices');allowed.add('PATCH '+root+'/models/prices');allowed.add('POST '+root+'/models/prices/refresh');
@@ -268,7 +383,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
     if(window.parent===window||event.source!==window.parent||event.origin!==location.origin)return;
     const data=event.data;if(!data||data.version!==1)return;
     if(data.type==='pacer:bridge-disconnected'&&bridge){disconnect();return}
-    if(data.type==='pacer:bridge-ready'&&allowBridge&&!key&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
+    if(data.type==='pacer:bridge-ready'&&allowBridge&&!connected){allowBridge=false;bridge=true;connected=true;generation++;el('login').hidden=true;el('workspace').hidden=false;refresh();return}
     if(data.type!=='pacer:response'||typeof data.id!=='string')return;
     const call=pending.get(data.id);if(!call)return;pending.delete(data.id);clearTimeout(call.timer);
     if(data.ok===true)call.resolve(data.data);else call.reject(Object.assign(Error(typeof data.error==='string'?data.error.slice(0,500):'Management request failed'),{status:data.status}));
@@ -278,8 +393,8 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
     if (!allowed.has(method+' '+path)&&!(method==='GET'&&body===undefined&&path.startsWith(profilePrefix)&&forwardDecimal(path.slice(profilePrefix.length)))) throw Error('Management operation is not allowed');
     const startedGeneration=generation;
     if(bridge){const data=await bridgeCall(path,method,body);if(startedGeneration!==generation)throw Error('Management connection changed');return data}
-    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',signal,headers:{...(key?{Authorization:'Bearer '+key}:{}),'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Object.assign(Error(response.status===401||response.status===403?'Management authorization required. Inference keys are not administrator keys.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.'),{status:response.status})}
+    const response = await fetch(path,{method,redirect:'error',cache:'no-store',credentials:'same-origin',signal,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+    if (!response.ok) {const details=await response.json().catch(()=>({}));throw Object.assign(Error(response.status===401||response.status===403?'Your session is not authorized. Reload this page to sign in.':typeof details.error==='string'?details.error.slice(0,500):'Request failed ('+response.status+'). No change was confirmed.'),{status:response.status})}
     const data=await response.json();if(startedGeneration!==generation)throw Error('Management connection changed');return data;
   }
   function message(text, error=false){el('message').hidden=!text;el('message').textContent=text;el('message').className='status'+(error?' error':'')}
@@ -289,19 +404,33 @@ function row(target, values){const tr=document.createElement('tr');for(const val
 function hashCell(td,values){td.replaceChildren(...values.map(value=>{const span=document.createElement('span');span.className='hash';span.textContent=value;return span}))}
 function emptyRow(target,columns){const tr=document.createElement('tr');tr.className='empty';const td=document.createElement('td');td.colSpan=columns;td.textContent='None yet';tr.append(td);el(target).append(tr)}
   function date(value){if(!value||String(value).startsWith('0001-'))return 'Unknown';const d=new Date(typeof value==='number'?value*1000:value);return Number.isFinite(d.getTime())?d.toISOString().replace('T',' ').replace('.000Z',' UTC'):'Unknown'}
+  let editingFields = {};
+  async function loadModels(){
+    const ticket=generation;
+    const data=await api('/v8/management/oauth/settings/models');
+    const channels=[...new Set((data.models||[]).map(m=>m.channel))].filter(ch=>allowed.has('GET /v8/management/routing/model-definitions/'+ch));
+    const definitions=new Map(await Promise.all(channels.map(async ch=>[ch,(await api('/v8/management/routing/model-definitions/'+ch)).models||[]])));
+    if(ticket!==generation||!connected)return;
+    models=(data.models||[]).map(model=>{
+      const base=(definitions.get(model.channel)||[]).find(m=>m.id===model.upstream);
+      return {...model,display_name:model.setting?.['display-name']??model.display_name??base?.display_name,context_length:model.setting?.['max-context-length']??model.context_length??base?.context_length,max_completion_tokens:model.setting?.['max-output-tokens']??model.max_completion_tokens??base?.max_completion_tokens,reasoning:model.reasoning??(base?.thinking?{mode:'levels',levels:base.thinking.levels||[]}:undefined)};
+    });
+    thinkingLevels=data['thinking-levels']||[];modelChannels=data['channel-info']||[];renderModelTabs();showModels();loadPrices();
+  }
   function editModel(model){
     editing=model;
     el('model-title').textContent=model.upstream;
     el('model-enabled').checked=model.enabled;
-    el('model-alias').value=model.alias?.name||'';
+    el('model-alias').value=model.alias?.name||model.name||model.upstream;
     el('model-keep').checked=!!model.alias?.['keep-original'];
     el('keep-label').hidden=!model.supports?.['keep-original'];
-    el('model-display').value=model.setting?.['display-name']||'';
-    el('model-context').value=model.setting?.['max-context-length']||'';
-    el('model-output').value=model.setting?.['max-output-tokens']||'';
+    el('model-display').value=model.setting?.['display-name']??model.display_name??'';
+    el('model-context').value=model.setting?.['max-context-length']??model.context_length??'';
+    el('model-output').value=model.setting?.['max-output-tokens']??model.max_completion_tokens??'';
     el('output-label').hidden=!model.supports?.['max-output-tokens'];
-    el('model-thinking').value=(model.setting?.['thinking-levels']||[]).join(', ');
-    el('thinking-help').textContent='Comma-separated levels: '+thinkingLevels.join(', ');
+    el('model-thinking').value=(model.setting?.['thinking-levels']??model.reasoning?.levels??[]).join(', ');
+    el('thinking-help').textContent=model.reasoning?.levels?.length?'CPA model levels: '+model.reasoning.levels.join(', '):'CPA has no named thinking levels for this model.';
+    editingFields=Object.fromEntries(['alias','display','context','output','thinking'].map(id=>[id,String(el('model-'+id).value)]));
     el('model-harness').textContent=JSON.stringify({id:model.id,display_name:model.display_name||undefined,kind:model.kind,context_length:model.context_length,input_length:model.input_length,max_completion_tokens:model.max_completion_tokens,reasoning:model.reasoning,input_modalities:model.input_modalities,output_modalities:model.output_modalities,service_tiers:model.service_tiers},null,2);
     el('model-error').textContent='';el('model-dialog').showModal();
   }
@@ -456,11 +585,23 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     finally { buttons.forEach(b => b.disabled = false); }
   }
   function metadataButtons(tr,actions){const td=document.createElement('td');for(const [name,action] of actions){const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=action;button.disabled=!metadata.editable;td.append(button)}tr.append(td)}
+  let configuredKeys = [];
+  async function loadKeys(){
+    const ticket=generation;
+    const values=await api('/v8/management/config/access/api-keys');
+    const keys=await Promise.all(values.map(async(value,index)=>{
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
+      return {hash,label:'API key '+(index+1),masked:'••••'+value.slice(-4)};
+    }));
+    const labels=await api(root+'/keys');
+    if(ticket!==generation||!connected)return;
+    configuredKeys=keys;metadata=labels;showMetadata();
+  }
   function showMetadata(){
-    el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent=metadata.coverage||'';
+    el('key-rows').replaceChildren();el('group-rows').replaceChildren();el('key-status').textContent='CPA currently authorizes '+configuredKeys.length+' API key'+(configuredKeys.length===1?'':'s')+'. Keys are read from CPA’s live configuration; only masked endings and fingerprints are displayed.';
     el('add-key').disabled=el('add-group').disabled=!metadata.editable;
-    for(const item of metadata.keys||[]){const tr=row('key-rows',[item.alias||'Unnamed key',item.reference,'']);hashCell(tr.children[1],[item.reference]);hashCell(tr.children[2],item.lineage_hashes||[]);metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]])}
-    if(!(metadata.keys||[]).length)emptyRow('key-rows',4);
+    for(const key of configuredKeys){const item=(metadata.keys||[]).find(k=>k.current_hash===key.hash);const tr=row('key-rows',[item?.alias||key.label,key.masked,'']);hashCell(tr.children[1],[key.masked,'SHA-256: '+key.hash]);hashCell(tr.children[2],item?.lineage_hashes||[]);if(item)metadataButtons(tr,[['Rename',()=>editMetadata('alias',item)],['Record replacement',()=>editMetadata('rotate-key',item)]]);else tr.append(document.createElement('td'))}
+    if(!configuredKeys.length)emptyRow('key-rows',4);
     for(const group of metadata.groups||[]){const names=(group.key_references||[]).map(ref=>metadata.keys.find(k=>k.reference===ref)?.alias||ref);const tr=row('group-rows',[group.name,names.join(', ')]);metadataButtons(tr,[['Edit group',()=>editMetadata('put-group',group)]])}
     if(!(metadata.groups||[]).length)emptyRow('group-rows',3);
   }
@@ -655,10 +796,65 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('forward-profile-form').onsubmit=event=>{event.preventDefault();return forwardSaveProfile()};el('forward-profile-new').onclick=forwardNewProfile;el('forward-membership-add').onclick=()=>{try{forwardMembership()}catch(e){el('forward-profile-status').textContent=e.message}};
   const usageCache = new Map();
   let currentUsageData = null;
-  let usageMode = 'latest';
   let usageGeneration = 0;
   let usageDateTimer = null;
   const usageSelectedWindows = new Map();
+  const usageWindowLists = new Map();
+  const usageProfileSelection = new Map();
+  let usageWindowsCache = new WeakMap();
+  allowed.add('PATCH '+root+'/usage/polling');
+
+  function profilePollingControl(profile){
+    const form=document.createElement('form');form.className='usage-polling';
+    const label=document.createElement('label');label.textContent='Poll every ';
+    const input=document.createElement('input');input.type='number';input.min='15';input.max='1440';input.step='1';input.value=profile.polling_seconds/60;
+    input.setAttribute('aria-label',profile.name+' polling minutes');input.title='15–1440 minutes. Provider backoff still applies; activity and reset checks may run sooner.';
+    label.append(input,document.createTextNode(' min'));
+    const save=document.createElement('button');save.type='submit';save.textContent='Save';
+    form.append(label,save);
+    form.onsubmit=async event=>{
+      event.preventDefault();const minutes=Number(input.value);
+      if(!Number.isInteger(minutes)||minutes<15||minutes>1440){showUsageError('Polling must be 15–1440 whole minutes.');return}
+      save.disabled=true;
+      try{await api(root+'/usage/polling','PATCH',{profile:profile.reference,seconds:minutes*60,revision:profile.polling_revision||0});usageCache.clear();await loadUsage(true)}
+      catch(error){showUsageError(error.message)}finally{save.disabled=false}
+    };
+    return form;
+  }
+
+  function profileMeters(profile){
+    const meters=document.createElement('div');meters.className='usage-meters';
+    const groups=new Map();
+    for(const m of profile.current||[]){if(!groups.has(m.scope))groups.set(m.scope,[]);groups.get(m.scope).push(m)}
+    const mini=(meter,kind,blocked)=>{
+      const row=document.createElement('div');row.className='usage-meter-mini';
+      const remaining=meter?.used_percent==null?null:Math.max(0,Math.min(100,100-meter.used_percent));
+      const bar=document.createElement('div');bar.className='usage-bar'+(blocked?' blocked':'');
+      if(remaining!==null){const fill=document.createElement('span');fill.style.width=remaining+'%';bar.append(fill);bar.setAttribute('role','meter');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-valuenow',String(remaining))}
+      const description=(meter?.label||profile.name)+' · '+(meter?.pool||'')+' '+kindTitle(kind);
+      bar.setAttribute('aria-label',description+' percent left');
+      row.title=meter?[meter.reset_ms?'Resets '+date(meter.reset_ms/1000):'No reset reported',meter.last_observed_ms?'Read '+date(meter.last_observed_ms/1000):'',meter.stale?'Reading is stale':'',blocked?'Unavailable while the 7-day allowance is empty':''].filter(Boolean).join(' · '):'No meter reported';
+      row.append(bar,span(remaining===null?'—':pct1(remaining)+'%','usage-percent'));return row;
+    };
+    for(const [scope,list] of [...groups].sort(([a],[b])=>(a==='gemini'?-1:b==='gemini'?1:a.localeCompare(b)))){
+      // A temporarily absent reading does not remove a reported active limit.
+      const kinds=[...new Set([...list.map(m=>m.kind),...(profile.pools||[]).filter(p=>p.scope===scope&&!p.ended).map(p=>p.kind)])].sort((a,b)=>kindRank(a)-kindRank(b));
+      const group=document.createElement('section');group.className='usage-meter-group';group.dataset.scope=scope;
+      const grid=document.createElement('div');grid.className='usage-meter-table';grid.style.setProperty('--meter-columns',kinds.length);
+      for(const kind of kinds)grid.append(span(kindTitle(kind),'usage-meter-heading'));
+      grid.append(span('Account','usage-meter-heading'));
+      if(list[0].pool){const title=span(list[0].pool,'usage-meter-family');grid.append(title)}
+      const accounts=[...new Set(list.map(m=>m.account))].sort((a,b)=>list.find(m=>m.account===a).label.localeCompare(list.find(m=>m.account===b).label));
+      for(const account of accounts){
+        const items=list.filter(m=>m.account===account),week=items.find(m=>m.kind==='weekly');
+        for(const kind of kinds)grid.append(mini(items.find(m=>m.kind===kind),kind,kind==='5h'&&week?.used_percent>=100));
+        const label=span(shortAccount(items[0].label),'usage-meter-name');label.title=items[0].label;grid.append(label);
+      }
+      group.append(grid);meters.append(group);
+    }
+    return meters;
+  }
+  const shortAccount=label=>(label||'Unknown account').split('@')[0];
   const usageInflight = new Map();
 
   const cleanModelName = name => (name || '').replace(/^(claude|gpt|gemini)-/, '');
@@ -769,10 +965,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     usageCache.clear();
     usageInflight.clear();
     usageSelectedWindows.clear();
+    usageWindowLists.clear();
+    usageProfileSelection.clear();
+    usageWindowsCache = new WeakMap();
     currentUsageData = null;
-    usageMode = 'latest';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-    el('usage-mode-average').setAttribute('aria-pressed', 'false');
     el('usage-key').value = '';
     while (el('usage-key').options.length > 1) el('usage-key').remove(1);
     el('usage-from').value = '';
@@ -789,21 +985,21 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const keyVal = el('usage-key').value;
     const fromVal = el('usage-from').value;
     const throughVal = el('usage-through').value;
-    const cacheKey = `${keyVal}|${fromVal}|${throughVal}`;
-
-    usageSelectedWindows.clear();
+    const selection=Object.fromEntries([...usageProfileSelection].map(([ref,ids])=>[ref,[...ids].sort()]));
+    const cacheKey = `${keyVal}|${fromVal}|${throughVal}|${JSON.stringify(selection)}`;
 
     const cached = usageCache.get(cacheKey);
-    if (cached && refreshing && Date.now() - cached.at > 60000) usageCache.delete(cacheKey);
+    if (cached && refreshing) usageCache.delete(cacheKey);
     else if (cached) {
       currentUsageData = cached.data;
       showUsageError('');
-      renderUsage();
-      return;
+       renderUsage();
+       loadWindowLists(cached.data);
+       return;
     }
 
     showUsageError('');
-    const query = {};
+    const query = {latest_only:true,selected_windows:selection};
     if (keyVal) query.key = keyVal;
     if (fromVal) query.from = fromVal;
     if (throughVal) query.through = throughVal;
@@ -824,6 +1020,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       currentUsageData = data;
       updateUsageAPIKeys(data.api_keys);
       renderUsage();
+      loadWindowLists(data);
     } catch (error) {
       if (!connected || ticket.generation !== generation || ticket.count !== usageGeneration) return;
       showUsageError(error.message);
@@ -838,18 +1035,69 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     return div;
   }
 
+  async function loadWindowLists(data){
+    const ticket=generation;
+    try{
+      let pending=usageWindowsCache.get(data);
+      if(!pending){pending=Promise.all((data.profiles||[]).map(async profile=>[profile.reference,(await api(root+'/usage/windows','POST',{...data.query,profile:profile.reference,all:true})).windows||[]]));usageWindowsCache.set(data,pending)}
+      const lists=await pending;
+      if(ticket!==generation||currentUsageData!==data||!connected)return;
+      for(const [ref,windows] of lists)usageWindowLists.set(ref,windows);
+      renderUsage();
+    }catch(error){usageWindowsCache.delete(data);if(ticket===generation&&currentUsageData===data)showUsageError('Window selection could not be loaded: '+error.message)}
+  }
+
+  function profileWindowPicker(profile){
+    const details=document.createElement('section');details.className='usage-window-picker';details.dataset.profile=profile.reference;details.setAttribute('aria-label',profile.name+' window selection');
+    const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
+    const controls=document.createElement('div');controls.className='usage-window-controls';
+    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true)};
+    controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
+    if(profile.polling_seconds)controls.append(profilePollingControl(profile));
+    details.append(controls);
+    const list=document.createElement('div');list.className='usage-window-options';
+    if(!usageWindowLists.has(profile.reference))list.append(span('Loading windows…','muted'));
+    const categories=poolGroups(profile.pools||[]).flatMap(g=>g.pools).filter(p=>windows.some(w=>w.kind===p.kind&&w.scope===p.scope));
+    list.style.setProperty('--window-categories',Math.max(1,categories.length));
+    for(const pool of categories){
+      const category=document.createElement('section');category.className='usage-window-category';
+      const heading=document.createElement('h4');heading.append(span(pool.label||'All models'),span(kindTitle(pool.kind)));category.append(heading);
+      for(const w of windows.filter(w=>w.kind===pool.kind&&w.scope===pool.scope)){
+      const label=document.createElement('label');label.className='usage-window-option';
+      label.title=shortAccount(w.label)+' · '+windowSpan(w)+(w.excluded?' · excluded from rates':'');
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=w.latest||chosen.has(w.id);cb.disabled=w.latest;
+      cb.setAttribute('aria-label',label.title+(w.latest?' · Latest':''));
+      const text=span('','usage-window-text');
+      if(profile.credentials>1)text.append(span(shortAccount(w.label),'usage-window-account'));
+      const simpleDate=ms=>ms?new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'}):'—';
+      text.append(span(simpleDate(w.start_ms)+' → '+simpleDate(w.end_ms),'usage-window-dates'));
+      const start=w.rate?.start_percent,end=w.rate?.end_percent??w.used_percent;
+      const change=span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change');
+      if(w.latest||w.excluded)change.append(span(w.latest?'Latest':'Excluded','usage-window-badge'));
+      text.append(change);
+      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
+      label.append(cb,text);category.append(label);
+      }
+      list.append(category);
+    }
+    const expand=button('',()=>{const expanded=expand.getAttribute('aria-expanded')!=='true';expand.setAttribute('aria-expanded',String(expanded));expand.setAttribute('aria-label',expanded?'Show fewer windows':'Show more windows');if(!expanded)list.scrollTop=0;list.style.height=expanded?'197px':'95px'},'usage-window-expand');
+    expand.setAttribute('aria-expanded','false');expand.setAttribute('aria-label','Show more windows');const chevron=span('');chevron.setAttribute('aria-hidden','true');expand.append(chevron);
+    details.append(list,expand);return details;
+  }
+
   function appendRateDisplay(col, rate) {
     if (!rate || rate.status !== 'available') {
       usageStat(col, 'No rate', 'usage-rate-big usage-rate-unavailable');
       usageStat(col, rate?.reason || rate?.status || 'Unavailable', 'usage-stat muted');
       return;
     }
+    usageStat(col, 'API value per quota point', 'usage-metric-label');
     usageStat(col, formatUSDPerPercent(rate.usd_per_percent), 'usage-rate-big');
     if (rate.equivalent_tokens_per_percent) {
       usageStat(col, formatTokens(rate.equivalent_tokens_per_percent) + ' / 1%' + (rate.reference_name ? ' (' + rate.reference_name + ')' : ''));
     }
     if (rate.start_percent != null && rate.end_percent != null) {
-      usageStat(col, `Meter ${pct1(rate.start_percent)}% → ${pct1(rate.end_percent)}% (Δ ${pct1(rate.delta_pp)} pp)`);
+      usageStat(col, `Remaining ${pct1(100-rate.start_percent)}% → ${pct1(100-rate.end_percent)}% (Δ ${pct1(rate.delta_pp)} pp)`);
     } else if (rate.delta_pp != null) {
       usageStat(col, `Meter Δ ${pct1(rate.delta_pp)} pp`);
     }
@@ -868,45 +1116,38 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
     const colH = document.createElement('div');
     colH.className = 'usage-col-header';
-    colH.textContent = colTitle;
+    if(pool.label)colH.append(span(pool.label,'usage-col-family'));
+    colH.append(span(colTitle));
     col.append(colH);
 
     const overrideKey = profile.reference + ':' + pool.kind + ':' + pool.scope;
     const activeWindow = usageSelectedWindows.get(overrideKey) || pool.latest;
 
-    if (usageMode === 'average' && !usageSelectedWindows.has(overrideKey)) {
+    {
+      const meters=(profile.current||[]).filter(m=>m.kind===pool.kind&&m.scope===pool.scope);
+      const known=meters.filter(m=>m.used_percent!=null);
+      const expected=profile.active_credentials||meters.length;
+      const remaining=known.length===expected&&known.length?known.reduce((sum,m)=>sum+Math.max(0,Math.min(100,100-m.used_percent)),0)/known.length:null;
+      usageStat(col,remaining===null?'Balance unavailable':pct1(remaining)+'% left','usage-rate-big');
+      if(remaining!==null){const bar=document.createElement('div');bar.className='usage-bar';const fill=document.createElement('span');fill.style.width=remaining+'%';bar.append(fill);bar.setAttribute('role','meter');bar.setAttribute('aria-label',profile.name+' '+colTitle+' combined percent left');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-valuenow',String(remaining));col.append(bar)}
+      usageStat(col,known.length<expected?'Readings available for '+known.length+' of '+expected+' accounts':expected>1?'Combined · '+expected+' active accounts':'Current balance','usage-summary-note');
       const rate = pool.average || {};
-      appendRateDisplay(col, rate);
+      if(rate.status==='available')usageStat(col,formatUSDPerPercent(rate.usd_per_percent),'usage-stat');
+      else usageStat(col,'Rate not measured yet','usage-summary-note');
       const samples = rate.samples || 0;
       const excluded = pool.excluded || 0;
-      usageStat(col, `Average of ${samples} measured window${samples === 1 ? '' : 's'}` + (excluded ? ` · ${excluded} left out` : ''));
+      const details=document.createElement('div');details.className='usage-average';
+      usageStat(details,`Average · ${samples} measured window${samples === 1 ? '' : 's'}`,'usage-average-count');
+      if(rate.status==='available'){
+        const tokens=rate.equivalent_tokens_per_percent;
+        if(tokens){const text=compactNum(tokens.low)+(Math.abs(tokens.high-tokens.low)>=1?'–'+compactNum(tokens.high):'')+' tokens / 1%';const line=usageStat(details,text,'usage-average-tokens');line.title=(rate.reference_name||'Reference model')+' · '+formatTokens(tokens)+' / 1%'}
+        if(rate.start_percent!=null&&rate.end_percent!=null)usageStat(details,pct1(100-rate.start_percent)+'% → '+pct1(100-rate.end_percent)+'% left','usage-average-delta');
+        else if(rate.delta_pp!=null)usageStat(details,pct1(rate.delta_pp)+' quota points measured','usage-average-delta');
+      }else if(rate.reason)details.title=rate.reason;
+      if(excluded)usageStat(details,excluded+' excluded','usage-average-delta');
       const mix = formatModelMix(pool.average_models);
-      if (mix) usageStat(col, mix, 'usage-model-mix');
-    } else if (!activeWindow) {
-      usageStat(col, 'No recorded window');
-    } else {
-      appendRateDisplay(col, activeWindow.rate || {});
-      if (activeWindow.verified) col.append(verifiedBadge(activeWindow.verified));
-      if (activeWindow.start_ms && activeWindow.end_ms) {
-        usageStat(col, windowSpan(activeWindow));
-      }
-      if (activeWindow.selected) {
-        const sel = activeWindow.selected;
-        let selText = `Recorded ${formatNanoRange(sel.value_low_nano_usd, sel.value_high_nano_usd)} · ${sel.requests.toLocaleString()} requests`;
-        if (currentUsageData?.key_filtered && activeWindow.token_share_percent != null) {
-          selText += ` · this key: ${pct1(activeWindow.token_share_percent)}% of window tokens`;
-        }
-        usageStat(col, selText);
-      }
-      const mix = formatModelMix(activeWindow.models);
-      if (mix) usageStat(col, mix, 'usage-model-mix');
-      if (pool.newest_unmeasured && activeWindow === pool.latest) usageStat(col, 'Newer window not measured yet', 'usage-stat muted');
-      if (activeWindow.excluded) {
-        const tag = document.createElement('span');
-        tag.className = 'pill';
-        tag.textContent = 'left out of the average';
-        col.append(tag);
-      }
+      if (mix) usageStat(details, mix, 'usage-average-models');
+      col.append(details);
     }
 
     const actions = document.createElement('div');
@@ -916,8 +1157,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     inspectBtn.className = 'usage-inspect-btn';
     inspectBtn.textContent = 'Inspect';
     inspectBtn.onclick = () => {
-      const win = (usageMode === 'latest' || usageSelectedWindows.has(overrideKey)) ? activeWindow : null;
-      return openInspect(profile, pool, win);
+      return openInspect(profile, pool, null);
     };
     const windowsBtn = document.createElement('button');
     windowsBtn.type = 'button';
@@ -977,6 +1217,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   }
 
   function renderUsage() {
+    const openPickers=new Map([...el('usage-grid').querySelectorAll('.usage-window-picker')].filter(p=>p.querySelector('.usage-window-expand')?.getAttribute('aria-expanded')==='true').map(p=>[p.dataset.profile,p.querySelector('.usage-window-options').scrollTop]));
     el('usage-grid').replaceChildren();
     el('usage-asof').textContent = '';
     if (!currentUsageData) return;
@@ -999,6 +1240,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     for (const profile of profiles) {
       const card = document.createElement('div');
       card.className = 'usage-card';
+      card.dataset.profile=profile.reference;
 
       const header = document.createElement('div');
       header.className = 'usage-card-header';
@@ -1018,45 +1260,26 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       const cred = document.createElement('span');
       cred.className = 'usage-meta';
-      cred.textContent = (profile.credentials || 0) + ' account' + (profile.credentials === 1 ? '' : 's');
+      const activeCount=profile.active_credentials??new Set((profile.current||[]).map(m=>m.account)).size;
+      cred.textContent = activeCount + ' active account' + (activeCount === 1 ? '' : 's');
+      cred.title=(profile.credentials||0)+' accounts in this profile’s history';
       header.append(cred);
       card.append(header);
+      card.append(profileWindowPicker(profile));
 
-      if (Array.isArray(profile.current) && profile.current.length > 0) {
-        const metersDiv = document.createElement('div');
-        metersDiv.className = 'usage-meters';
-        const kinds = profile.current.map(m => m.kind + '|' + m.scope);
-        const current = [...profile.current].sort((a, b) => (a.pool ? 1 : 0) - (b.pool ? 1 : 0) || kindRank(a.kind) - kindRank(b.kind));
-        for (const meter of current) {
-          const mLine = document.createElement('div');
-          let kindLbl = (meter.pool ? meter.pool + ' ' : '') + kindTitle(meter.kind);
-          // Several accounts on one card: name the account the meter belongs to.
-          if (meter.label && kinds.filter(k => k === meter.kind + '|' + meter.scope).length > 1) kindLbl = meter.label + ' · ' + kindLbl;
-          const usedStr = meter.used_percent != null ? pct1(meter.used_percent) + '% used' : 'Unknown used';
-          const rstStr = meter.reset_ms ? 'resets ' + date(meter.reset_ms / 1000) : '';
-          const parts = [kindLbl + ' ' + usedStr];
-          if (rstStr) parts.push(rstStr);
-          if (meter.stale) parts.push('stale');
-          mLine.textContent = parts.join(' · ');
-          metersDiv.append(mLine);
-        }
-        card.append(metersDiv);
+      if (activeCount>1&&Array.isArray(profile.current) && profile.current.length > 0) {
+        card.append(profileMeters(profile));
       }
 
-      const pools = profile.pools || [];
-      const groups = poolGroups(pools.filter(p => !p.ended));
+      const selected=usageProfileSelection.get(profile.reference)||new Set();
+      const pools = (profile.pools || []).filter(pool=>!pool.ended||(usageWindowLists.get(profile.reference)||[]).some(w=>selected.has(w.id)&&w.kind===pool.kind&&w.scope===pool.scope));
+      const groups = poolGroups(pools);
       if (!groups.length) usageStat(card, 'No recorded window yet');
-      for (const g of groups) card.append(renderPoolGroup(profile, g));
-      const ended = poolGroups(pools.filter(p => p.ended));
-      if (ended.length > 0) {
-        const details = document.createElement('details');
-        details.className = 'usage-other-limits';
-        const summary = document.createElement('summary');
-        summary.textContent = 'Ended limits: ' + ended.map(g => g.label || 'main').join(', ');
-        details.append(summary);
-        for (const g of ended) details.append(renderPoolGroup(profile, g));
-        card.append(details);
-      }
+      const columns=document.createElement('div');columns.className='usage-columns';
+      const ordered=groups.flatMap(g=>g.pools);
+      columns.style.setProperty('--summary-columns',ordered.length<=3?Math.max(1,ordered.length):ordered.length<=6?Math.ceil(ordered.length/2):3);
+      for(const pool of ordered)columns.append(renderUsageCol(profile,pool,kindTitle(pool.kind)));
+      card.append(columns);
 
       const actions = document.createElement('div');
       actions.className = 'usage-card-actions';
@@ -1082,6 +1305,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         archivedGrid.append(card);
       } else el('usage-grid').append(card);
     }
+    for(const picker of el('usage-grid').querySelectorAll('.usage-window-picker'))if(openPickers.has(picker.dataset.profile)){const list=picker.querySelector('.usage-window-options'),expand=picker.querySelector('.usage-window-expand');list.style.height='197px';expand.setAttribute('aria-expanded','true');expand.setAttribute('aria-label','Show fewer windows');list.scrollTop=openPickers.get(picker.dataset.profile)}
   }
 
   async function openInspect(profile, pool, window) {
@@ -1091,6 +1315,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       scope: pool.scope,
     };
     if (window?.id) query.window = window.id;
+    else {query.latest_only=true;query.selected_windows=Object.fromEntries([...usageProfileSelection].map(([ref,ids])=>[ref,[...ids]]))}
     const keyVal = el('usage-key').value;
     const fromVal = el('usage-from').value;
     const throughVal = el('usage-through').value;
@@ -1141,7 +1366,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       el('usage-inspect-meter').replaceChildren();
       const meterParts = [];
       if (data.meter.start_percent != null && data.meter.end_percent != null) {
-        meterParts.push(`${pct1(data.meter.start_percent)}% → ${pct1(data.meter.end_percent)}%`);
+        meterParts.push(`${pct1(100-data.meter.start_percent)}% → ${pct1(100-data.meter.end_percent)}% left`);
       }
       meterParts.push(`Δ ${pct1(data.meter.delta_pp)} pp`);
       meterParts.push(`${data.meter.readings} reading${data.meter.readings === 1 ? '' : 's'}`);
@@ -1370,15 +1595,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         const cardBtn = document.createElement('button');
         cardBtn.type = 'button';
         cardBtn.className = 'usage-window-card-btn';
-        cardBtn.textContent = 'Show on card';
+        cardBtn.textContent = 'Include in average';
         cardBtn.onclick = () => {
-          usageSelectedWindows.set(overrideKey, w);
-          if (usageMode !== 'latest') {
-            usageMode = 'latest';
-            el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-            el('usage-mode-average').setAttribute('aria-pressed', 'false');
-          }
-          renderUsage();
+          const selected=usageProfileSelection.get(profile.reference)||new Set();selected.add(w.id);usageProfileSelection.set(profile.reference,selected);
+          loadUsage(true);
           el('usage-windows-dialog').close();
         };
         tdCard.append(cardBtn);
@@ -1397,7 +1617,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   // Accounts are every login Pacer and the import know, merged when linked as
   // one provider account (a re-login). Edits save a new revision; the usage
   // record then works out only what changed and the page follows.
-  let accountsData = null, manageMode = '', manageBusy = false;
+  let accountsData = null, manageMode = '', manageBusy = false, manageView='profiles';
   const button = (text, onclick, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; if (cls) b.className = cls; b.onclick = onclick; return b; };
   const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
   function manageStatus(text, error = false) { const s = el('usage-manage-status'); s.hidden = !text; s.textContent = text || ''; s.className = 'status' + (error ? ' error' : ''); }
@@ -1429,7 +1649,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     el('usage-manage-body').querySelectorAll('button,select,input').forEach(n => n.disabled = true);
     const at = Date.now() - 1000;
     try {
-      await api(root + path, 'PATCH', body);
+      const result=await api(root + path, 'PATCH', body);
+      if(body.op==='create'&&result.profile)manageMode=result.profile;
       manageStatus(done + ' The cards update as soon as Pacer has worked it into the record.');
       await loadAccounts();
       followEdit(at);
@@ -1466,17 +1687,18 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const line = document.createElement('div');
     line.className = 'manage-row';
     const label = document.createElement('label');
-    label.textContent = 'New login of an earlier account? ';
+    label.textContent = 'Same provider account as';
     const select = document.createElement('select');
     select.className = 'manage-link-select';
-    select.append(new Option('no', ''));
+    select.append(new Option('Choose the existing account…', ''));
     for (const o of others) select.append(new Option(o.label + (o.last_ms ? ' (last used ' + day(o.last_ms) + ')' : ''), o.ref));
     label.append(select);
     const link = button('Link as one account', () => { if (select.value) linkEdit({ login: account.logins[0].ref, same_as: select.value, linked: true }, 'Linked: both logins now count as one account, with one history.'); }, 'manage-link');
     link.disabled = true;
     select.onchange = () => { link.disabled = !select.value; };
     line.append(label, link);
-    return line;
+    const details=document.createElement('details');details.className='manage-link-details';const summary=document.createElement('summary');summary.textContent='Link a replacement login';details.append(summary,span('Use this when you signed in again to the same provider account. To group different accounts, add them to a profile instead.','muted'),line);
+    return details;
   }
   function accountBlock(account, controls, withProvider = true) {
     const block = document.createElement('div');
@@ -1501,13 +1723,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const row = document.createElement('div');
     row.className = 'manage-row';
     const choices = profiles.filter(p => p.provider === account.provider && !p.archived && !accountProfiles(account.ref).includes(p));
-    if (!choices.length) { row.append(span('No other ' + providerName(account.provider) + ' profile to add it to. Create one below.', 'muted')); return row; }
+    if (!choices.length) { row.append(span('No other matching profile.', 'muted')); return row; }
     const label = document.createElement('label');
     label.textContent = 'Add to ';
     const select = document.createElement('select');
     for (const p of choices) select.append(new Option(p.name, p.reference));
     label.append(select);
-    row.append(label, button('Add with its history', () => profileEdit({ op: 'add', profile: select.value, account: account.ref, from_ms: 0 }, 'Added; its earlier requests count too.')));
+    const go=button('Add to profile',()=>{const p=choices.find(p=>p.reference===select.value),previous=p.accounts.some(m=>m.account===account.ref);return profileEdit({op:'add',profile:select.value,account:account.ref,from_ms:previous?Date.now():0},previous?'Active again from now; previous history kept.':'Added with its history.')});
+    row.append(label,go);
     return row;
   }
   function newProfileForm() {
@@ -1516,7 +1739,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const h = document.createElement('h3');
     h.textContent = 'New profile';
     const form = document.createElement('form');
-    form.className = 'manage-row';
+    form.className = 'manage-create-form';
     const nameLabel = document.createElement('label');
     nameLabel.textContent = 'Name ';
     const name = document.createElement('input');
@@ -1527,12 +1750,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const provLabel = document.createElement('label');
     provLabel.textContent = 'Provider ';
     const prov = document.createElement('select');
+    prov.setAttribute('aria-label','Provider');
     for (const p of [...new Set((accountsData.accounts || []).map(a => a.provider))].sort()) prov.append(new Option(providerName(p), p));
     provLabel.append(prov);
     const create = document.createElement('button');
-    create.textContent = 'Create';
-    form.append(nameLabel, provLabel, create);
-    form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'create', name: name.value.trim(), provider: prov.value }, 'Profile created. Add its accounts.'); };
+    create.textContent = 'Create profile';
+    const accounts=document.createElement('fieldset');accounts.className='manage-account-choices';const selected=new Set();
+    const renderChoices=()=>{selected.clear();accounts.replaceChildren();const legend=document.createElement('legend');legend.textContent='Choose accounts';accounts.append(legend);for(const a of accountsData.accounts.filter(a=>a.provider===prov.value)){const label=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.value=a.ref;cb.onchange=()=>{if(cb.checked)selected.add(a.ref);else selected.delete(a.ref)};label.append(cb,span(a.label));accounts.append(label)}};
+    prov.onchange=renderChoices;renderChoices();
+    const history=document.createElement('label');history.textContent='Include usage';const when=document.createElement('select');when.append(new Option('All recorded history','all'),new Option('From now onward','now'));history.append(when);
+    form.append(nameLabel, provLabel, accounts,history,create);
+    form.onsubmit = event => { event.preventDefault();return profileEdit({ op: 'create', name: name.value.trim(), provider: prov.value,accounts:[...selected],from_ms:when.value==='all'?0:Date.now() }, 'Profile and selected accounts saved.'); };
     section.append(h, form);
     return section;
   }
@@ -1546,12 +1774,14 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const profiles = data.profiles || [];
     const byRef = new Map((data.accounts || []).map(a => [a.ref, a]));
     const profile = profiles.find(p => p.reference === manageMode);
+    const nav=document.createElement('nav');nav.className='manage-nav';nav.setAttribute('aria-label','Account management');
+    for(const [view,title] of [['profiles','Profiles'],['accounts','Accounts & logins'],['create','Create profile']]){const b=button(title,()=>{manageMode='';manageView=view;manageStatus('');renderManage()});b.setAttribute('aria-current',!profile&&manageView===view?'page':'false');nav.append(b)}body.append(nav);
     if (profile) {
       el('usage-manage-title').textContent = 'Manage accounts · ' + profile.name;
       const counted = document.createElement('div');
       counted.className = 'manage-section';
       const h = document.createElement('h3');
-      h.textContent = 'Counted on this card';
+      h.textContent = 'Accounts in '+profile.name;
       counted.append(h);
       const refs = [...new Set(profile.accounts.map(m => m.account))];
       if (!refs.length) counted.append(span('No accounts yet. Add one below.', 'muted'));
@@ -1562,8 +1792,10 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         const open = spans.some(m => !m.to_ms);
         const row = document.createElement('div');
         row.className = 'manage-row';
-        row.append(span(spans.map(m => (m.from_ms ? 'from ' + day(m.from_ms) : 'from its first use') + (m.to_ms ? ' until ' + day(m.to_ms) : ' on')).join('; ')));
-        if (open) row.append(button('Stop counting from now', () => profileEdit({ op: 'end', profile: profile.reference, account: ref, at_ms: Date.now() }, 'From now on its requests no longer count here; its history stays.')));
+        row.append(span(open?'Active':'Historical only',open?'pill manage-active':'pill'));
+        const dates=span(spans.map(m => (m.from_ms ? day(m.from_ms) : 'First recorded use') + ' → '+(m.to_ms ? day(m.to_ms) : 'present')).join('; '),'manage-dates');row.append(dates);
+        if (open) row.append(button('End membership', () => profileEdit({ op: 'end', profile: profile.reference, account: ref, at_ms: Date.now() }, 'Membership ended from now. Earlier history remains.')));
+        else row.append(button('Reactivate',()=>profileEdit({op:'add',profile:profile.reference,account:ref,from_ms:Date.now()},'Active again from now. Earlier history remains.')));
         const remove = button('Remove with its history', () => {
           remove.replaceWith(span('Its earlier requests and windows leave this card too.', 'muted'), button('Remove', () => profileEdit({ op: 'remove', profile: profile.reference, account: ref }, 'Removed from this card.')), button('Keep', renderManage));
         });
@@ -1585,13 +1817,15 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
         label.textContent = 'Account ';
         const select = document.createElement('select');
         select.className = 'manage-add-account';
-        for (const a of candidates) select.append(new Option(a.label + ' · ' + plural(a.requests, 'request') + (a.last_ms ? ' · last ' + day(a.last_ms) : ''), a.ref));
+        for (const a of candidates) select.append(new Option(a.label, a.ref));
         label.append(select);
         const when = document.createElement('select');
         when.className = 'manage-add-when';
-        when.append(new Option('with all its earlier requests', 'all'), new Option('from now on', 'now'));
+        when.setAttribute('aria-label','Include usage');
+        when.append(new Option('All recorded history', 'all'), new Option('From now onward', 'now'));
+        const updateWhen=()=>{const previous=profile.accounts.some(m=>m.account===select.value);when.options[0].disabled=previous;when.value=previous?'now':'all'};select.onchange=updateWhen;updateWhen();
         const go = document.createElement('button');
-        go.textContent = 'Add';
+        go.textContent = 'Add account';
         form.append(label, when, go);
         form.onsubmit = event => { event.preventDefault(); profileEdit({ op: 'add', profile: profile.reference, account: select.value, from_ms: when.value === 'all' ? 0 : Date.now() }, 'Added to ' + profile.name + '.'); };
         add.append(form);
@@ -1620,10 +1854,17 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       return;
     }
     const unassignedOnly = manageMode === 'unassigned';
+    if(!unassignedOnly&&manageView==='create'){el('usage-manage-title').textContent='Create profile';body.append(newProfileForm());return}
+    if(!unassignedOnly&&manageView==='profiles'){
+      el('usage-manage-title').textContent='Profiles';
+      body.append(span('Group accounts with the same provider plan. Membership controls which usage belongs to each profile.','manage-intro'));
+      for(const p of profiles){const item=document.createElement('div');item.className='manage-profile-row';const active=[...new Set(p.accounts.filter(m=>!m.to_ms).map(m=>m.account))];const text=document.createElement('div');text.append(span(p.name,'manage-account-name'),span(providerName(p.provider)+' · '+active.length+' active accounts'+(p.archived?' · Archived':''),'usage-meta'));const names=span(active.map(ref=>shortAccount(byRef.get(ref)?.label)).join(', ')||'No active accounts','manage-profile-members');text.append(names);item.append(text,button('Manage',()=>{manageMode=p.reference;renderManage()}));body.append(item)}
+      return;
+    }
     el('usage-manage-title').textContent = unassignedOnly ? 'Accounts in no profile' : 'Accounts & profiles';
     const intro = document.createElement('p');
     intro.className = 'muted';
-    intro.textContent = unassignedOnly ? 'These accounts count on no profile card, so they have no $ per 1%. Add each to the profile of its plan.' : 'Every account Pacer and the import know. A re-login after the provider made you sign in again is the same account: link it to the earlier one so its history continues.';
+    intro.textContent = unassignedOnly ? 'Add these accounts to the profile for their provider plan.' : 'Add separate provider accounts to a profile. Link logins only when they belong to the same provider account.';
     body.append(intro);
     const list = (data.accounts || []).filter(a => !unassignedOnly || accountProfiles(a.ref).length === 0);
     if (!list.length) body.append(span('Every account is in a profile.', 'muted'));
@@ -1642,7 +1883,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       }
       body.append(section);
     }
-    body.append(newProfileForm());
   }
   el('usage-accounts').onclick = () => openManage('');
   el('usage-manage-close').onclick = () => el('usage-manage-dialog').close();
@@ -1678,10 +1918,11 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     input.focus();
   }
 
-  el('usage-key').onchange = () => loadUsage();
+  el('usage-key').onchange = () => {usageProfileSelection.clear();return loadUsage()};
   function onUsageDateInput() {
     clearTimeout(usageDateTimer);
     usageDateTimer = setTimeout(() => {
+      usageProfileSelection.clear();
       loadUsage();
     }, 250);
   }
@@ -1689,35 +1930,109 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('usage-from').onchange = onUsageDateInput;
   el('usage-through').oninput = onUsageDateInput;
   el('usage-through').onchange = onUsageDateInput;
-  el('usage-mode-latest').onclick = () => {
-    if (usageMode === 'latest') return;
-    usageMode = 'latest';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'true');
-    el('usage-mode-average').setAttribute('aria-pressed', 'false');
-    renderUsage();
-  };
-  el('usage-mode-average').onclick = () => {
-    if (usageMode === 'average') return;
-    usageMode = 'average';
-    el('usage-mode-latest').setAttribute('aria-pressed', 'false');
-    el('usage-mode-average').setAttribute('aria-pressed', 'true');
-    renderUsage();
-  };
   el('usage-inspect-close').onclick = () => el('usage-inspect-dialog').close();
   el('usage-windows-close').onclick = () => el('usage-windows-dialog').close();
   async function refresh(knownState){message('');forwardControls();try{
-    if(tab==='models'){const data=await api('/v8/management/oauth/settings/models');models=data.models||[];thinkingLevels=data['thinking-levels']||[];modelChannels=data['channel-info']||[];renderModelTabs();showModels();loadPrices()}
-    else if(tab==='keys'){metadata=await api(root+'/keys');showMetadata()}
-    else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('mode').querySelector('[value=active]').disabled=!data.routing.can_activate;el('rollout').textContent=data.routing.gate||'';el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' /h':'Unknown',account.state||'Unknown']);for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
+    if(tab==='models'){await loadModels()}
+    else if(tab==='keys'){await loadKeys()}
+    else {const data=knownState?.routing?knownState:await api(root+'/state');el('mode').value=data.routing.mode;el('rollout').textContent=(data.routing.providers||[]).join(', ');renderSettings(data.settings);el('accounts').replaceChildren();el('windows').replaceChildren();for(const account of data.accounts||[]){const tr=row('accounts',[account.alias||account.id,account.provider,Number.isFinite(account.pace)?account.pace.toFixed(2)+' %/h':'Unknown',account.state||'Unknown']);tr.append(pauseCell(account));for(const w of account.windows||[])row('windows',[(account.alias||account.id)+' / '+w.scope,w.remaining==null?'Unknown':w.remaining.toFixed(1)+'%',date(w.reset),[w.state,w.source].filter(Boolean).join(' · ')])}el('decisions').textContent=JSON.stringify(data.decisions||[],null,2);el('history').textContent=data.history_coverage||'Historical report migration has not been verified. CPAMP remains the history source; no data has been discarded.';if(tab==='usage')loadUsage(true)}
     el('updated').textContent='Read '+new Date().toLocaleTimeString();
   }catch(error){message(error.message,true)}}
-  async function showWorkspace(data){connected=true;allowBridge=false;el('key').value='';el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
-  el('signin').onsubmit=async event=>{event.preventDefault();allowBridge=false;bridge=false;generation++;key=el('key').value;try{await showWorkspace(await api(root+'/state'))}catch(error){key='';message(error.message,true)}};
-  async function connectProxySession(){try{await showWorkspace(await api(root+'/state'))}catch{ /* No authorized proxy session: keep the explicit key login. */ }}
-  function disconnect(){key='';allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected. Reopen the CPAMP page to reconnect through its session.')}
-  el('disconnect').onclick=disconnect;
+  async function showWorkspace(data){connected=true;allowBridge=false;el('login').hidden=true;el('workspace').hidden=false;await refresh(data)}
+  async function connectProxySession(){message('Connecting…');el('reconnect').disabled=true;try{await showWorkspace(await api(root+'/state'))}catch(error){if(!connected)message(error.message,true)}finally{el('reconnect').disabled=false}}
+  el('reconnect').onclick=()=>{if(window.parent!==window){allowBridge=true;window.parent.postMessage({type:'pacer:hello',version:1},location.origin)}connectProxySession()};
+  function disconnect(){allowBridge=false;bridge=false;connected=false;generation++;clearForward();clearUsage();for(const call of pending.values()){clearTimeout(call.timer);call.reject(Error('Disconnected'))}pending.clear();models=[];editing=null;thinkingLevels=[];metadata={revision:0,keys:[],groups:[]};metadataEdit=null;el('metadata-dialog').close();el('model-dialog').close();el('metadata-form').reset();el('model-form').reset();el('usage-inspect-dialog').close();el('usage-windows-dialog').close();el('usage-manage-dialog').close();el('price-dialog').close();accountsData=null;prices=null;priceIndex=new Map();for(const id of ['accounts','windows','key-rows','group-rows','member-options','catalogue','history','decisions','key-status','models-tabs','prices-status','usage-manage-body'])el(id).replaceChildren();el('workspace').hidden=true;el('login').hidden=false;message('Disconnected from Pacer. Retry to reconnect through your authenticated session.')}
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));for(const id of ['pacer','usage','models','keys'])el(id).hidden=id!==tab;if(connected)refresh()});
-  el('refresh').onclick=refresh;el('filter').oninput=showModels;
+  el('filter').oninput=showModels;
+  let autoRefreshing=false;
+  async function refreshVisible(){
+    if(!connected||document.hidden||autoRefreshing||document.querySelector('dialog[open]')||document.activeElement?.matches('input:not([type=checkbox]),select,textarea'))return;
+    autoRefreshing=true;
+    try{if(tab==='usage')await loadUsage(true);else await refresh()}finally{autoRefreshing=false}
+  }
+  setInterval(refreshVisible,30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshVisible()});
+  // Settings: rendered from the state, saved as one PATCH. Auto-refresh does
+  // not overwrite unsaved edits.
+  let settings=null, settingsDirty=false, modelOptions=null;
+  const numberFields={'set-band':'band_percent','set-new-min':'new_chat_minimum_percent','set-short-floor':'short_floor_percent','set-long-floor':'long_floor_percent','set-warm':'warm_minutes','set-retries':'transient_retries','set-force-warning':'force_warning_percent'};
+  function renderSettings(view){
+    if(!view?.settings)return;
+    settings=view;el('set-models').dataset.max=view.limits?.compaction_models||8;
+    if(settingsDirty)return;
+    const s=view.settings;
+    el('set-compact').checked=!!s.compact_on_switch;
+    for(const [id,name] of Object.entries(numberFields))el(id).value=s[name];
+    el('set-claude').checked=(s.providers||[]).includes('claude');el('set-codex').checked=(s.providers||[]).includes('codex');
+    renderModelList(s.compaction_models||[]);
+    const changed=view.changed||[];
+    const names={compact_on_switch:'compact on switch',compaction_models:'summary models',band_percent:'equal pace band',new_chat_minimum_percent:'new-chat minimum',short_floor_percent:'5-hour floor',long_floor_percent:'7-day floor',warm_minutes:'warm for',transient_retries:'retries',force_warning_percent:'forced move warning',providers:'providers',paused_accounts:'paused accounts'};
+    el('settings-status').textContent=changed.length?'Changed here (differs from config.yaml or the default): '+changed.map(n=>names[n]||n).join(', ')+'.':'All settings follow config.yaml or the defaults.';
+    loadModelOptions();
+  }
+  function modelValues(){return [...el('set-models').querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean)}
+  // One field per model plus an empty one for the next fallback.
+  function modelField(list,value,index){
+    const li=document.createElement('li'),input=document.createElement('input');
+    input.setAttribute('list','model-options');input.maxLength=128;input.value=value;input.autocomplete='off';
+    input.placeholder=index===0?'Model, e.g. claude-sonnet-4-6':'Fallback model (optional)';
+    input.setAttribute('aria-label',index===0?'Summary model':'Fallback model '+index);
+    // Typing into the last, empty field adds the next one without disturbing this one.
+    input.oninput=()=>{settingsDirty=true;const max=Number(list.dataset.max)||8;if(input.value.trim()&&li===list.lastElementChild&&list.children.length<max)list.append(modelField(list,'',list.children.length))};
+    // A committed change redraws the list (buttons, no gaps), keeping focus on
+    // the field the user moved to.
+    input.onchange=()=>{settingsDirty=true;setTimeout(()=>{const fields=[...list.querySelectorAll('input')],focused=fields.indexOf(document.activeElement),before=fields.slice(0,Math.max(focused,0)).filter(i=>!i.value.trim()).length;renderModelList(modelValues());if(focused>=0){const next=list.querySelectorAll('input')[Math.min(focused-before,list.children.length-1)];next?.focus()}})};
+    li.append(input);return li;
+  }
+  function renderModelList(values){
+    const list=el('set-models'),max=Number(list.dataset.max)||8;list.replaceChildren();
+    const items=values.length<max?[...values,'']:values;
+    items.forEach((value,index)=>{
+      const li=modelField(list,value,index);
+      if(value){
+        // Positions of the fields as they are now, blanks included.
+        const fields=()=>[...list.querySelectorAll('input')].map(i=>i.value.trim());
+        const at=()=>[...list.children].indexOf(li);
+        for(const [label,text,move] of [['Move up','↑',-1],['Move down','↓',1]]){if((move<0&&index===0)||(move>0&&index===values.length-1))continue;const b=document.createElement('button');b.type='button';b.textContent=text;b.title=label;b.setAttribute('aria-label',label+' '+value);b.onclick=()=>{const v=fields(),i=at(),j=i+move;if(j<0||j>=v.length)return;[v[i],v[j]]=[v[j],v[i]];settingsDirty=true;renderModelList(v.filter(Boolean))};li.append(' ',b)}
+        const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.setAttribute('aria-label','Remove '+value);remove.onclick=()=>{const v=fields();v.splice(at(),1);settingsDirty=true;renderModelList(v.filter(Boolean))};li.append(' ',remove);
+      }
+      list.append(li);
+    });
+  }
+  async function loadModelOptions(){
+    if(modelOptions)return;
+    modelOptions=[];
+    try{
+      const data=await api('/v8/management/oauth/settings/models');
+      const names=new Set();for(const m of data.models||[])if(m.enabled!==false)for(const n of (m.exposed?.length?m.exposed:[m.id||m.name]))if(n)names.add(n);
+      modelOptions=[...names].sort();
+      el('model-options').replaceChildren(...modelOptions.map(n=>{const o=document.createElement('option');o.value=n;return o}));
+      el('model-options-status').textContent=modelOptions.length+' models CPA serves are suggested; other names CPA accepts work too.';
+    }catch(error){modelOptions=null;el('model-options-status').textContent='Model suggestions unavailable: '+error.message}
+  }
+  function pauseCell(account){
+    const td=document.createElement('td'),label=document.createElement('label'),box=document.createElement('input');
+    box.type='checkbox';box.checked=!account.paused;box.disabled=!settings||!account.account;
+    box.setAttribute('aria-label','New chats on '+(account.alias||account.id));
+    box.onchange=async()=>{
+      const paused=new Set(settings.settings.paused_accounts||[]);if(box.checked)paused.delete(account.account);else paused.add(account.account);
+      box.disabled=true;
+      try{const view=await api(root+'/settings','PATCH',{paused_accounts:[...paused]});settings=view;await refresh();message(box.checked?'New chats may use '+(account.alias||account.id)+' again.':'Paused for new chats: '+(account.alias||account.id)+'. Its warm chats stay.')}catch(error){box.checked=!box.checked;message(error.message,true)}finally{box.disabled=false}
+    };
+    label.append(box,document.createTextNode(account.paused?' Paused':' Allowed'));td.append(label);return td;
+  }
+  el('settings-form').addEventListener('input',()=>{settingsDirty=true});
+  el('reset-settings').onclick=()=>{settingsDirty=false;renderSettings(settings);message('')};
+  el('settings-form').onsubmit=async event=>{
+    event.preventDefault();
+    const body={compact_on_switch:el('set-compact').checked,compaction_models:modelValues(),providers:['claude','codex'].filter(p=>el('set-'+p).checked)};
+    for(const [id,name] of Object.entries(numberFields)){const input=el(id),value=Number(input.value);if(input.value===''||!input.checkValidity()||!Number.isFinite(value)){input.focus();message('Check “'+input.closest('label').querySelector('b').textContent+'”: '+(input.validationMessage||'enter a number'),true);return}body[name]=value}
+    if(!body.providers.length){message('Route at least one provider, or turn routing off above.',true);return}
+    if(new Set(body.compaction_models).size!==body.compaction_models.length){message('A summary model is listed twice.',true);return}
+    const unknown=modelOptions?.length?body.compaction_models.filter(m=>!modelOptions.includes(m)):[];
+    el('save-settings').disabled=true;
+    try{const view=await api(root+'/settings','PATCH',body);settingsDirty=false;renderSettings(view);await refresh();message('Settings saved'+(unknown.length?'. Not in CPA’s model list: '+unknown.join(', ')+'; the client skips a model it cannot use.':'.'))}catch(error){message(error.message,true)}finally{el('save-settings').disabled=false}
+  };
   el('save-mode').onclick=async()=>{try{await api(root+'/routing','PATCH',{mode:el('mode').value});await refresh();message('Routing mode saved. This does not change any chat’s cache policy.')}catch(error){message(error.message,true)}};
   el('model-cancel').onclick=()=>el('model-dialog').close();
   async function saveModel(reset=false){
@@ -1725,16 +2040,18 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     try{
       const alias=el('model-alias').value.trim(), setting={};
       if(!reset){
-        const display=el('model-display').value.trim();if(display)setting['display-name']=display;
+        for(const field of ['display-name','max-context-length','max-output-tokens','thinking-levels'])if(editing.setting?.[field]!==undefined)setting[field]=editing.setting[field];
+        const display=el('model-display').value.trim();if(display!==editingFields.display){if(display)setting['display-name']=display;else delete setting['display-name']}
         for(const [id,field,supported] of [['model-context','max-context-length',true],['model-output','max-output-tokens',editing.supports?.['max-output-tokens']]]){
-          if(!supported||!el(id).value)continue;const value=Number(el(id).value);
+          if(!supported||String(el(id).value)===editingFields[id.slice(6)])continue;
+          if(!el(id).value){delete setting[field];continue}const value=Number(el(id).value);
           if(!Number.isSafeInteger(value)||value<1)throw Error('Token limits must be positive whole numbers');setting[field]=value;
         }
         const levels=[...new Set(el('model-thinking').value.split(',').map(v=>v.trim().toLowerCase()).filter(Boolean))];
         if(levels.some(v=>!thinkingLevels.includes(v)))throw Error('Choose thinking levels from the supported list');
-        if(levels.length)setting['thinking-levels']=levels;
+        if(el('model-thinking').value!==editingFields.thinking){if(levels.length)setting['thinking-levels']=levels;else delete setting['thinking-levels']}
       }
-      await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,...(!reset?{enabled:el('model-enabled').checked}:{}),alias:!reset&&alias?{name:alias,'keep-original':!!editing.supports?.['keep-original']&&el('model-keep').checked}:null,setting:Object.keys(setting).length?setting:null});
+      await api('/v8/management/models/config','PATCH',{channel:editing.channel,model:editing.upstream,...(!reset?{enabled:el('model-enabled').checked}:{}),alias:!reset&&alias&&alias!==editing.upstream?{name:alias,'keep-original':!!editing.supports?.['keep-original']&&el('model-keep').checked}:null,setting:Object.keys(setting).length?setting:null});
       el('model-dialog').close();await refresh();message('Model configuration saved in CPA.');
     }catch(error){el('model-error').textContent=error.message}finally{buttons.forEach(b=>b.disabled=false)}
   }
@@ -1747,6 +2064,6 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('add-key').onclick=()=>editMetadata('add-key');el('add-group').onclick=()=>editMetadata('put-group');
   el('metadata-form').onsubmit=event=>{event.preventDefault();saveMetadata()};el('metadata-delete').onclick=()=>saveMetadata(true);el('metadata-cancel').onclick=()=>el('metadata-dialog').close();
   if(window.parent!==window)window.parent.postMessage({type:'pacer:hello',version:1},location.origin);
-  else connectProxySession();
+  connectProxySession();
 })();
 </script></body></html>

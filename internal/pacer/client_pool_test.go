@@ -12,7 +12,7 @@ import (
 )
 
 func TestClientAccessPublishesDisjointPoolsBeforeSelection(t *testing.T) {
-	p := newRoutingFixture(t, "off", false).p
+	p := newRoutingFixture(t, "off").p
 	callers := []ClientGrant{
 		{CallerScope: clientCaller("alice-key"), AuthIDs: []string{"alice-claude", "alice-codex"}},
 		{CallerScope: clientCaller("bob-key"), AuthIDs: []string{"bob-claude", "bob-codex"}},
@@ -77,7 +77,7 @@ func TestClientAccessPoolDefaultsAndTrustedCaller(t *testing.T) {
 		{name: "header-only caller", access: &ClientAccess{Grants: []ClientGrant{{CallerScope: caller, AuthIDs: []string{"a"}}}}, deny: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newRoutingFixture(t, "off", false).p
+			p := newRoutingFixture(t, "off").p
 			p.cfg.ClientAccess = tc.access
 			r := grantRequest(tc.name, tc.caller, "", nil)
 			r.Headers.Set("X-Pacer-Caller-Scope", caller)
@@ -110,7 +110,7 @@ func TestClientAccessPoolDefaultsAndTrustedCaller(t *testing.T) {
 }
 
 func TestClientAccessRechecksRevokedPoolOnRetries(t *testing.T) {
-	p := newRoutingFixture(t, "off", false).p
+	p := newRoutingFixture(t, "off").p
 	caller := clientCaller("retry-key")
 	p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: caller, AuthIDs: []string{"a", "b"}}}}
 	r := grantRequest("retry", caller, "a", nil)

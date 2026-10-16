@@ -4,6 +4,10 @@ Worktree `active-routing`, branch `pacer-active-routing`, base `3130ef3`.
 Implements the effect of a routing decision and tests it through `Plugin.Handle`, the
 JSON dispatcher called by `cmd/plugin`'s native ABI entrypoint.
 
+> **Superseded** by [pace-routing.md](pace-routing.md): the activation gates and
+> `routingEligible` are removed; routing is `off` or `on`, and `routingAction` no
+> longer takes a mode or eligibility. The forced/cold contract below still holds.
+
 **Activation and observation gates are UNMET.** Runtime YAML and management still
 accept only `off` / `dry-run`; persisted `active` is still refused, and management
 still reports `can_activate:false`. PLAN's external integration/rollout acceptance

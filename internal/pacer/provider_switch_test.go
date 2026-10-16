@@ -15,7 +15,7 @@ import (
 func TestClaimedAutomaticProviderSwitchStopsBeforeUpstream(t *testing.T) {
 	for _, scenario := range []string{"same-request-retry", "next-request"} {
 		t.Run(scenario, func(t *testing.T) {
-			f := newRoutingFixture(t, "off", false)
+			f := newRoutingFixture(t, "off")
 			p := f.p
 			caller := clientCaller("provider-bound-caller")
 			p.creds["codex-c"] = credential{ID: "codex-c", Index: "ic", Provider: "codex", Account: tracker.Digest("codex-account"), Alias: "Codex C"}
@@ -91,7 +91,7 @@ func TestClaimedAutomaticProviderSwitchStopsBeforeUpstream(t *testing.T) {
 func TestClaimedFallbackToUsageOnlyProviderIsRefused(t *testing.T) {
 	for _, provider := range []string{"deepseek", "qwen"} {
 		t.Run(provider, func(t *testing.T) {
-			f := newRoutingFixture(t, "off", false)
+			f := newRoutingFixture(t, "off")
 			p := f.p
 			p.Host = func(method string, input any) (json.RawMessage, error) {
 				if method == "host.auth.list" {

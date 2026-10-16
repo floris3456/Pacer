@@ -123,7 +123,9 @@ func TestUsageExclusionsThroughTheForwardStore(t *testing.T) {
 	var before historyreports.ComparePool
 	for _, cp := range view.Profiles {
 		for _, pool := range cp.Pools {
-			if window == "" && pool.Latest != nil && pool.Average.Status == "available" {
+			// The compact page now exposes the actual latest window, including
+			// unmeasured ones. Exclude a measured contributor to test the average.
+			if window == "" && pool.Latest != nil && pool.Latest.Rate.Status == "available" && pool.Average.Status == "available" {
 				profile, window, before = cp.Reference, pool.Latest.ID, pool
 			}
 		}

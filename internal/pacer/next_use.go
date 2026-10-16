@@ -3,7 +3,6 @@ package pacer
 import (
 	"time"
 
-	"github.com/floris3456/cliproxyapi-quota-handoff/internal/measurement"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/routing"
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/tracker"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -29,9 +28,18 @@ type nextUseView struct {
 	Provider       string `json:"provider"`
 	Model          string `json:"model"`
 	Reason         string `json:"reason"`
-	Auth           string `json:"auth,omitempty"`
-	Alias          string `json:"alias,omitempty"`
-	Forced         bool   `json:"forced"`
+	// Warm: the chat's cache may still be warm, so NEXT USE waits until it is cold.
+	Warm bool `json:"warm"`
+	// NEXT USE: the account the chat moves to once its cache is cold, only
+	// when that is another account.
+	Auth   string `json:"auth,omitempty"`
+	Alias  string `json:"alias,omitempty"`
+	Forced bool   `json:"forced"`
+	// FORCE USE: the account a forced move sends the chat to, "now" when its
+	// account cannot serve, "soon" when a meter is near its floor.
+	ForceAuth   string `json:"force_auth,omitempty"`
+	ForceAlias  string `json:"force_alias,omitempty"`
+	ForceReason string `json:"force_reason,omitempty"`
 }
 
 const previewRetention = 24 * time.Hour
@@ -54,68 +62,91 @@ func (p *Plugin) rememberPreviewLocked(key string, input routingPreviewInput) {
 	p.previews[key] = input
 }
 
-// Called under p.mu by both the scheduler and the read-only preview. This is
-// deliberately the same evidence and scoring input construction for both paths.
-func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time) ([]routing.Account, float64, []credential) {
+// Called under p.mu by both the scheduler and the read-only preview: the same
+// meter inputs for both paths. chatAccount, when CPA did not offer it, is added
+// as not offered so routing can tell a briefly unavailable account from one
+// that cannot serve.
+func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, chatAccount string) ([]routing.Account, []credential) {
 	accounts := []routing.Account{}
 	candidates := []credential{}
-	expected := 0.0
+	offered := false
 	for _, id := range input.Candidates {
 		c, ok := p.creds[id]
 		if !ok || c.Provider != input.Provider || !p.clientAllowedLocked(input.Caller, c.ID) {
 			continue
 		}
 		candidates = append(candidates, c)
-		windows, err := p.observer.ReadWindows(c.Account)
+		account, err := p.routingAccountLocked(c, input.Model, now)
 		if err != nil {
 			continue
 		}
-		account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now)}
-		if c.Provider == "codex" {
-			credits := p.readCredits(c.Account)
-			account.QuotaExhaustionUncertain = credits.At(now).State != "empty"
-			// A successful meter read writes credits before its windows. New
-			// empty credits must not combine with an older exhausted window
-			// while that same read is replenishing the subscription allowance.
-			for _, w := range windows {
-				if w.Applies(input.Model) && !w.NotApplicable && w.Usage.At.UnixMilli() < credits.ReadMS {
-					account.QuotaExhaustionUncertain = true
-				}
-			}
-		}
-		if report, ok := p.measurements[c.Account]; ok && now.Sub(report.AsOf) < time.Minute {
-			selection := input.Selection
-			if input.Managed {
-				prior := report.Expected(measurement.ChatRef{CallerID: selection.Scope.CallerScope, InstallationID: selection.Scope.InstallationID, SessionID: selection.Scope.SessionID, ProviderRoute: selection.Scope.ProviderRoute, Provider: input.Provider, AccountID: c.Account, ContextEpoch: selection.ContextEpoch}, measurement.TTL(selection.TTL))
-				if prior.Known && prior.USD > expected {
-					expected = prior.USD
-				}
-			}
-			if report.SevenDay.Known {
-				account.Size = report.SevenDay.USDPerPercent
-			}
-			if report.FiveHour.Known {
-				account.ShortValue = report.FiveHour.USDPerPercent
-				account.RunwayUnknown = !report.WarmBurn.Bounded
-			}
-			if report.WarmBurn.Bounded {
-				account.WarmBurn = report.WarmBurn.HighUSDPerHour
-			}
-		}
+		offered = offered || c.Account == chatAccount
 		accounts = append(accounts, account)
 	}
-	return accounts, expected, candidates
+	if chatAccount != "" && !offered {
+		var own *credential
+		for _, c := range p.creds {
+			if c.Account == chatAccount && c.Provider == input.Provider && p.clientAllowedLocked(input.Caller, c.ID) && (own == nil || c.ID < own.ID) {
+				c := c
+				own = &c
+			}
+		}
+		if own != nil {
+			if account, err := p.routingAccountLocked(*own, input.Model, now); err == nil {
+				account.NotOffered = true
+				accounts = append(accounts, account)
+			}
+		}
+	}
+	return accounts, candidates
+}
+
+// Caller holds p.mu. Scheduling and previews use the same credit evidence,
+// including accounts temporarily omitted by CPA. Credits have no quota pace.
+func (p *Plugin) routingAccountLocked(c credential, model string, now time.Time) (routing.Account, error) {
+	windows, err := p.observer.ReadWindows(c.Account)
+	account := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, model, windows, now), Paused: p.settings.paused(c.Account)}
+	if err != nil {
+		return account, err
+	}
+	credits := p.readCredits(c.Account)
+	state := credits.At(now).State
+	account.QuotaExhaustionUncertain = state == "available" || state == "unlimited" || c.Provider == "codex" && state != "empty"
+	// Meter reads store credits before windows. Do not combine a new empty
+	// credit flag with an older exhausted window during that update.
+	if state == "empty" {
+		limits := p.settings.routing()
+		for _, w := range windows {
+			floor := limits.ShortFloor
+			if w.Seconds >= routing.LongSeconds {
+				floor = limits.LongFloor
+			}
+			if w.Applies(model) && !w.NotApplicable && w.Remaining != nil && *w.Remaining <= floor && w.Usage.At.UnixMilli() < credits.ReadMS {
+				account.QuotaExhaustionUncertain = true
+			}
+		}
+	}
+	return account, nil
+}
+
+// warm reports whether the chat's prompt cache may still be warm on its
+// account: a request is running, cache evidence protects it, or (without
+// evidence) its last request is within the warm time setting.
+func warm(b tracker.Binding, active bool, now time.Time, unknownWarmth time.Duration) bool {
+	return active || now.Before(b.ProtectedUntil) || (b.UnknownWarmth && now.Before(b.LastUsed.Add(unknownWarmth)))
 }
 
 func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	now := p.now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	view := nextUseView{Version: 1, AtMS: now.UnixMilli(), ExpiresMS: now.Add(30 * time.Second).UnixMilli(), Mode: p.cfg.Routing.Mode, Provider: binding.Provider, Model: binding.Model, Reason: "unavailable"}
-	if !p.cfg.Enabled || p.cfg.Routing.Mode == "off" {
+	// Clients know the modes off, dry-run and active: routing on is "active".
+	view := nextUseView{Version: 1, AtMS: now.UnixMilli(), ExpiresMS: now.Add(30 * time.Second).UnixMilli(), Mode: "off", Provider: binding.Provider, Model: binding.Model, Reason: "unavailable"}
+	if !p.cfg.Enabled || p.cfg.Routing.Mode != "on" {
 		view.Reason = "routing_off"
 		return view
 	}
+	view.Mode = "active"
 	enabled := false
 	for _, provider := range p.cfg.Routing.Providers {
 		enabled = enabled || provider == binding.Provider
@@ -132,16 +163,28 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 	if err != nil || current.Key == "" {
 		return view
 	}
-	accounts, expected, candidates := p.routingInputsLocked(input, now)
-	d := routing.Pick(routing.Default(), now, routing.Chat{Account: current.Account, ProtectedUntil: current.ProtectedUntil, UnknownWarmth: current.UnknownWarmth, InFlight: active, ExpectedValue: expected}, accounts)
-	view.Reason = d.Reason
-	if !d.Handled || d.Account == current.Account || (d.Reason != "cold_move" && d.Reason != "forced_move") {
-		return view
+	accounts, candidates := p.routingInputsLocked(input, now, current.Account)
+	next, force := routing.Preview(p.settings.routing(), now, current.Account, accounts, p.settings.ForceWarning)
+	// While warm too: where the chat goes once it is cold.
+	view.Reason, view.Warm = next.Reason, warm(current, active, now, p.settings.warmFor())
+	alias := func(d routing.Decision) (string, string) {
+		if !d.Handled || d.Account == current.Account || (d.Reason != routing.ColdMove && d.Reason != routing.ForcedMove) {
+			return "", ""
+		}
+		for _, c := range candidates {
+			if c.ID == d.Auth {
+				return c.ID, c.Alias
+			}
+		}
+		return "", ""
 	}
-	for _, c := range candidates {
-		if c.ID == d.Auth {
-			view.Auth, view.Alias, view.Forced = c.ID, c.Alias, d.Forced
-			break
+	if view.Auth, view.Alias = alias(next); view.Auth != "" {
+		view.Forced = next.Forced
+	}
+	if view.ForceAuth, view.ForceAlias = alias(force); view.ForceAuth != "" {
+		view.ForceReason = "soon"
+		if next.Forced {
+			view.ForceReason = "now"
 		}
 	}
 	return view

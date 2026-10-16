@@ -26,6 +26,14 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS pacer_usage_source(id INTEGER PRIMARY KEY CHECK(id=1), source TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pacer_usage_credentials(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth)); CREATE TABLE IF NOT EXISTS pacer_usage_capture_metadata(request_id TEXT NOT NULL,auth TEXT NOT NULL,body BLOB NOT NULL,PRIMARY KEY(request_id,auth))`); err != nil {
 		return nil, err
 	}
+	// This process's tables above, and any table a newer Pacer version added
+	// before this one, changed the DDL generation the feed records as its
+	// schema witness. Re-anchor the witness before Open checks it; the feed
+	// objects themselves must still be intact, so a database a DDL runaway left
+	// inconsistent still refuses.
+	if err := measurement.SettleReportFeedSchema(ctx, db); err != nil {
+		return nil, err
+	}
 	m, err := measurement.Open(ctx, db, measurement.Options{Clock: p.now})
 	if err != nil {
 		return nil, err
@@ -113,6 +121,12 @@ func (p *Plugin) captureUsageCredentialTx(request string, c credential) error {
 	return tx.Commit()
 }
 
+// meterRereadTokens: a request that processed this many input tokens without a
+// cache read moves a 5-hour meter by a few points (a 574k-token cache write
+// moved one by 10 on 2026-10-15). Its own reply showed the meter from before,
+// so the account's meter is read again shortly after (observation.Spend).
+const meterRereadTokens = 100_000
+
 func (p *Plugin) recordUsage(raw []byte) error {
 	_, err := p.recordUsageCaptured(raw)
 	return err
@@ -186,6 +200,9 @@ func (p *Plugin) recordUsageCaptured(raw []byte) (captured credential, err error
 	record := observed.Record
 	if record.Attribution.AccountID != captured.Account {
 		return captured, errors.New("persisted native attribution mismatch")
+	}
+	if p.observer != nil && record.Final && record.Success && record.Usage.NonCacheInput+record.Usage.CacheCreate >= meterRereadTokens {
+		p.metricError(p.observer.Spend(captured.Account, captured.Provider, p.now()))
 	}
 	if p.policyEvidence != nil && record.Policy.SelectedTTL != "" {
 		_, evidenceErr := p.policyEvidence.Observe(context.Background(), record)
@@ -263,7 +280,16 @@ func (p *Plugin) storeObservations(c credential, samples []observation.Window) {
 	}
 	for _, w := range after {
 		// Named scopes need exact catalogue membership, not guessed substrings.
-		if w.Scope != "all" || w.Remaining == nil || w.Cycle == "" || w.Usage.At.IsZero() {
+		if w.Scope != "all" {
+			continue
+		}
+		// A window that reset and has not started has no cycle yet; the one it
+		// replaced is closed.
+		if old := previous[w.Key()]; w.Dormant && !old.Dormant && old.Cycle != "" {
+			p.metricError(p.measurement.CloseCycle(context.Background(), measurement.Closure{CycleRef: measurement.CycleRef{Provider: c.Provider, AccountID: c.Account, Scope: w.Scope, CycleID: old.Cycle, Duration: time.Duration(old.Seconds) * time.Second}, At: w.StatusEvidence.At, Source: "pacer-observer:" + w.StatusEvidence.Source}))
+			continue
+		}
+		if w.Remaining == nil || w.Cycle == "" || w.Usage.At.IsZero() {
 			continue
 		}
 		o := measurement.Observation{Provider: c.Provider, AccountID: c.Account, Scope: w.Scope, CycleID: w.Cycle, Duration: time.Duration(w.Seconds) * time.Second, At: w.Usage.At, UsedPercent: 100 - *w.Remaining, Source: w.Usage.Source, Usable: w.Complete(w.Usage.At) && !w.Dormant && !w.NotApplicable && !w.Usage.At.After(p.now())}

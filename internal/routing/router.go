@@ -1,5 +1,6 @@
-// Package routing places chats using source-backed budgets. It does no I/O and
-// never treats an elapsed reset as replenishment.
+// Package routing places chats by 7-day pace (docs/pace-routing.md). It does
+// no I/O, uses provider meters only, and never treats an elapsed reset as
+// replenishment.
 package routing
 
 import (
@@ -8,236 +9,297 @@ import (
 	"time"
 )
 
+// LongSeconds separates the paced meters (7 days and longer) from the
+// short windows that are simply used.
+const LongSeconds = 7 * 24 * 3600
+
+// Budget is one applicable provider window. Known means a usable reading: at
+// most an hour old, with a future reset unless the window is dormant (reset,
+// not yet started), which counts as 100 % left.
 type Budget struct {
-	Seconds   int64
-	Remaining float64
-	Reset     time.Time
-	Known     bool
+	Seconds   int64     `json:"seconds"`
+	Remaining float64   `json:"remaining"`
+	Reset     time.Time `json:"reset,omitzero"`
+	Known     bool      `json:"known"`
+	Dormant   bool      `json:"dormant,omitempty"`
 }
 
-// Account contains only credentials CPA currently offers; cooling and disabled
-// credentials must never be added by the caller. Aliases share Account identity.
+// Account is a credential CPA offers for this request; aliases share Account
+// identity. Cooling and disabled credentials are never offered. The caller may
+// add the chat's own account with NotOffered set: it is never chosen, but when
+// its meters are usable the decision says so (Decision.Unoffered), because CPA
+// left it out for another reason (a failed attempt of this request, a
+// transient-error cooldown). Paused accounts take no new or moved chats; their
+// warm chats stay.
 type Account struct {
-	Auth, Account    string
-	Budgets          []Budget
-	Size, ShortValue float64 // dollars per percent; zero means unmeasured
-	WarmBurn         float64 // dollars/hour from compatible, observed warm stretches
-	RunwayUnknown    bool    // measured capacity exists, but outstanding warm load is unbounded
-	KeyWarm          bool
-	// Subscription exhaustion alone cannot prove account exhaustion when
-	// separate credits are available or their status is unknown/stale.
+	Auth, Account string
+	Budgets       []Budget
+	NotOffered    bool `json:"-"`
+	Paused        bool `json:"-"`
+	// Subscription floors alone cannot prove exhaustion while extra capacity
+	// is available or Codex credit evidence is missing, stale or incoherent.
 	QuotaExhaustionUncertain bool
 }
 
+// Chat is the chat being placed. Account is empty for a new chat. Warm means
+// its prompt cache may be warm on Account: the chat stays unless that account
+// cannot serve it.
 type Chat struct {
-	Account        string
-	ProtectedUntil time.Time
-	UnknownWarmth  bool
-	InFlight       bool
-	ExpectedValue  float64
+	Account string
+	Warm    bool
 }
 
 type Config struct {
-	MoveMargin            float64
+	Band                  float64 // accounts with pace >= Band × best are equivalent
+	ShortFloor, LongFloor float64 // % left at or below which an account cannot serve
+	NewShort              float64 // minimum short-window % left for a new placement
 	MinHorizon            time.Duration
-	ShortFloor, LongFloor float64
-	NewLong, NewShort     float64
 }
 
 func Default() Config {
-	return Config{MoveMargin: .25, MinHorizon: time.Hour, ShortFloor: 2, LongFloor: 1, NewLong: 3, NewShort: 15}
+	return Config{Band: .9, ShortFloor: 2, LongFloor: 1, NewShort: 15, MinHorizon: time.Hour}
+}
+
+// Candidate records the inputs of one offered account in the decision trace.
+type Candidate struct {
+	Auth     string   `json:"auth"`
+	Account  string   `json:"account"`
+	Budgets  []Budget `json:"budgets"`
+	Known    bool     `json:"known"`
+	Pace     float64  `json:"pace"`
+	Eligible bool     `json:"eligible"`
+	Paused   bool     `json:"paused,omitempty"`
+	Offered  *bool    `json:"offered,omitempty"` // false only for the chat's own account CPA left out
 }
 
 type Decision struct {
-	Handled bool    `json:"handled"`
-	Auth    string  `json:"auth,omitempty"`
-	Account string  `json:"account,omitempty"`
-	Reason  string  `json:"reason"`
-	Forced  bool    `json:"forced"`
-	Pace    float64 `json:"pace,omitempty"`
+	Handled bool   `json:"handled"`
+	Auth    string `json:"auth,omitempty"`
+	Account string `json:"account,omitempty"`
+	Reason  string `json:"reason"`
+	Forced  bool   `json:"forced"`
+	// Unoffered: a warm chat's own account was not offered although its meters
+	// can serve it. The caller may wait for it instead of forcing the move.
+	Unoffered  bool        `json:"unoffered,omitempty"`
+	Pace       float64     `json:"pace,omitempty"`
+	Candidates []Candidate `json:"candidates,omitempty"`
 }
+
+// Reasons. Only cold_move is a discretionary move: the client keeps its
+// context. forced_move leaves an account that cannot serve.
+const (
+	Warm         = "warm"
+	NewChat      = "new_chat"
+	ColdStay     = "cold_stay"
+	ColdMove     = "cold_move"
+	ForcedMove   = "forced_move"
+	NoEligible   = "no_eligible"
+	NoUsableData = "no_usable_meters"
+	// WarmAuxiliary: a request on the chat's model besides its steps (a warming
+	// ping) stays on the chat's account, where it reads and renews the cache.
+	WarmAuxiliary = "warm_auxiliary"
+	// KeepAccount: with routing off, a bound chat's request on its model stays
+	// on the chat's account. CPA keeps its own chat map only in memory, so
+	// after a CPA restart it would move the chat and its pings.
+	KeepAccount = "keep_account"
+)
 
 type score struct {
 	Account
-	pace, room               float64
-	known, hard, fit, runway bool
-	quotaUncertain           bool
+	known, hard       bool
+	quotaUncertain    bool
+	pace, short, long float64
+	running           bool      // a short window is running (its capacity expires at its reset)
+	shortReset        time.Time // earliest reset of a running short window
 }
 
 func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 	scores := make([]score, 0, len(accounts))
 	var current *score
-	for _, account := range accounts {
-		s := evaluate(cfg, now, chat.ExpectedValue, account)
+	for _, a := range accounts {
+		s := evaluate(cfg, now, a)
 		scores = append(scores, s)
-		if account.Account == chat.Account && (current == nil || s.Auth < current.Auth) {
-			copy := s
-			current = &copy
+		// The chat's account: an offered alias first, then the lowest auth.
+		if chat.Account != "" && a.Account == chat.Account && (current == nil || (current.NotOffered && !s.NotOffered) || (current.NotOffered == s.NotOffered && s.Auth < current.Auth)) {
+			c := s
+			current = &c
 		}
 	}
-	forced := chat.Account != "" && (current == nil || current.hard)
-	// Keep an offered current account when only its subscription is depleted.
-	// Separate credit capacity has no comparable pace; abstention here would
-	// let CPA's fallback silently rotate a still-usable account.
-	if current != nil && current.quotaUncertain {
-		return chosen(*current, "credit_status_unscored", false)
-	}
-	// Missing telemetry never evicts a healthy warm/protected binding. Unknown
-	// legacy TTL cannot authorize a cold move at five minutes.
-	if current != nil && !current.hard && (chat.InFlight || chat.UnknownWarmth || now.Before(chat.ProtectedUntil)) {
-		return chosen(*current, "protected", false)
-	}
-	eligible := make([]score, 0, len(scores))
-	runwayBlocked := false
+	trace := make([]Candidate, 0, len(scores))
+	eligible := []score{}
+	anyKnown := false
 	for _, s := range scores {
-		runwayBlocked = runwayBlocked || (s.known && !s.hard && !s.runway)
-		if s.known && !s.hard && (forced || s.runway) {
+		if !s.NotOffered {
+			anyKnown = anyKnown || s.known
+		}
+		ok := s.known && !s.hard && !s.NotOffered && !s.Paused && (s.Account.Account == chat.Account || s.short >= cfg.NewShort)
+		if ok {
 			eligible = append(eligible, s)
 		}
+		c := Candidate{Auth: s.Auth, Account: s.Account.Account, Budgets: s.Budgets, Known: s.known, Pace: s.pace, Eligible: ok, Paused: s.Paused}
+		if s.NotOffered {
+			c.Offered = new(bool)
+		}
+		trace = append(trace, c)
 	}
+	forced := chat.Account != "" && (current == nil || current.hard || current.NotOffered)
+	if current != nil && !current.NotOffered && current.quotaUncertain && (!current.Paused || chat.Warm) {
+		return chosen(*current, "credit_status_unscored", false, trace)
+	}
+	if chat.Warm && current != nil && !forced {
+		return chosen(*current, Warm, false, trace)
+	}
+	unoffered := chat.Warm && current != nil && current.NotOffered && (current.known || current.quotaUncertain) && !current.hard
 	if len(eligible) == 0 {
-		if runwayBlocked {
-			return Decision{Reason: "placement_runway_unknown_or_exhausting", Forced: forced}
+		reason := NoEligible
+		if !anyKnown {
+			reason = NoUsableData
 		}
-		return Decision{Reason: "no_known_budget", Forced: forced}
+		return Decision{Reason: reason, Forced: forced, Unoffered: unoffered, Candidates: trace}
 	}
-	// Compare tie candidates to a fixed maximum (not pairwise tolerance, which
-	// violates sort transitivity). A tie prefers shared key warmth, then room.
-	sort.Slice(eligible, func(i, j int) bool {
-		if eligible[i].pace != eligible[j].pace {
-			return eligible[i].pace > eligible[j].pace
-		}
-		return eligible[i].Auth < eligible[j].Auth
-	})
-	fitting := make([]score, 0, len(eligible))
+	best := 0.0
 	for _, s := range eligible {
-		if s.fit {
-			fitting = append(fitting, s)
+		best = math.Max(best, s.pace)
+	}
+	band := eligible[:0]
+	for _, s := range eligible {
+		if s.pace >= best*cfg.Band {
+			band = append(band, s)
 		}
 	}
-	best := eligible[0]
-	if len(fitting) == 0 {
-		for _, s := range eligible {
-			if s.room > best.room || (s.room == best.room && s.Auth < best.Auth) {
-				best = s
-			}
+	// Within the band: stay, then spend a running short window (the one that
+	// expires first), then lowest auth. Dormant capacity does not expire.
+	sort.Slice(band, func(i, j int) bool {
+		a, b := band[i], band[j]
+		if stay := a.Account.Account == chat.Account; stay != (b.Account.Account == chat.Account) {
+			return stay
 		}
-	} else {
-		best = fitting[0]
-		top := best.pace
-		for _, s := range fitting[1:] {
-			if s.pace < top*.95 {
-				break
-			}
-			if (s.KeyWarm && !best.KeyWarm) || (s.KeyWarm == best.KeyWarm && (s.room > best.room || (s.room == best.room && s.Auth < best.Auth))) {
-				best = s
-			}
+		if a.running != b.running {
+			return a.running
 		}
+		if a.running && !a.shortReset.Equal(b.shortReset) {
+			return a.shortReset.Before(b.shortReset)
+		}
+		return a.Auth < b.Auth
+	})
+	choice := band[0]
+	switch {
+	case forced:
+		d := chosen(choice, ForcedMove, true, trace)
+		d.Unoffered = unoffered
+		return d
+	case chat.Account == "":
+		return chosen(choice, NewChat, false, trace)
+	case choice.Account.Account == chat.Account:
+		return chosen(choice, ColdStay, false, trace)
 	}
-	if forced {
-		return chosen(best, "forced_move", true)
-	}
-	if current == nil {
-		return chosen(best, "new_chat", false)
-	}
-	if best.Account.Account == current.Account.Account {
-		return chosen(*current, "current_best", false)
-	}
-	// The emergency most-room fallback is not permission for a discretionary
-	// cold move onto a runway-blocked or undersized account.
-	if !best.fit || !current.known || best.pace < current.pace*(1+cfg.MoveMargin) {
-		return chosen(*current, "cold_margin", false)
-	}
-	return chosen(best, "cold_move", false)
+	return chosen(choice, ColdMove, false, trace)
 }
 
-func chosen(s score, reason string, forced bool) Decision {
-	return Decision{Handled: true, Auth: s.Auth, Account: s.Account.Account, Pace: s.pace, Reason: reason, Forced: forced}
+// Pace is the account's 7-day pace in % per hour, if its meters are usable.
+func Pace(cfg Config, now time.Time, a Account) (float64, bool) {
+	s := evaluate(cfg, now, a)
+	return s.pace, s.known
 }
 
-func evaluate(cfg Config, now time.Time, expected float64, a Account) score {
-	s := score{Account: a, known: len(a.Budgets) > 0, fit: true, runway: !a.RunwayUnknown, room: math.Inf(1), pace: math.Inf(1)}
-	shortValue := a.ShortValue
-	// Invalid measured load/capacity is not a verified zero load. Keep existing
-	// warm chats, but exclude this account from discretionary placement/fallback.
-	if shortValue < 0 || math.IsNaN(shortValue) || math.IsInf(shortValue, 0) {
-		shortValue, s.runway = 0, false
+// Preview tells, without a request, where the chat's next routing moments send
+// it (docs/pace-routing.md, "Next and forced use"). next is the pick once the
+// chat's cache is cold. force is the forced move off its account: now, when the
+// account cannot serve (then force is next), or soon, when one of its meters is
+// within soon points of its floor. An account CPA left out whose meters can
+// serve still counts as serving: a warm chat waits for it. An unhandled
+// decision has nothing to show.
+func Preview(cfg Config, now time.Time, account string, accounts []Account, soon float64) (next, force Decision) {
+	offered, waiting := false, false
+	for _, a := range accounts {
+		if a.Account != account {
+			continue
+		}
+		s := evaluate(cfg, now, a)
+		offered = offered || !a.NotOffered
+		waiting = waiting || (a.NotOffered && (s.known || s.quotaUncertain) && !s.hard)
 	}
-	if a.WarmBurn < 0 || math.IsNaN(a.WarmBurn) || math.IsInf(a.WarmBurn, 0) {
-		s.runway = false
+	if !offered && waiting {
+		accounts = withOffer(accounts, account, false)
 	}
-	longest := int64(0)
-	for _, b := range a.Budgets {
-		if b.Seconds > longest {
-			longest = b.Seconds
+	next = Pick(cfg, now, Chat{Account: account}, accounts)
+	if next.Forced {
+		return next, next
+	}
+	near := false
+	for _, a := range accounts {
+		if s := evaluate(cfg, now, a); a.Account == account && !a.NotOffered && !a.QuotaExhaustionUncertain && s.known {
+			near = near || s.short <= cfg.ShortFloor+soon || s.long <= cfg.LongFloor+soon
 		}
 	}
-	size := a.Size
-	if size <= 0 || math.IsNaN(size) || math.IsInf(size, 0) {
-		size = 1
+	if !near {
+		return next, Decision{}
 	}
+	return next, Pick(cfg, now, Chat{Account: account}, withOffer(accounts, account, true))
+}
+
+// withOffer copies accounts with the given account's NotOffered set.
+func withOffer(accounts []Account, account string, notOffered bool) []Account {
+	out := append([]Account(nil), accounts...)
+	for i := range out {
+		if out[i].Account == account {
+			out[i].NotOffered = notOffered
+		}
+	}
+	return out
+}
+
+func chosen(s score, reason string, forced bool, trace []Candidate) Decision {
+	return Decision{Handled: true, Auth: s.Auth, Account: s.Account.Account, Pace: s.pace, Reason: reason, Forced: forced, Candidates: trace}
+}
+
+// evaluate: pace = 7-day % left / max(MinHorizon, reset − now), the rate that
+// spends the meter by its reset (a dormant 7-day window has its full length
+// ahead). With several paced windows the slowest binds. Short windows only
+// gate eligibility. An account is known when every window is usable and at
+// least one is paced.
+func evaluate(cfg Config, now time.Time, a Account) score {
+	s := score{Account: a, known: true, pace: math.Inf(1), short: math.Inf(1), long: math.Inf(1)}
+	paced := false
 	for _, b := range a.Budgets {
-		valid := b.Known && b.Seconds > 0 && !math.IsNaN(b.Remaining) && !math.IsInf(b.Remaining, 0) && b.Remaining >= 0 && b.Remaining <= 100 && b.Reset.After(now)
+		remaining := b.Remaining
+		if b.Dormant {
+			remaining = 100
+		}
+		valid := b.Known && b.Seconds > 0 && !math.IsNaN(remaining) && !math.IsInf(remaining, 0) && remaining >= 0 && remaining <= 100 && (b.Dormant || b.Reset.After(now))
 		if !valid {
 			s.known = false
 			continue
 		}
-		floor := cfg.ShortFloor
-		if b.Seconds == longest {
-			floor = cfg.LongFloor
-		}
-		if b.Remaining <= floor {
-			s.hard = true
-		}
-		if b.Seconds == longest {
-			horizon := b.Reset.Sub(now)
-			if horizon < cfg.MinHorizon {
-				horizon = cfg.MinHorizon
+		if b.Seconds >= LongSeconds {
+			paced = true
+			s.hard = s.hard || remaining <= cfg.LongFloor
+			s.long = math.Min(s.long, remaining)
+			horizon := time.Duration(b.Seconds) * time.Second
+			if !b.Dormant {
+				horizon = b.Reset.Sub(now)
 			}
-			if horizon <= 0 {
-				s.known = false
-				continue
-			}
-			s.pace = math.Min(s.pace, size*b.Remaining/horizon.Hours())
-			if b.Remaining < cfg.NewLong {
-				s.fit = false
-			}
+			s.pace = math.Min(s.pace, remaining/math.Max(cfg.MinHorizon.Hours(), horizon.Hours()))
 			continue
 		}
-		room := b.Remaining
-		if shortValue > 0 {
-			room *= shortValue
-		}
-		s.room = math.Min(s.room, room)
-		if shortValue > 0 && expected > 0 {
-			if room < expected {
-				s.fit = false
+		s.hard = s.hard || remaining <= cfg.ShortFloor
+		s.short = math.Min(s.short, remaining)
+		if !b.Dormant {
+			if !s.running || b.Reset.Before(s.shortReset) {
+				s.shortReset = b.Reset
 			}
-		} else if b.Remaining < cfg.NewShort {
-			s.fit = false
-		}
-		if shortValue > 0 && a.WarmBurn > 0 && a.WarmBurn*b.Reset.Sub(now).Hours() > room {
-			s.fit = false
-			s.runway = false
+			s.running = true
 		}
 	}
-	if math.IsInf(s.room, 1) {
-		// A provider may genuinely have only one budget. Use its remaining
-		// capacity for fallback; never manufacture a five-hour window.
-		s.room = 0
-		for _, b := range a.Budgets {
-			if b.Known {
-				s.room = b.Remaining
-			}
-		}
-	}
-	if math.IsInf(s.pace, 1) {
+	if !paced {
 		s.known = false
-		s.pace = 0
 	}
 	if s.hard && a.QuotaExhaustionUncertain {
 		s.quotaUncertain = true
 		s.hard, s.known = false, false
+	}
+	if !s.known {
+		s.pace = 0
 	}
 	return s
 }

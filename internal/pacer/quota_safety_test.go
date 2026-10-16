@@ -20,7 +20,7 @@ func TestClaudeQuotaSelectionDiscoversStartupCandidates(t *testing.T) {
 				name += "/discovery-failed"
 			}
 			t.Run(name, func(t *testing.T) {
-				f := newRoutingFixture(t, "off", false)
+				f := newRoutingFixture(t, "off")
 				quotaLeft(t, f, "a", 0)
 				r := f.before(t, "startup", "claude-opus-5-5")
 				if missing == "all" {
@@ -74,7 +74,7 @@ func quotaLeft(t *testing.T, f *routingFixture, id string, left float64) {
 }
 
 func TestClaudeQuotaSafetyPreservesExtraUsageAndUnknownCapacity(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	quotaLeft(t, f, "a", 0)
 	windows, err := f.p.observer.ReadWindows(f.p.creds["a"].Account)
 	if err != nil {
@@ -97,6 +97,47 @@ func TestClaudeQuotaSafetyPreservesExtraUsageAndUnknownCapacity(t *testing.T) {
 				t.Fatal("stale extra capacity denied")
 			}
 		}
+	}
+}
+
+func TestQuotaSafetyDoesNotOverridePaceRouting(t *testing.T) {
+	f := newRoutingFixture(t, "on")
+	f.seed(t, time.Minute)
+	f.clock.Add(int64(2 * time.Minute))
+	f.p.creds["c"] = credential{ID: "c", Provider: "claude", Account: "account-c"}
+	quotaLeft(t, f, "c", 0)
+	r := f.before(t, "cold-placement", "claude-opus-5-5")
+	if choice := f.pick(t, r, "c", "a", "b"); !choice.Handled || choice.AuthID != "b" {
+		t.Fatal("an exhausted third account overrode the best cold placement", choice)
+	}
+	if response := f.after(t, r, "b"); response.Terminate {
+		t.Fatal("cold pace move unexpectedly required compaction", string(response.ResponseBody))
+	}
+}
+
+func TestPaceRoutingAndPreviewRespectClaudeExtraCapacity(t *testing.T) {
+	for _, state := range []string{"empty", "available"} {
+		t.Run(state, func(t *testing.T) {
+			f := newRoutingFixture(t, "on")
+			f.seed(t, 5*time.Minute)
+			quotaLeft(t, f, "a", 0)
+			if state == "available" {
+				f.clock.Add(int64(time.Millisecond))
+				if _, err := f.p.credits.ObserveCredits(f.p.creds["a"].Account, observation.Credits{State: state, ReadMS: f.p.now().UnixMilli(), Source: observation.APISource}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := f.before(t, "credit-placement", "claude-opus-5-5")
+			choice := f.pick(t, r, "a", "b")
+			view := f.p.nextUse(f.binding(t))
+			want := "b"
+			if state == "available" {
+				want = "a"
+			}
+			if !choice.Handled || choice.AuthID != want || (view.ForceAuth != "") != (state == "empty") {
+				t.Fatal("routing and preview disagree with extra capacity", choice, view)
+			}
+		})
 	}
 }
 
@@ -137,7 +178,7 @@ func TestClaudeQuotaSafetyEvidence(t *testing.T) {
 }
 
 func TestClaudeQuotaSafetySkipsEmptyDestinationBeforeCompaction(t *testing.T) {
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "dry-run")
 	f.seed(t, 5*time.Minute)
 	before := f.binding(t)
 	f.p.creds["c"] = credential{ID: "c", Index: "ic", Provider: "claude", Account: "account-c", Alias: "Claude C"}
@@ -176,7 +217,7 @@ func TestClaudeQuotaSafetySkipsEmptyDestinationBeforeCompaction(t *testing.T) {
 }
 
 func TestClaudeQuotaSafetyAllEmptyAndReset(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	f.seed(t, time.Minute)
 	before := f.binding(t)
 	quotaLeft(t, f, "a", 0)
@@ -203,7 +244,7 @@ func TestClaudeQuotaSafetyAllEmptyAndReset(t *testing.T) {
 }
 
 func TestClaudeQuotaSafetyPreservesHostBoundaries(t *testing.T) {
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "dry-run")
 	f.seed(t, time.Minute)
 	quotaLeft(t, f, "b", 0)
 	f.p.creds["c"] = credential{ID: "c", Provider: "claude", Account: "c"}
@@ -241,7 +282,7 @@ func TestClaudeQuotaSafetyPreservesHostBoundaries(t *testing.T) {
 }
 
 func TestClaudeQuotaSafetyReplacementPriorityAndCallerGrants(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	f.seed(t, time.Minute)
 	quotaLeft(t, f, "a", 0)
 	f.p.creds["c"] = credential{ID: "c", Provider: "claude", Account: "c"}
@@ -269,7 +310,7 @@ func TestClaudeQuotaSafetyReplacementPriorityAndCallerGrants(t *testing.T) {
 }
 
 func TestClaudeQuotaSafetyDoesNotRerouteAuxiliaryRequests(t *testing.T) {
-	f := newRoutingFixture(t, "dry-run", false)
+	f := newRoutingFixture(t, "dry-run")
 	quotaLeft(t, f, "a", 0)
 	for _, kind := range []string{"compaction", "title", "generate"} {
 		f.q.Kind = kind
@@ -285,7 +326,7 @@ func TestClaudeQuotaSafetyDoesNotRerouteAuxiliaryRequests(t *testing.T) {
 }
 
 func TestClaudeExtraCaptureKeepsSourceClock(t *testing.T) {
-	f := newRoutingFixture(t, "off", false)
+	f := newRoutingFixture(t, "off")
 	quotaLeft(t, f, "a", 0)
 	f.clock.Add(int64(10 * time.Second))
 	at := f.p.now().Add(-time.Second)

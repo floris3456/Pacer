@@ -54,6 +54,25 @@ func evidenceForRecovery(provider string, c cooldown, windows []observation.Wind
 		if w.NotApplicable && !needed {
 			continue
 		}
+		// A window that reset and has not started is 100 % left, read after the failure.
+		if w.Dormant {
+			status := w.StatusEvidence
+			if !w.FreshComplete(now, time.Hour) || status.Source != observation.APISource || !status.At.After(c.FailureAt) || status.At.After(now) {
+				return recoveryEvidence{}, false
+			}
+			if needed {
+				required[key] = true
+				newCycle = true
+			}
+			if status.At.Before(at) {
+				at = status.At
+			}
+			if source == "" {
+				source = "quota_endpoint"
+			}
+			epochs = append(epochs, key+":dormant")
+			continue
+		}
 		if !w.FreshComplete(now, time.Hour) || w.Dormant || w.NotApplicable || w.Remaining == nil || *w.Remaining <= 0 || !w.Usage.At.After(c.FailureAt) || !w.ResetEvidence.At.After(c.FailureAt) || w.ResetEvidence.Quality != observation.Absolute || w.Usage.At.After(now) || w.ResetEvidence.At.After(now) {
 			return recoveryEvidence{}, false
 		}

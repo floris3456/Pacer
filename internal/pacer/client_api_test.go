@@ -112,7 +112,7 @@ func TestClientAPIDiscoveryAddsVersionedFeaturesWithoutChangingLegacyFields(t *t
 }
 
 func TestClientAPIAuthenticatesCapabilitiesAndDeniesUngrantedPrices(t *testing.T) {
-	p := newRoutingFixture(t, "off", false).p
+	p := newRoutingFixture(t, "off").p
 	p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: clientCaller("granted-key"), AuthIDs: []string{"a"}}}}
 	var hostCalls, wrongPath atomic.Int64
 	p.Host = func(method string, input any) (json.RawMessage, error) {
@@ -190,7 +190,7 @@ func TestClientAPIAuthenticatesCapabilitiesAndDeniesUngrantedPrices(t *testing.T
 }
 
 func TestClientAccessPolicyRPCUsesAuthenticatedScope(t *testing.T) {
-	p := newRoutingFixture(t, "off", false).p
+	p := newRoutingFixture(t, "off").p
 	caller := clientCaller("granted-key")
 	p.cfg.ClientAccess = &ClientAccess{Grants: []ClientGrant{{CallerScope: caller, AuthIDs: []string{"a"}}}}
 	for _, method := range []string{pluginabi.MethodCachePolicyHandle, pluginabi.MethodCachePolicyResolve, pluginabi.MethodCachePolicyAttempt} {

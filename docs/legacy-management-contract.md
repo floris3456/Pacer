@@ -34,7 +34,8 @@ slices may be null, matching the existing strict report scanner.
 The bridge should forward request/response objects without reshaping report DTOs,
 pins or numeric fields. Keep management credentials entirely in the host's
 existing authenticated session; the iframe gets no key, token or artifact path.
-The direct native page holds its CPA management key only in page memory.
+The direct native page uses the authenticated reverse-proxy session. The proxy
+keeps the CPA management key server-side; the page does not collect credentials.
 
 ### Query types
 

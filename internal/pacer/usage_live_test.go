@@ -101,3 +101,17 @@ func attachRecord(t *testing.T, p *Plugin, reader *historyreports.Reader, store 
 	p.mu.Unlock()
 	return store
 }
+
+func TestNativeReadingKeepsDormantWindowsAsIdleReadings(t *testing.T) {
+	at := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	full := 100.0
+	dormant := observation.Window{Provider: "claude", Scope: "all", Seconds: 18000, Remaining: &full, Dormant: true, Usage: observation.Field{At: at, Source: observation.APISource, Quality: observation.Measured}, StatusEvidence: observation.Field{At: at, Source: observation.APISource, Quality: observation.Measured, Raw: "null"}}
+	r, ok := nativeReading(observation.AccountHistoryEntry{HistoryEntry: observation.HistoryEntry{ID: 7, Sample: dormant}, Account: "claude:a"})
+	if !ok || r.ID != 7 || r.Remaining == nil || *r.Remaining != 100 || !r.At.Equal(at) || !r.Reset.Equal(at.Add(5*time.Hour)) || r.Source != observation.APISource || r.Seconds != 18000 {
+		t.Fatalf("dormant reading dropped or misplaced: %+v %v", r, ok)
+	}
+	dormant.StatusEvidence = observation.Field{}
+	if _, ok := nativeReading(observation.AccountHistoryEntry{HistoryEntry: observation.HistoryEntry{ID: 8, Sample: dormant}}); ok {
+		t.Fatal("dormant window without a read time")
+	}
+}

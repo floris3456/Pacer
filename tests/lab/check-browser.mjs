@@ -25,16 +25,14 @@ try {
   await page.getByLabel('Management key').fill('pacer-test-admin');
   await page.getByRole('button',{name:'Connect',exact:true}).click();
   await page.locator('#workspace').waitFor();
-  await page.locator('#rollout').filter({hasText:'dry-run observation'}).waitFor();
-  const activeOption=await page.locator('#mode option[value=active]').evaluate(node=>({disabled:node.disabled,attribute:node.hasAttribute('disabled'),html:node.outerHTML}));
-  assert.equal(activeOption.disabled&&activeOption.attribute,true,JSON.stringify(activeOption));
+  assert.deepEqual(await page.locator('#mode option').evaluateAll(nodes=>nodes.map(node=>node.value)),['off','on']);
   assert.deepEqual(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage),password:document.querySelector('#key').value})),{local:[],session:[],password:''});
-  step('management connects without storing credentials; active routing gated');
-  await page.getByLabel('Routing mode').selectOption('dry-run');
+  step('management connects without storing credentials');
+  await page.getByLabel('Routing mode').selectOption('on');
   await page.getByRole('button',{name:'Apply',exact:true}).click();
   await page.getByText('Routing mode saved. This does not change any chat’s cache policy.',{exact:true}).waitFor();
   const state = await page.request.get(base+'/v0/management/plugins/pacer/state',{headers:{Authorization:'Bearer pacer-test-admin'}});
-  assert.equal((await state.json()).routing.mode,'dry-run');
+  assert.equal((await state.json()).routing.mode,'on');
   step('routing control saved through actual native management route');
   await page.screenshot({path:out+'/pacer-desktop.png',fullPage:true});
 
