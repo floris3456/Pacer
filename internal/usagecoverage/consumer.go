@@ -27,6 +27,10 @@ type Consumer struct {
 	physical       *measurement.PhysicalProof
 	id, source     string
 	pendingFailure bool
+	// physicalOff: physical proof is unavailable for the rest of this process
+	// (it failed to start or a physical write failed); physicalErr says why.
+	physicalOff bool
+	physicalErr error
 }
 
 // New always creates a new durable consumer incarnation. The caller must install
@@ -46,14 +50,47 @@ func New(ctx context.Context, store *measurement.Store, options Options) (*Consu
 	if err := store.StartSourceConsumer(ctx, c.id, c.source, options.Clock().Round(0).UTC()); err != nil {
 		return nil, err
 	}
-	var err error
-	if c.physical, err = store.NewPhysicalProof(ctx, c.id); err != nil {
-		return nil, err
+	// Physical proof only feeds capacity estimates. Without it the consumer still
+	// records usage and request-domain coverage, so it never stops Pacer's start.
+	physical, err := store.NewPhysicalProof(ctx, c.id)
+	if err != nil {
+		c.physicalOff, c.physicalErr = true, err
+		return c, nil
 	}
+	c.physical = physical
 	return c, nil
 }
 
 func (c *Consumer) ID() string { return c.id }
+
+// PhysicalError is why physical proof is off in this process, or nil.
+func (c *Consumer) PhysicalError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.physicalErr
+}
+
+// physicalDo runs an optional physical write. A failed one never reaches the
+// request domain or the host hook: the physical consumer is marked failed
+// (durably when that write works) and skipped for the rest of this process, so
+// no proof can span the lost write. Semantically unusable input stays unknown.
+func (c *Consumer) physicalDo(ctx context.Context, op func(*measurement.PhysicalProof) error) {
+	if c.physicalOff {
+		return
+	}
+	err := op(c.physical)
+	if err == nil || errors.Is(err, measurement.ErrInvalid) || errors.Is(err, measurement.ErrConflict) || errors.Is(err, measurement.ErrStaleSource) {
+		return
+	}
+	c.physicalOff, c.physicalErr = true, err
+	_ = c.physical.Poison(ctx)
+}
+func (c *Consumer) physicalFault(ctx context.Context, account string) {
+	c.physicalDo(ctx, func(p *measurement.PhysicalProof) error { return p.Fault(ctx, account) })
+}
+func (c *Consumer) physicalInvalidate(ctx context.Context, ref, manager, sink string) {
+	c.physicalDo(ctx, func(p *measurement.PhysicalProof) error { return p.Invalidate(ctx, ref, manager, sink) })
+}
 
 // A failed write cannot be followed by a successful proof in this process. The
 // next operation first persists a sticky failure; on restart New's lower bound
@@ -65,9 +102,7 @@ func (c *Consumer) ready(ctx context.Context) error {
 	if err := c.store.PoisonSourceConsumer(ctx, c.id); err != nil {
 		return err
 	}
-	if err := c.physical.Poison(ctx); err != nil {
-		return err
-	}
+	c.physicalDo(ctx, func(p *measurement.PhysicalProof) error { return p.Poison(ctx) })
 	c.pendingFailure = false
 	return nil
 }
@@ -126,9 +161,7 @@ func (c *Consumer) PutMembership(ctx context.Context, m Membership) error {
 }
 func (c *Consumer) badMembership(ctx context.Context, account string, cause error) error {
 	c.storageResult(cause)
-	if err := c.physical.Fault(ctx, account); err != nil {
-		return c.storageResult(err)
-	}
+	c.physicalFault(ctx, account)
 	if err := c.fault(ctx, account); err != nil {
 		return err
 	}
@@ -166,9 +199,7 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 	}
 	r, err := measurement.FromNative(raw, capture.Credential, c.source)
 	if err != nil {
-		if failure := c.physical.Fault(ctx, ""); failure != nil {
-			return ObservedUsage{}, c.storageResult(failure)
-		}
+		c.physicalFault(ctx, "")
 		if failure := c.fault(ctx, ""); failure != nil {
 			return ObservedUsage{}, failure
 		}
@@ -197,9 +228,7 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 		}
 	}
 	if se != nil && se.SourceRef != "" && (se.Gap || !se.Tracked) {
-		if err = c.physical.Invalidate(ctx, se.SourceRef, se.ManagerID, ""); err != nil {
-			return ObservedUsage{}, c.storageResult(err)
-		}
+		c.physicalInvalidate(ctx, se.SourceRef, se.ManagerID, "")
 		if err = c.store.InvalidateSource(ctx, se.SourceRef, se.ManagerID, "", se.InvalidFrom); err != nil {
 			return ObservedUsage{}, c.storageResult(err)
 		}
@@ -208,20 +237,16 @@ func (c *Consumer) ObserveUsageWithRecord(ctx context.Context, raw []byte, captu
 	if err != nil {
 		c.storageResult(err)
 		if se != nil && se.SourceRef != "" {
-			if failure := c.physical.Invalidate(ctx, se.SourceRef, se.ManagerID, ""); failure != nil {
-				return ObservedUsage{}, c.storageResult(failure)
-			}
-		} else if failure := c.physical.Fault(ctx, r.Attribution.AccountID); failure != nil {
-			return ObservedUsage{}, c.storageResult(failure)
+			c.physicalInvalidate(ctx, se.SourceRef, se.ManagerID, "")
+		} else {
+			c.physicalFault(ctx, r.Attribution.AccountID)
 		}
 		if failure := c.fault(ctx, r.Attribution.AccountID); failure != nil {
 			return ObservedUsage{}, failure
 		}
 		return ObservedUsage{}, err
 	}
-	if err = c.physical.ObserveRecord(ctx, raw, r); err != nil {
-		return ObservedUsage{}, c.storageResult(err)
-	}
+	c.physicalDo(ctx, func(p *measurement.PhysicalProof) error { return p.ObserveRecord(ctx, raw, r) })
 	return ObservedUsage{Record: r, Result: result}, nil
 }
 
@@ -233,9 +258,7 @@ func (c *Consumer) Invalidate(ctx context.Context, account string) error {
 	if err := c.ready(ctx); err != nil {
 		return err
 	}
-	if err := c.physical.Fault(ctx, account); err != nil {
-		return c.storageResult(err)
-	}
+	c.physicalFault(ctx, account)
 	return c.fault(ctx, account)
 }
 
@@ -248,9 +271,9 @@ func (c *Consumer) ApplyCheckpoint(ctx context.Context, membership string, expec
 		return err
 	}
 	// Optional physical negatives are durable before either domain can advance.
-	if err := c.applyPhysicalCheckpoint(ctx, membership, expected, response); err != nil {
-		return c.storageResult(err)
-	}
+	c.physicalDo(ctx, func(*measurement.PhysicalProof) error {
+		return c.applyPhysicalCheckpoint(ctx, membership, expected, response)
+	})
 	// The request-domain digest retains its original payload. The optional
 	// extension has its own bounded hash and must not alter request-time identity.
 	response.Physical = nil
@@ -311,9 +334,7 @@ func (c *Consumer) ApplyCheckpoint(ctx context.Context, membership string, expec
 	}
 	err = c.store.ApplySourceCheckpoint(ctx, p)
 	if errors.Is(err, measurement.ErrInvalid) || errors.Is(err, measurement.ErrConflict) {
-		if failure := c.physical.Invalidate(ctx, ref, response.ManagerIncarnationID, response.IncarnationID); failure != nil {
-			return c.storageResult(failure)
-		}
+		c.physicalInvalidate(ctx, ref, response.ManagerIncarnationID, response.IncarnationID)
 	}
 	return c.storageResult(err)
 }
@@ -341,9 +362,7 @@ func (c *Consumer) CheckpointFailed(ctx context.Context, membership string) erro
 	if err != nil {
 		return c.storageResult(err)
 	}
-	if err = c.physical.Fault(ctx, m.AccountID); err != nil {
-		return c.storageResult(err)
-	}
+	c.physicalFault(ctx, m.AccountID)
 	return c.fault(ctx, m.AccountID)
 }
 

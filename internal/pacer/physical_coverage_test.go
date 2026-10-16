@@ -142,7 +142,9 @@ func TestPhysicalNativeHandlePersistenceRefusalAndOptionalMalformedRetention(t *
 			if restore != nil {
 				restore()
 			}
-			if (mode == "sql" || mode == "malformed") != (err != nil) {
+			// A physical write failure after the primary record is acknowledged and
+			// turns physical proof off; only the malformed envelope is refused.
+			if (mode == "malformed") != (err != nil) || (mode == "sql") != (p.coverage.PhysicalError() != nil) {
 				t.Fatal("native acknowledgment mismatch", mode, err)
 			}
 			// Existing second SDK envelope decode refuses a malformed typed field,

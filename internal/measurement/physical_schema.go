@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 const physicalSchema = `
@@ -33,6 +34,7 @@ var physicalTables = []string{"meta", "consumers", "streams", "records", "epochs
 type PhysicalProof struct {
 	store            *Store
 	consumer, source string
+	pruned           time.Time
 }
 
 // NewPhysicalProof is called only after StartSourceConsumer has durably assigned
@@ -67,9 +69,6 @@ func (s *Store) NewPhysicalProof(ctx context.Context, consumer string) (*Physica
 		} else if exists != len(physicalTables) {
 			return errors.New("measurement: partial physical schema")
 		}
-		if err = physicalMetadata(ctx, tx); err != nil {
-			return err
-		}
 		for _, name := range []string{"dispatch", "owner", "active", "upper", "boundary"} {
 			var n int
 			if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?`, "measurement_physical_"+name).Scan(&n); err != nil {
@@ -82,12 +81,20 @@ func (s *Store) NewPhysicalProof(ctx context.Context, consumer string) (*Physica
 		var old string
 		err = tx.QueryRowContext(ctx, `SELECT source_id FROM measurement_physical_consumers WHERE id=?`, consumer).Scan(&old)
 		if err == nil {
+			// Reopening this consumer keeps the namespace as it is, poison included.
 			if old != p.source {
 				return ErrConflict
 			}
-			return nil
+			return physicalMetadata(ctx, tx)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		// A new consumer (a restart) starts a poisoned namespace over.
+		if err = physicalMetadata(ctx, tx); errors.Is(err, ErrLimit) {
+			err = resetPhysical(ctx, tx)
+		}
+		if err != nil {
 			return err
 		}
 		if err = physicalReserve(ctx, tx, "consumers"); err != nil {
@@ -97,8 +104,10 @@ func (s *Store) NewPhysicalProof(ctx context.Context, consumer string) (*Physica
 			}
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO measurement_physical_consumers VALUES(?,?,0)`, consumer, p.source)
-		return err
+		if _, err = tx.ExecContext(ctx, `INSERT INTO measurement_physical_consumers VALUES(?,?,0)`, consumer, p.source); err != nil {
+			return err
+		}
+		return prunePhysical(ctx, tx, consumer)
 	})
 	if err != nil {
 		return nil, err
@@ -106,6 +115,7 @@ func (s *Store) NewPhysicalProof(ctx context.Context, consumer string) (*Physica
 	if refusal != nil {
 		return nil, refusal
 	}
+	p.pruned = s.clock()
 	return p, nil
 }
 

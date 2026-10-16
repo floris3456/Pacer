@@ -121,11 +121,11 @@ func (c *Consumer) PhysicalLower(ctx context.Context, cut measurement.PhysicalCu
 	if err := c.ready(ctx); err != nil {
 		return nil, err
 	}
-	if cut.ConsumerID != c.id {
+	if cut.ConsumerID != c.id || c.physicalOff {
 		return nil, nil
 	}
-	lower, err := c.store.PhysicalLower(ctx, cut)
-	return lower, c.storageResult(err)
+	// A failed read loses no evidence, so it never latches the request domain.
+	return c.store.PhysicalLower(ctx, cut)
 }
 
 // SelectPhysical accepts only this listener's exact persisted cut identities.
@@ -136,9 +136,14 @@ func (c *Consumer) SelectPhysical(ctx context.Context, s measurement.PhysicalSel
 	if err := c.ready(ctx); err != nil {
 		return measurement.PhysicalResult{}, err
 	}
-	if s.From.ConsumerID != c.id || s.Through.ConsumerID != c.id {
-		return measurement.PhysicalResult{Version: measurement.PhysicalVersion, Domain: measurement.PhysicalDomain, Selection: s, Reason: "foreign_consumer", Facts: []measurement.PhysicalFact{}}, nil
+	unknown := func(reason string) measurement.PhysicalResult {
+		return measurement.PhysicalResult{Version: measurement.PhysicalVersion, Domain: measurement.PhysicalDomain, Selection: s, Reason: reason, Facts: []measurement.PhysicalFact{}}
 	}
-	r, err := c.store.SelectPhysical(ctx, s)
-	return r, c.storageResult(err)
+	if s.From.ConsumerID != c.id || s.Through.ConsumerID != c.id {
+		return unknown("foreign_consumer"), nil
+	}
+	if c.physicalOff {
+		return unknown("physical_unavailable"), nil
+	}
+	return c.store.SelectPhysical(ctx, s)
 }

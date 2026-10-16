@@ -57,6 +57,9 @@ func (p *Plugin) openMeasurements(db *sql.DB) (*measurement.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.coverage.PhysicalError() != nil {
+		p.measurementErrors++ // configure holds p.mu; capacity stays unknown, usage and routing go on
+	}
 	p.coverageGroups = map[string]coverageGroup{}
 	return m, nil
 }

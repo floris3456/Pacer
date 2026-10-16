@@ -9,7 +9,14 @@ import (
 
 func (p *PhysicalProof) Apply(ctx context.Context, in PhysicalCheckpoint) error {
 	var refusal error
+	now := p.store.clock()
+	prune := now.Sub(p.pruned) >= physicalPruneEvery
 	err := p.write(ctx, func(tx *sql.Tx) error {
+		if prune {
+			if err := prunePhysical(ctx, tx, p.consumer); err != nil {
+				return err
+			}
+		}
 		i := in.Identity
 		m, _, err := sourceMembership(ctx, tx, i.MembershipID)
 		if err != nil {
@@ -202,6 +209,9 @@ func (p *PhysicalProof) Apply(ctx context.Context, in PhysicalCheckpoint) error 
 	if err != nil {
 		return err
 	}
+	if prune {
+		p.pruned = now
+	}
 	return refusal
 }
 
@@ -293,7 +303,9 @@ func physicalJoin(ctx context.Context, q physicalQuerier, s PhysicalSelection, m
 		}
 		facts = append(facts, f)
 		if len(facts) > MaxPhysicalSelection {
-			return nil, "", ErrLimit
+			// Too many dispatches since the lower edge: this epoch proves nothing
+			// more, but the namespace stays usable.
+			return []PhysicalFact{}, "physical_selection_limit", nil
 		}
 	}
 	return facts, "", rows.Err()

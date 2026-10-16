@@ -228,7 +228,13 @@ func TestForwardHandleFeedRollbackAndPostPrimaryPhysicalFailure(t *testing.T) {
 			f.h.clock.Add(int64(3 * time.Second))
 			_, e := p.Handle(pluginabi.MethodUsageHandle, hookRaw(t, u))
 			restore()
-			if e == nil || strings.Contains(e.Error(), "not authorized") {
+			if physical {
+				// A physical write after the primary record cannot fail the hook: the
+				// record is kept and physical proof turns off for this process.
+				if e != nil || p.coverage.PhysicalError() == nil {
+					t.Fatal("physical failure reached the hook or went unreported", e)
+				}
+			} else if e == nil || strings.Contains(e.Error(), "not authorized") {
 				t.Fatal("false acknowledgement/raw SQL", e)
 			}
 			expected := 0
@@ -248,7 +254,9 @@ func TestForwardHandleFeedRollbackAndPostPrimaryPhysicalFailure(t *testing.T) {
 			if r.Totals.Rows != int64(expected) || r.Capacity != "unavailable" || p.cfg.Routing.Mode == "on" {
 				t.Fatal(r)
 			}
-			if physical && (r.Totals.SelectionValue == nil || r.Totals.SelectionValue.Low != 725e7 || r.Totals.CoverageReasons["local_source_fault"] != 1) {
+			// The kept row is valued and stays unproven; the physical failure no
+			// longer faults request coverage.
+			if physical && (r.Totals.SelectionValue == nil || r.Totals.SelectionValue.Low != 725e7 || r.Totals.CoverageReasons["physical_coverage_unverified"] != 1 || r.Totals.CoverageReasons["local_source_fault"] != 0) {
 				t.Fatal(r.Totals)
 			}
 		})

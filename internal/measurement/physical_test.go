@@ -47,6 +47,43 @@ func TestPhysicalBootstrapIsExplicitMetadataOnlyAndRejectsPartialSchema(t *testi
 	}
 }
 
+func TestPhysicalNewConsumerStartsAPoisonedNamespaceOver(t *testing.T) {
+	s, db := openTest(t, filepath.Join(t.TempDir(), "reset.sqlite"))
+	if err := s.StartSourceConsumer(ctx, "listener", "source", base); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.NewPhysicalProof(ctx, "listener")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE measurement_physical_meta SET gaps=8192`); err != nil {
+		t.Fatal(err)
+	}
+	ref := SourceReference("source", SourceScope{Provider: "claude", AuthID: "dummy", AuthIndex: "index", Kind: ClaudeHTTPSource, Version: 1})
+	if err = p.Invalidate(ctx, ref, "manager", ""); !errors.Is(err, ErrLimit) {
+		t.Fatal("limit not rejected", err)
+	}
+	// A restart is a new consumer: refused writes mean no stored epoch may prove
+	// across that stretch, so the namespace starts over empty.
+	if err = s.StartSourceConsumer(ctx, "listener-2", "source", base.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := s.NewPhysicalProof(ctx, "listener-2")
+	if err != nil {
+		t.Fatal("poisoned namespace refused a new consumer", err)
+	}
+	var poisoned, gaps, consumers, rows int
+	if err = db.QueryRow(`SELECT poisoned,gaps,consumers,(SELECT count(*) FROM measurement_physical_consumers) FROM measurement_physical_meta WHERE id=1`).Scan(&poisoned, &gaps, &consumers, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if poisoned != 0 || gaps != 0 || consumers != 1 || rows != 1 {
+		t.Fatal("namespace not started over", poisoned, gaps, consumers, rows)
+	}
+	if err = p2.Invalidate(ctx, ref, "manager", ""); err != nil {
+		t.Fatal("new consumer cannot write", err)
+	}
+}
+
 func TestPhysicalFixedLimitsPoisonDurablyWithoutEviction(t *testing.T) {
 	s, db := openTest(t, filepath.Join(t.TempDir(), "limit.sqlite"))
 	if err := s.StartSourceConsumer(ctx, "listener", "source", base); err != nil {

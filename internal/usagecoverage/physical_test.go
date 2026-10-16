@@ -437,24 +437,131 @@ func TestPhysicalRestartRetainsHistoryNeverBorrowsAndOldGapStaysAtOrigin(t *test
 	}
 }
 
-func TestPhysicalSQLFailureIsNotAcknowledgedAndLatches(t *testing.T) {
+func TestPhysicalWriteFailureKeepsUsageAndTurnsProofsOff(t *testing.T) {
 	f, m := physicalSetup(t)
 	beginPhysical(t, f, m, 10)
 	restore := rejectSQLInsert(t, f.db, "measurement_physical_records")
 	raw, capture := physicalUsage(t, "failed-store", "a", 11, 12)
-	if _, err := f.c.ObserveUsage(ctx, raw, capture); err == nil {
-		t.Fatal("physical persistence failure acknowledged")
+	o, err := f.c.ObserveUsageWithRecord(ctx, raw, capture)
+	must(t, err) // the optional physical write cannot fail the usage hook
+	if _, err = f.store.Record(ctx, o.Record.EventID, 1); err != nil {
+		t.Fatal("usage record lost with the physical write", err)
+	}
+	if f.c.PhysicalError() == nil {
+		t.Fatal("physical failure not reported")
 	}
 	restore()
+	raw, capture = physicalUsage(t, "after-failure", "a", 13, 14)
+	o, err = f.c.ObserveUsageWithRecord(ctx, raw, capture)
+	must(t, err)
+	if _, err = f.store.Record(ctx, o.Record.EventID, 1); err != nil {
+		t.Fatal("usage recording stopped after a physical failure", err)
+	}
+	r := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r))
+	s := physicalSelection(f, m.ID, r)
+	if v := selected(t, f, s); v.Known || v.Reason != "physical_unavailable" {
+		t.Fatal("proof spans the lost physical write", v)
+	}
+	if v, err := f.store.SelectPhysical(ctx, s); err != nil || v.Known {
+		t.Fatal("stored proof spans the lost physical write", v, err)
+	}
+}
+
+func TestPhysicalRetentionKeepsWhatIsReadAndPrunesTheRest(t *testing.T) {
+	f, m := physicalSetup(t)
+	raw, capture := physicalUsage(t, "below-lower", "a", 8, 9)
 	_, err := f.c.ObserveUsage(ctx, raw, capture)
 	must(t, err)
-	r := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
-	err = f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), r)
-	if err != nil && !errors.Is(err, measurement.ErrStaleSource) {
-		t.Fatal(err)
+	beginPhysical(t, f, m, 10)
+	raw, capture = physicalUsage(t, "inside", "a", 11, 12)
+	_, err = f.c.ObserveUsage(ctx, raw, capture)
+	must(t, err)
+	first := physicalResponse("a", 20, 10, epoch.Add(time.Minute), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), first))
+	second := physicalResponse("a", 30, 10, epoch.Add(2*time.Hour), false)
+	must(t, f.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), second))
+	known := func(f2 *fixture, s measurement.PhysicalSelection) bool {
+		t.Helper()
+		v, err := f2.store.SelectPhysical(ctx, s)
+		must(t, err)
+		return v.Known
 	}
-	if selected(t, f, physicalSelection(f, m.ID, r)).Known {
-		t.Fatal("write failure was healed by retry")
+	count := func(f2 *fixture, query string, args ...any) int {
+		t.Helper()
+		var n int
+		must(t, f2.db.QueryRow(query, args...).Scan(&n))
+		return n
+	}
+
+	// A restart soon after keeps the proofs the newest samples name; only the
+	// record below every lower edge, which no proof can join, goes.
+	must(t, f.db.Close())
+	f2 := openFixture(t, f.path, epoch.Add(3*time.Hour))
+	if !known(f2, physicalSelection(f, m.ID, first)) || !known(f2, physicalSelection(f, m.ID, second)) {
+		t.Fatal("proof within the retention lost on restart")
+	}
+	if count(f2, `SELECT count(*) FROM measurement_physical_records WHERE dispatch_seq=9`) != 0 {
+		t.Fatal("record below every lower edge kept")
+	}
+
+	// The second consumer's epoch runs much later.
+	initial := physicalResponse("a", 50, 50, epoch.Add(20*time.Hour), true)
+	initial.ManagerIncarnationID, initial.IncarnationID = "manager-two", "sink-two"
+	initial.Physical.FromCut.At = epoch.Add(20 * time.Hour)
+	must(t, f2.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), initial))
+	next := initial
+	next.Sequence = 60
+	next.Through = at(epoch.Add(21 * time.Hour))
+	cp := *initial.Physical
+	cp.Coverage, cp.Reason = "known", ""
+	cp.ThroughCut = &pluginapi.UsagePhysicalCut{Sequence: 60, At: *next.Through}
+	next.Physical = &cp
+	must(t, f2.c.ApplyCheckpoint(ctx, m.ID, tuple("a"), next))
+
+	// The first consumer's epoch was idle for more than the retention before the
+	// newest checkpoint: it goes with its proofs, cuts, stream and records.
+	must(t, f2.db.Close())
+	f3 := openFixture(t, f.path, epoch.Add(22*time.Hour))
+	if known(f3, physicalSelection(f, m.ID, first)) || known(f3, physicalSelection(f, m.ID, second)) {
+		t.Fatal("expired proof still readable")
+	}
+	if !known(f3, physicalSelection(f2, m.ID, next)) {
+		t.Fatal("proof within the retention lost by the prune")
+	}
+	if count(f3, `SELECT count(*) FROM measurement_physical_streams WHERE consumer_id=?`, f.c.ID()) != 0 || count(f3, `SELECT count(*) FROM measurement_physical_records`) != 0 {
+		t.Fatal("expired stream kept")
+	}
+	// The limits count the rows that are left.
+	var meta [8]int
+	must(t, f3.db.QueryRow(`SELECT records,streams,epochs,cuts,proofs,gaps,consumers,faults FROM measurement_physical_meta WHERE id=1`).Scan(&meta[0], &meta[1], &meta[2], &meta[3], &meta[4], &meta[5], &meta[6], &meta[7]))
+	for i, table := range []string{"records", "streams", "epochs", "cuts", "proofs", "gaps", "consumers", "faults"} {
+		if rows := count(f3, `SELECT count(*) FROM measurement_physical_`+table); meta[i] != rows {
+			t.Fatal(table, "counter", meta[i], "rows", rows)
+		}
+	}
+}
+
+func TestConsumerStartsAndRecordsWithoutPhysicalProof(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.db.Exec(`UPDATE measurement_physical_meta SET version=99`)
+	must(t, err)
+	must(t, f.db.Close())
+	f2 := openFixture(t, f.path, epoch.Add(time.Minute))
+	if f2.c.PhysicalError() == nil {
+		t.Fatal("physical start failure hidden")
+	}
+	must(t, f2.c.PutMembership(ctx, membership("members-a", "a", "a")))
+	raw, capture := rawUsage("still-recorded", "a", epoch.Add(2*time.Minute))
+	o, err := f2.c.ObserveUsageWithRecord(ctx, raw, capture)
+	must(t, err)
+	if _, err = f2.store.Record(ctx, o.Record.EventID, 1); err != nil {
+		t.Fatal("usage not recorded without physical proof", err)
+	}
+	must(t, f2.c.ApplyCheckpoint(ctx, "members-a", tuple("a"), response("a", 1)))
+	lower, err := f2.c.PhysicalLower(ctx, measurement.PhysicalCutIdentity{ConsumerID: f2.c.ID()})
+	if err != nil || lower != nil {
+		t.Fatal("physical lower edge without physical proof", lower, err)
 	}
 }
 
