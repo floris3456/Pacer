@@ -68,8 +68,6 @@ func (p *Plugin) clientAPILocked() clientAPI {
 			"required_cache_policy": {Supported: p.hostGuard.enforced() && policy.Supported, Enabled: p.cfg.CachePolicy.RequireManaged && p.hostGuard.enforced() && policy.Enabled},
 			"cache_policy":          policy,
 			"managed_auxiliary":     auxiliary,
-			"keepalive":             {Reason: "host_integration_required"},
-			"native_compaction":     {Reason: "host_integration_required"},
 		},
 		Access: map[string]string{"mode": access, "enforcement": enforcement},
 	}

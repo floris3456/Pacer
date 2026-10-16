@@ -3,6 +3,7 @@ package pacer
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
@@ -69,7 +70,10 @@ func (p *Plugin) windowAccountAllowedLocked(c credential) bool {
 	if p.cfg.ClientAccess != nil {
 		allowed := false
 		for _, grant := range p.cfg.ClientAccess.Grants {
-			allowed = allowed || p.clientAllowedLocked(grant.CallerScope, c.ID)
+			if slices.Contains(grant.AuthIDs, c.ID) {
+				allowed = true
+				break
+			}
 		}
 		if !allowed {
 			return false

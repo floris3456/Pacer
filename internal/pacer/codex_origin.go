@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/floris3456/cliproxyapi-quota-handoff/internal/origin"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
@@ -59,17 +60,8 @@ func (p *Plugin) beforeOrigin(req pluginapi.RequestInterceptRequest, pool *plugi
 	if !allowed {
 		return pool, denyClientAccess()
 	}
-	if pool != nil {
-		found := false
-		for _, id := range pool.AuthIDs {
-			if id == owner {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return pool, denyClientAccess()
-		}
+	if pool != nil && !slices.Contains(pool.AuthIDs, owner) {
+		return pool, denyClientAccess()
 	}
 	return &pluginapi.AuthPool{Version: 1, AuthIDs: []string{owner}}, pluginapi.RequestInterceptResponse{}
 }
