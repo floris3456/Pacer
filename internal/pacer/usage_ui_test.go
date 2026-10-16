@@ -174,6 +174,7 @@ class Element {
   reset() {}
   setAttribute(k, v) { this[k] = v; this.attributes[k] = v; }
   getAttribute(k) { return this.attributes[k]; }
+  addEventListener(type, listener) { this['on' + type] = listener; }
   querySelectorAll(sel) {
     const res = [];
     const walk = el => {

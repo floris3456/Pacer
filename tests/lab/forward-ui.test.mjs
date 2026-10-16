@@ -35,6 +35,7 @@ async function fixture(embedded=false){
     querySelectorAll(selector){return this.children.flatMap(c=>c instanceof Element?[...(c.tag===selector?[c]:[]),...c.querySelectorAll(selector)]:[])}
     querySelector(){return new Element()}
     setAttribute(k,v){this[k]=v}
+    addEventListener(type,listener){this['on'+type]=listener}
     showModal(){this.open=true}close(){this.open=false}
     reset(){for(const n of this.querySelectorAll('input')){n.value='';n.checked=false}}
     click(){if(this.tag==='a')downloads.push({name:this.download,url:this.href,blob:urls.get(this.href)});else return this.onclick?.()}
@@ -61,20 +62,22 @@ async function fixture(embedded=false){
   const parent={postMessage(message,origin){assert.equal(origin,loc.origin);if(message.type==='pacer:hello')return;assert.equal(message.type,'pacer:request');Promise.resolve(dispatch(message.path,message.body,message.method)).then(data=>listeners.get('message')({source:parent,origin:loc.origin,data:{type:'pacer:response',version:1,id:message.id,ok:true,data}}),error=>listeners.get('message')({source:parent,origin:loc.origin,data:{type:'pacer:response',version:1,id:message.id,ok:false,status:error.status,error:'Fixed failure'}}))}};
   window.parent=embedded?parent:window;
   const originals=new Map();const set=(key,v)=>{originals.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{value:v,configurable:true,writable:true})};
-  set('window',window);set('location',loc);set('document',{getElementById:el,createElement:tag=>new Element(tag),createTextNode:text=>({textContent:text}),querySelectorAll:()=>[]});
+  set('window',window);set('location',loc);set('document',{getElementById:el,createElement:tag=>new Element(tag),createTextNode:text=>({textContent:text}),querySelectorAll:()=>[],querySelector:()=>null,addEventListener(){}});
   set('URL',{createObjectURL(blob){const url='blob:fixture-'+ ++sequence;urls.set(url,blob);return url},revokeObjectURL(url){urls.delete(url);revoked.push(url)}});
+  set('setInterval',(fn,ms)=>{assert.equal(ms,30000);return ++sequence});set('clearInterval',()=>{});
   set('setTimeout',fn=>{timers.set(++sequence,fn);return sequence});set('clearTimeout',id=>timers.delete(id));
-  set('fetch',async(path,opts)=>{assert.equal(opts.headers.Authorization,'Bearer synthetic-memory-key');assert.equal(opts.redirect,'error');assert.equal(opts.cache,'no-store');try{return {ok:true,json:async()=>dispatch(path,opts.body?JSON.parse(opts.body):undefined,opts.method,opts.signal)}}catch(error){return {ok:false,status:error.status,json:async()=>({})}}});
+  set('fetch',async(path,opts)=>{assert.equal(opts.headers.Authorization,undefined);assert.equal(opts.credentials,'same-origin');assert.equal(opts.redirect,'error');assert.equal(opts.cache,'no-store');if(embedded)return {ok:false,status:401,json:async()=>({})};try{const data=await dispatch(path,opts.body?JSON.parse(opts.body):undefined,opts.method,opts.signal);return {ok:true,json:async()=>data}}catch(error){return {ok:false,status:error.status,json:async()=>({})}}});
   // Import the real script as an ES module: no source hooks, eval or vm code.
   await import('data:text/javascript;base64,'+Buffer.from(script+'\n// fixture '+ ++moduleSequence).toString('base64'));
   const submit=id=>el(id).onsubmit({preventDefault(){}});
-  if(embedded){listeners.get('message')({source:parent,origin:loc.origin,data:{type:'pacer:bridge-ready',version:1}});await Promise.resolve();await Promise.resolve()}else{el('key').value='synthetic-memory-key';await submit('signin')}
+  await new Promise(resolve=>setImmediate(resolve));
+  if(embedded){listeners.get('message')({source:parent,origin:loc.origin,data:{type:'pacer:bridge-ready',version:1}});await new Promise(resolve=>setImmediate(resolve))}
   return {el,calls,downloads,urls,revoked,submit,setHandle(fn){const old=handle;handle=(...args)=>fn(...args,old)},async load(){await submit('forward-form')},send(data,source=parent,origin=loc.origin){listeners.get('message')({source,origin,data})},close(){for(const [k,d]of originals){if(d)Object.defineProperty(globalThis,k,d);else delete globalThis[k]}}};
 }
 
 test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{timeout:10000},async t=>{
   await t.test('one pinned generation/filter survives status changes, editable filters, paging and raw CSV/JSON exports',async()=>{
-    const f=await fixture();try{
+    const f=await fixture(true);try{
       await f.load();assert.match(f.el('forward-summary').textContent,/\$7.25/);assert.match(f.el('forward-requests').textContent,/250000.*750000/);assert.match(f.el('forward-requests').textContent,/000000001 UTC/);const saved=f.el('forward-pin').textContent;
       f.el('forward-model').value='changed-control';f.setHandle((path,body,method,old)=>path.endsWith('/status')?{version,state:'snapshot_available',projected_through:'9223372036854775807',bootstrap_through:'0',latest_generation:nextHash,runtime:{state:'lagging',target_through:'9223372036854775807'}}:old(path,body,method));
       await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/9223372036854775807/);assert.equal(f.el('forward-pin').textContent,saved);
@@ -83,7 +86,7 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
       await f.el('forward-csv-next').click();assert.equal(f.calls.at(-1).body.cursor,'csv-next');assert.equal(f.calls.at(-1).body.limit,50);assert.deepEqual(f.calls.at(-1).body.pin,JSON.parse(saved));
       await f.el('forward-json').click();assert.equal(Buffer.from(await f.downloads.at(-1).blob.arrayBuffer()).toString(),'{"exact":true}\n');
       const evidenceButton=f.el('forward-requests').querySelectorAll('button')[0];await evidenceButton.click();assert(f.el('forward-evidence-dialog').open);assert.match(f.el('forward-evidence-body').textContent,/<img src=x>/);
-      f.el('disconnect').click();assert.equal(f.urls.size,0);assert.equal(f.el('forward-pin').textContent,'');assert(!f.el('forward-evidence-dialog').open);
+      f.send({type:'pacer:bridge-disconnected',version:1});assert.equal(f.urls.size,0);assert.equal(f.el('forward-pin').textContent,'');assert(!f.el('forward-evidence-dialog').open);
     }finally{f.close()}
   });
   await t.test('explicit membership clearing uses loaded string CAS, never editable revision or omitted arrays',async()=>{
@@ -96,7 +99,7 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
     }finally{f.close()}
   });
   await t.test('delayed disconnect/reload discard pending report and export results',async()=>{
-    const f=await fixture();try{await f.load();let release,entered;const ready=new Promise(resolve=>entered=resolve);f.setHandle(async(path,body,method,old)=>{if(path.endsWith('/export-json')){entered();await new Promise(resolve=>release=resolve)}return old(path,body,method)});const work=f.el('forward-json').click();await ready;const signal=f.calls.at(-1).signal;f.el('disconnect').click();assert(signal.aborted);release();await work;assert.equal(f.downloads.length,0);assert.equal(f.el('forward-pin').textContent,'');assert.equal(f.urls.size,0)}finally{f.close()}
+    const f=await fixture(true);try{await f.load();let release,entered;const ready=new Promise(resolve=>entered=resolve);f.setHandle(async(path,body,method,old)=>{if(path.endsWith('/export-json')){entered();await new Promise(resolve=>release=resolve)}return old(path,body,method)});const work=f.el('forward-json').click();await ready;f.send({type:'pacer:bridge-disconnected',version:1});release();await work;await new Promise(resolve=>setImmediate(resolve));assert.equal(f.downloads.length,0);assert.equal(f.el('forward-pin').textContent,'');assert.equal(f.urls.size,0)}finally{f.close()}
   });
   await t.test('new load cancels the old epoch; late pin/report cannot overwrite the newly captured generation',async()=>{
     const f=await fixture();try{
@@ -118,14 +121,14 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
       for(const envelope of [{...exported(),content:'YR=='},{...exported(),media_type:'text/html'},{...exported(),content:'a==='}]){f.setHandle((path,body,method,old)=>path.endsWith('/export-csv')?envelope:old(path,body,method));await f.el('forward-csv').click();assert.equal(f.downloads.length,1);}
     }finally{f.close()}
   });
-  await t.test('wrapped status uses exact quotes, optional runtime fields stay conservative and no refresh interval is scheduled',async()=>{
+  await t.test('wrapped status uses exact quotes and keeps optional runtime fields conservative',async()=>{
     const f=await fixture();try{
       f.setHandle((path,body,method,old)=>path.endsWith('/status')?{status:{version,projected_through:revision,bootstrap_through:'0',latest_generation:hash},runtime:{state:'paused',source_head:'9223372036854775807',target_through:revision,target_at:'2026-10-08T01:00:03.000000001Z',other:'ignored',unknown_counter:9007199254740992}}:old(path,body,method));
       await f.el('forward-status-load').click();assert.match(f.el('forward-status').textContent,/Paused/);assert.match(f.el('forward-status').textContent,/9223372036854775807/);assert.match(f.el('forward-status').textContent,/000000001 UTC/);assert(!f.el('forward-status').textContent.includes('ignored'));
     }finally{f.close()}
   });
   await t.test('actual publisher DTO shape retains exact sealed receipt independently of non-atomic ledger/target metadata',async()=>{
-    const f=await fixture();try{
+    const f=await fixture(true);try{
       await f.load();const saved=f.el('forward-pin').textContent;let status=publisherStatus();
       f.setHandle((path,body,method,old)=>path.endsWith('/status')?status:old(path,body,method));
       await f.el('forward-status-load').click();let text=f.el('forward-status').textContent;
@@ -138,7 +141,7 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
       assert.match(text,/Publisher snapshot: Lagging · active yes · phase seal/);assert.match(text,/Next target metadata: adapter target head 9223372036854775806 · publisher target T 2026-10-08 07:44:00\.000000001 UTC/);
       assert.equal(receipt.publisher.failures,'18446744073709551615');assert.equal(receipt.publisher.report_at,'2026-10-08T07:43:35.386974073Z');assert.equal(receipt.publisher.target_at,'2026-10-08T07:44:00.000000001Z');assert.equal(receipt.publisher.projected,revision);assert(!('future_metadata' in receipt.publisher));assert(!('unknown_counter' in receipt.runtime));
       assert.match(text,/Separate, non-atomic/);assert.match(text,/not published watermarks or record totals/);assert.equal(f.el('forward-pin').textContent,saved);
-      await f.el('forward-next').click();assert.deepEqual(f.calls.at(-1).body.pin,JSON.parse(saved));f.el('disconnect').click();assert.equal(f.el('forward-status-receipt').textContent,'');
+      await f.el('forward-next').click();assert.deepEqual(f.calls.at(-1).body.pin,JSON.parse(saved));f.send({type:'pacer:bridge-disconnected',version:1});assert.equal(f.el('forward-status-receipt').textContent,'');
     }finally{f.close()}
   });
   await t.test('publisher states/phases and fixed errors keep the prior pin available; initialization invents no sealed receipt',async()=>{
@@ -179,7 +182,7 @@ test('forward source UI contracts (fake DOM/transport; no browser acceptance)',{
         if(path.endsWith('/report'))return {...report(body.pin),totals:{...totals,valued_count:0,valued_subset:{...value,low_nano_usd:0,high_nano_usd:0},selection_value:null,reason_counts:{price_missing:1}}};
         if(path.endsWith('/requests'))return {pin:body.pin,rows:[{...evidence(body.pin),value:null,issues:['price_missing']}],next_cursor:''};
         return old(path,body,method);
-      });await f.load();assert.match(f.el('forward-summary').textContent,/valued 0 · unvalued 1 · selected API-equivalent Unknown/);assert.match(f.el('forward-requests').textContent,/Unknown/);assert(!f.el('forward-requests').textContent.includes('$'));assert.match(f.el('forward-reasons').textContent,/price missing/);
+      });await f.load();assert.match(f.el('forward-summary').textContent,/0 valued, 1 unvalued\. Value of the whole selection: Unknown/);assert.match(f.el('forward-requests').textContent,/Unknown/);assert(!f.el('forward-requests').textContent.includes('$'));assert.match(f.el('forward-reasons').textContent,/price missing/);
     }finally{f.close()}
   });
   await t.test('embedded unavailable never falls back and source/origin fences precede disconnect',async()=>{

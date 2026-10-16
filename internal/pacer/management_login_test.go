@@ -41,20 +41,21 @@ const settle=async()=>{for(let i=0;i<20;i++)await new Promise(r=>setImmediate(r)
 async function scenario(status, action){
   const nodes=new Map(), calls=[], messages=[];
   const element=()=>({value:'',hidden:false,children:[],options:[],dataset:{},style:{},
-    setAttribute(){},replaceChildren(){},append(){},close(){},reset(){},
+    setAttribute(){},replaceChildren(){},append(){},close(){},reset(){},addEventListener(){},
     querySelector(){return {}},querySelectorAll(){return []}});
   for(const m of html.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g))nodes.set(m[1],{...element(),hidden:/\bhidden\b/.test(m[0])});
   const el=id=>{assert(nodes.has(id),id);return nodes.get(id)};
-  let release, onMessage;
+  let release, onMessage, refreshInterval;
   const sandbox={console,setTimeout,clearTimeout,location:{origin:'https://fixture.invalid'},
-    document:{getElementById:el,querySelectorAll:()=>[],createElement:element},
+    setInterval(fn,ms){assert.equal(ms,30000);refreshInterval=fn;return 1},
+    document:{getElementById:el,querySelectorAll:()=>[],querySelector:()=>null,createElement:element,addEventListener(){}},
     fetch:async(path,opts)=>{
       calls.push({path,opts});
       assert.equal(path,'/v0/management/plugins/pacer/state');
       assert.equal(opts.redirect,'error');assert.equal(opts.cache,'no-store');
       assert.equal(opts.credentials,'same-origin');
       assert.equal(opts.headers.Authorization,undefined);
-      if(calls.length===1&&(action==='disconnect'||action==='bridge'))await new Promise(r=>release=r);
+      if(calls.length===1&&action==='bridge')await new Promise(r=>release=r);
       const code=calls.length===1?status:200;
       return {ok:code===200,status:code,json:async()=>({routing:{mode:'on',modes:['off','on'],providers:['claude']},accounts:[]})};
     }};
@@ -65,17 +66,16 @@ async function scenario(status, action){
   }}:sandbox.window;
   for(const k of ['localStorage','sessionStorage'])Object.defineProperty(sandbox,k,{get(){throw Error('credential persistence forbidden')}});
   vm.runInNewContext(script,sandbox,{timeout:5000});
-  if(action==='disconnect'){assert(release);el('disconnect').onclick();release()}
   if(action==='bridge'){
     assert(release);onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:bridge-ready',version:1}});release();
   }
   await settle();
   if(action==='iframe'||action==='bridge')assert.equal(messages[0].type,'pacer:hello');
-  if(action==='bridge'){assert.equal(el('workspace').hidden,false);assert.equal(el('message').hidden,true);assert(messages.some(m=>m.type==='pacer:request'));return}
+  if(action==='bridge'){assert.equal(el('workspace').hidden,false);assert.equal(el('message').hidden,true);assert(messages.some(m=>m.type==='pacer:request'));onMessage({source:sandbox.window.parent,origin:sandbox.location.origin,data:{type:'pacer:bridge-disconnected',version:1}});await refreshInterval();assert.equal(el('workspace').hidden,true);assert.equal(calls.length,1);return}
   assert.equal(calls.length,1,'exactly one automatic probe, no polling or duplicate state fetch');
-  const authorized=status===200&&action!=='disconnect';
+  const authorized=status===200;
   assert.equal(el('login').hidden,authorized);assert.equal(el('workspace').hidden,!authorized);
-  if(authorized){assert.equal(el('mode').value,'on');el('disconnect').onclick();await settle();assert.equal(calls.length,1);assert.equal(el('workspace').hidden,true)}
+  if(authorized){assert.equal(el('mode').value,'on');await refreshInterval();await settle();assert.equal(calls.length,2);assert.equal(el('workspace').hidden,false)}
   if(status!==200){
     assert.equal(el('message').hidden,false);
     assert.equal(el('reconnect').disabled,false);
@@ -84,5 +84,5 @@ async function scenario(status, action){
     assert.equal(el('login').hidden,true);assert.equal(el('workspace').hidden,false);
   }
 }
-(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'disconnect');await scenario(200,'iframe');await scenario(401,'iframe');await scenario(401,'bridge');console.log('PASS: proxy login, refusals, session retry, disconnect race, embedded proxy login and retry, legacy bridge race')})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await scenario(200);await scenario(401);await scenario(403);await scenario(500);await scenario(200,'iframe');await scenario(401,'iframe');await scenario(401,'bridge');console.log('PASS: proxy login, refusals, session retry, periodic refresh, embedded proxy login and retry, legacy bridge race and disconnect')})().catch(e=>{console.error(e);process.exitCode=1});
 `
