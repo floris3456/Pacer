@@ -13,6 +13,12 @@ import; it is not a current whole-SDK assertion. Native C ABI remains 1; schema-
 contracts were added subsequently. This is not a Go `-buildmode=plugin` module.
 Review per-file provenance and the ABI before updating this snapshot.
 
+`SNAPSHOT.json` pins the complete current tree, including the historical
+manifests. Run `python3 scripts/verify-sdk.py` from the repository root to verify
+it. An SDK change must update the applicable provenance notes and the snapshot;
+the verifier rejects changed, missing and unrecorded files. Historical import
+hashes are not compared with subsequently patched source files.
+
 `INVENTORY-PROVENANCE.json` records two additive files for the
 `host.auth.inventory_checkpoint` RPC (`sdk/pluginabi/auth_inventory.go`,
 `sdk/pluginapi/auth_inventory.go`). Both are byte-for-byte copies from CPA

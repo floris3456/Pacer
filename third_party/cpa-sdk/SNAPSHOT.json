@@ -1,0 +1,30 @@
+{
+  "scope": "Current mixed SDK tree; see README.md and the historical provenance manifests.",
+  "files": {
+    "AUTH-POOL-PROVENANCE.json": "a0d6428f4ced6bc0af1f8b0870886a38ad6a7b3d33051dfe0003dfc523d147da",
+    "INVENTORY-PROVENANCE.json": "baba54495e6310d9e9b77bea1ac4f59ca5c623a59961ceda49af66b670191acc",
+    "LICENSE": "879792e89cf1bdd6a8d446033ec87e30496f97dcafc4656dc53f641509b346a6",
+    "PHYSICAL-PROVENANCE.json": "633083e071257a111ae0a9b62745c26291cc576dfaf6d709305bec309d1a656a",
+    "PROVENANCE.json": "893f5d014755475cd259f1cea2a6f8fa24cd70ef1c59736e901c77d2a5c2c775",
+    "QUOTA-WINDOW-START-PROVENANCE.json": "cf8d4500e4ac7e9ab74463148c2aa15e06e34264fc2edfc2c6ab4b69908f4d6a",
+    "README.md": "a541d3083f26f82e56e64977a0814993f0717f8f815958aaa1c01d6ae8afa223",
+    "V8-PROVENANCE.json": "ad77dcd045e9407b19e62b253fd24f9002c17afa5f88db475812bd71dfa45a82",
+    "go.mod": "f3698986d0698ed59e23ee68af9915f165bc33f8e5b64f08aa7a756ce0a5e2af",
+    "sdk/pluginabi/auth_inventory.go": "806ab3f0264f96961969484468382d629d2bc8d5bfe3fb70f47f3f0e58c62926",
+    "sdk/pluginabi/cache_policy.go": "832c3719c2b7d30f78c00149a6b2c07e48c858196266b3dcf3c373ff2ca499c0",
+    "sdk/pluginabi/claude_replay.go": "dc125fc469694bbd70fc0547ca6f89986424bb6e7d86d77d504a1377dafcf643",
+    "sdk/pluginabi/codex_origin.go": "b22bdb77ea5bf9f7d427c24280d0a685a295f777decc61b3226b3fd4ee7ace7e",
+    "sdk/pluginabi/types.go": "eb99fe8ecb2a443dd58bd71e37985a47e440256b2d5867603687aaedac1fec36",
+    "sdk/pluginabi/types_test.go": "4f80bd39f76dc4e5297d6a542e0bfdb10c2034de973e06714c0bafb5a3ba24f7",
+    "sdk/pluginabi/usage_checkpoint.go": "0b64d1946b613241d83a08efecb112602a5d97be991ba12924f0f1ded80fbfb5",
+    "sdk/pluginapi/auth_inventory.go": "1183b0ddaccb416d94b213c81bb6819590345d3544843a55fe5e9dc675a4ae2c",
+    "sdk/pluginapi/cache_policy.go": "1eaa27e13f5c79494277c966842b0690b02ea168ab5c09f8012c4b0750f64802",
+    "sdk/pluginapi/claude_replay.go": "e57af0bcaada79afa30588e75bc117bb325b721b41b568ef825940217b512693",
+    "sdk/pluginapi/codex_origin.go": "6b7707ab607e0b6d2ed8b4e8f7e10578f10f21044733a80fcf571e31c0f72146",
+    "sdk/pluginapi/quota_window_start.go": "e4366538dec78664c8c127445291e0393a42e99f0a00054db3741fdf6fa9a55f",
+    "sdk/pluginapi/types.go": "eed742662382f5c5e356b5129874ce596c1eaf9d2440c8f7ff596f6d12e1c29f",
+    "sdk/pluginapi/types_test.go": "a64057dc69802fea6fc2566ececfdbb0934ca8ab96b22a7dbb070e93eddd5554",
+    "sdk/pluginapi/usage_checkpoint.go": "08a62c87777c245e80bc5b2b01e81de196b27f012f4a00a0fdf7e9c957b97398",
+    "sdk/pluginapi/usage_physical.go": "ca50a9997ddd6a6371f6aeb21fba4468b1399894e278e72917c7029e3a0c2a1b"
+  }
+}

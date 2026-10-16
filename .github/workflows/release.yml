@@ -23,11 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify SDK provenance and release version
         run: |
+          python3 scripts/verify-sdk.py
           python3 - <<'PY'
-          import hashlib, json, os, pathlib
-          root = pathlib.Path('third_party/cpa-sdk')
-          for path, digest in json.loads((root / 'PROVENANCE.json').read_text())['files'].items():
-              assert hashlib.sha256((root / path).read_bytes()).hexdigest() == digest, path
+          import os, pathlib
           version = pathlib.Path('VERSION').read_text().strip()
           assert f'Version: "{version}"' in pathlib.Path('internal/bridge/bridge.go').read_text()
           if os.environ['GITHUB_REF_TYPE'] == 'tag':
@@ -38,7 +36,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
             -e GOCACHE=/tmp/go-build -e GOPATH=/tmp/go \
             golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d \
-            sh -c 'go test -race ./... && (cd third_party/cpa-sdk && go test ./...) && sh scripts/build.sh'
+            sh -c 'go test -race -tags sqlite_fts5 ./... && go vet -tags sqlite_fts5 ./... && (cd third_party/cpa-sdk && go test ./...) && sh scripts/build.sh'
       - name: Package
         run: python3 scripts/package.py
       - uses: actions/upload-artifact@v4

@@ -3,16 +3,13 @@ package pacer
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -150,7 +147,7 @@ func forwardHTTPCheckHeaders(t *testing.T, r pluginapi.ManagementResponse) {
 	}
 }
 
-func TestForwardHTTPAdvertisementSDKProvenanceAndNoImplicitRegistration(t *testing.T) {
+func TestForwardHTTPAdvertisementAndNoImplicitRegistration(t *testing.T) {
 	for _, base := range []string{"", "/v0/management/plugins/pacer", "/v8/management/plugins/other", forwardV8Base + "/", forwardV8Base + "..suffix"} {
 		reg := pluginapi.ManagementRegistrationRequest{BasePath: forwardV8Base, PluginManagementBasePath: base}
 		if len(forwardV8Routes(reg, true)) != 0 {
@@ -197,56 +194,6 @@ func TestForwardHTTPAdvertisementSDKProvenanceAndNoImplicitRegistration(t *testi
 	var legacy pluginapi.ManagementRegistrationRequest
 	if err := json.Unmarshal([]byte(`{"BasePath":"/v0/management","ResourceBasePath":"/v0/resource/plugins/pacer"}`), &legacy); err != nil || len(forwardV8Routes(legacy, true)) != 0 {
 		t.Fatal("old host inferred v8")
-	}
-	root := "../../third_party/cpa-sdk"
-	var provenance struct {
-		Commit    string            `json:"commit"`
-		Files     map[string]string `json:"files"`
-		Preserved map[string]string `json:"preserved_manifests"`
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "V8-PROVENANCE.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(raw, &provenance); err != nil {
-		t.Fatal(err)
-	}
-	if provenance.Commit != "9af81eadc59475eba69de16f586b4fb555791515" || len(provenance.Files) != 1 || len(provenance.Preserved) != 2 || provenance.Files["sdk/pluginapi/types.go"] != "1c72f5459f04d9d9f81c25686999e7022b7d9935731259f4cb2e9ada2d5ac2de" {
-		t.Fatal("incorrect SDK source attestation")
-	}
-	var patch struct {
-		BaseManifest string            `json:"base_manifest"`
-		Files        map[string]string `json:"files"`
-	}
-	raw, err = os.ReadFile(filepath.Join(root, "AUTH-POOL-PROVENANCE.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(raw, &patch); err != nil {
-		t.Fatal(err)
-	}
-	if patch.BaseManifest != "V8-PROVENANCE.json" || len(patch.Files) != 1 || patch.Files["sdk/pluginapi/types.go"] != "eed742662382f5c5e356b5129874ce596c1eaf9d2440c8f7ff596f6d12e1c29f" {
-		t.Fatal("incorrect local SDK patch attestation")
-	}
-	for path, want := range patch.Files {
-		data, e := os.ReadFile(filepath.Join(root, path))
-		if e != nil {
-			t.Fatal(e)
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != want {
-			t.Fatal("SDK provenance mismatch", path)
-		}
-	}
-	for path, want := range provenance.Preserved {
-		data, e := os.ReadFile(filepath.Join(root, path))
-		if e != nil {
-			t.Fatal(e)
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != want {
-			t.Fatal("historical manifest changed", path)
-		}
 	}
 }
 
