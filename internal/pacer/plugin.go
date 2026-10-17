@@ -911,7 +911,14 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 				return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
 			}
 		}
-		key, history := t.keys(c.Provider, req.Model)
+		// For an alias, CPA's pick carries the alias and this hook the upstream
+		// model, with the alias as the requested one: the chat is bound under the
+		// name it was routed on. Any other model change stays a deviation.
+		model := req.Model
+		if t.Model != "" && req.RequestedModel == t.Model {
+			model = t.Model
+		}
+		key, history := t.keys(c.Provider, model)
 		kind := "primary"
 		if t.Claim != nil {
 			kind = t.Claim.Kind
@@ -920,12 +927,12 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 			// The history follows its chat's account, so the same history under a
 			// new name finds that account (rescueByHistory). Advisory: a failed
 			// write never refuses the request.
-			if err := p.chats.Follow(history, selectionIntent(t, c, req.Model)); err != nil {
+			if err := p.chats.Follow(history, selectionIntent(t, c, model)); err != nil {
 				p.metricError(err)
 			}
 		}
 		if key != "" && !managedAux {
-			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
+			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, model), t.Claim, gate)
 			if err != nil {
 				if e, yes := err.(*tracker.Refusal); yes {
 					p.recordDecision(req.RequestID, t, c, e.Code)

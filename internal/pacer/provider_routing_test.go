@@ -120,6 +120,32 @@ func TestAntigravityRoutesEachQuotaGroupByItsOwnPace(t *testing.T) {
 	}
 }
 
+// For an alias, CPA picks by the routed name and its after-hook carries the
+// upstream model. The chat is bound under the name it was placed by, so its
+// next turn stays on its account although another one has the better pace.
+func TestAliasChatStaysOnItsAccount(t *testing.T) {
+	f := newProviderFixture(t, "claude, antigravity")
+	f.meters(t, "g1", "antigravity", map[string][2]float64{"claude_gpt": {60, 40}})
+	f.meters(t, "g2", "antigravity", map[string][2]float64{"claude_gpt": {90, 85}})
+	first := f.providerRequest(t, "first", "gemini-opus-4-6-thinking", "review this")
+	if got := f.providerPick(t, first, "antigravity", "g1", "g2"); !got.Handled || got.AuthID != "g2" {
+		t.Fatalf("alias chat not placed: %+v", got)
+	}
+	upstream := first
+	upstream.Model, upstream.RequestedModel = "claude-opus-4-6-thinking", "gemini-opus-4-6-thinking"
+	if got := f.after(t, upstream, "g2"); got.Terminate {
+		t.Fatalf("alias chat refused: %s", got.ResponseBody)
+	}
+	f.complete(t, first.RequestID)
+	f.clock.Add(int64(time.Minute))
+	f.meters(t, "g1", "antigravity", map[string][2]float64{"claude_gpt": {95, 95}})
+	f.meters(t, "g2", "antigravity", map[string][2]float64{"claude_gpt": {70, 60}})
+	next := f.providerRequest(t, "next", "gemini-opus-4-6-thinking", "review this")
+	if got := f.providerPick(t, next, "antigravity", "g1", "g2"); !got.Handled || got.AuthID != "g2" || f.p.requests["next"].Decision.Reason != "warm" {
+		t.Fatalf("alias chat moved: %+v %+v", got, f.p.requests["next"].Decision)
+	}
+}
+
 // A provider that is not routed stays CPA's: no placement, no binding.
 func TestUnroutedUsageOnlyProviderStaysCPAs(t *testing.T) {
 	f := newProviderFixture(t, "claude")
