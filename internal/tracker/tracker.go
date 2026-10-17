@@ -135,16 +135,39 @@ func (s *Store) Get(key string) (Binding, bool, error) {
 	return b, active, err
 }
 
-func (s *Store) Seed(key string, c Selection) error {
+// Seed binds a chat new to Pacer that is known to have run recently on an
+// account (CPA's affinity, or its warm history), consuming checkpoint.
+func (s *Store) Seed(key string, c Selection, checkpoint string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, err := s.read(key)
 	if err != nil || b.Key != "" {
 		return err
 	}
-	// CPA's affinity binding means the chat ran recently: its warmth is unknown
-	// from now, not from an unknown past.
-	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true, LastUsed: s.now()})
+	// The chat ran recently: its warmth is unknown from now, not from an unknown past.
+	return s.save(Binding{Key: key, Auth: c.Auth, Account: c.Account, Alias: c.Alias, Provider: c.Provider, Model: c.Model, Generation: 1, UnknownWarmth: true, LastUsed: s.now(), Consumed: checkpoint})
+}
+
+// Follow records where a chat's history went: the binding of its history key
+// takes the selected account. It has no cache evidence of its own, so it is
+// warm by time from its last use, and a move starts a new generation.
+func (s *Store) Follow(key string, c Selection) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := s.read(key)
+	if err != nil {
+		return err
+	}
+	if b.Key == "" {
+		b = Binding{Key: key, Generation: 1}
+	}
+	if b.Account != "" && b.Account != c.Account {
+		b.Generation++
+		b.ProtectedUntil = time.Time{}
+	}
+	b.Auth, b.Account, b.Alias, b.Provider, b.Model = c.Auth, c.Account, c.Alias, c.Provider, c.Model
+	b.UnknownWarmth, b.LastUsed = true, s.now()
+	return s.save(b)
 }
 
 // Admit runs before the selected account receives a byte. A cold optimization

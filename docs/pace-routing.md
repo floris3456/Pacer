@@ -83,6 +83,24 @@ Pacer decides only when the prompt cache is cold on every account, or the curren
 A cold move needs no compaction and costs nothing extra: the cache must be rebuilt on any account.
 Pinning warm chats also stops CPA from moving them.
 
+## Recognizing a chat
+
+A chat is named by the client's claim (`X-Quota-Handoff`) or a session header. Its history also
+identifies it: the request format, tools, system prompt and first user message, within one CPA API
+key, provider and model (cache markers are left out; they move between requests). Every later request
+of the chat repeats that start, because it is what the provider's prompt cache reads.
+
+- A request that names no chat goes by its history: placed by pace when new, kept on its account
+  while warm, like any chat. This covers every client and request format CPA reports (`claude`,
+  `openai`, `openai-response`/`codex`, `gemini`); a Responses request continuing a stored response
+  (`previous_response_id`) carries no history and stays CPA's.
+- The history follows its chat's account (primary requests and warming pings). A chat whose name is
+  new but whose history is warm on an account (a fork, a client restart, another name for the same
+  conversation) is seeded there and stays: a rescue. A forced move is still Pacer's decision (the
+  account is at a floor or not offered), never the client's.
+- Two chats that open with the same system prompt, tools and first message share the history key.
+  They also share that cache prefix, so keeping them together costs nothing.
+
 ## Safety without dry-run
 
 - Every refusal path falls back to CPA (`Handled:false`); missing evidence is never zero usage.

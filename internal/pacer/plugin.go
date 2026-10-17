@@ -66,11 +66,13 @@ type attempt struct {
 	Model, PreviousAccount     string
 	Claim                      *tracker.Claim
 	Caller, Session, Key, Auth string
-	Headers                    http.Header
-	Decision                   routing.Decision
-	RoutingChoice              pluginapi.SchedulerPickResponse
-	RoutingProvider            string
-	Binding                    tracker.Binding
+	// History is the request's history start (historyKey), "" without one.
+	History         string
+	Headers         http.Header
+	Decision        routing.Decision
+	RoutingChoice   pluginapi.SchedulerPickResponse
+	RoutingProvider string
+	Binding         tracker.Binding
 	// Client is what this request's client declared (X-Pacer-Client); Served
 	// is the credential CPA picked, kept when the client asked for quota.
 	Client      clientCaps
@@ -505,8 +507,9 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 		if q != nil && caller == "" {
 			return refuse("quota_identity_missing", "Quota routing requires authenticated caller identity"), nil
 		}
+		history := historyKey(req.SourceFormat, req.Body)
 		p.mu.Lock()
-		p.requests[req.RequestID] = attempt{Claim: q, Caller: caller, Session: session(req.Headers, req.Metadata), Headers: req.Headers, Client: clientDeclaration(req.Headers)}
+		p.requests[req.RequestID] = attempt{Claim: q, Caller: caller, Session: session(req.Headers, req.Metadata), History: history, Headers: req.Headers, Client: clientDeclaration(req.Headers)}
 		p.mu.Unlock()
 		return pluginapi.RequestInterceptResponse{Headers: http.Header{requestHeader: {req.RequestID}}}, nil
 	case pluginabi.MethodSchedulerPick:
@@ -596,6 +599,8 @@ func (p *Plugin) Handle(method string, raw []byte) (any, error) {
 // Primary requests and compactions are routed; other auxiliaries are left to
 // CPA. Warm chats stay on their account; a compaction never rebinds the chat.
 // When routing is off, CPA places chats, but a bound chat stays on its account.
+// A chat is known by its claim or session, else by its history (historyKey),
+// and a new name with a warm history stays where that history is warm.
 func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPickResponse {
 	p.mu.Lock()
 	cfg := p.cfg
@@ -651,13 +656,20 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		// affinity a restart cleared, and a warm chat would be moved.
 		p.discover(true)
 	}
-	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
+	key, history := t.keys(provider, req.Model)
 	if key == "" {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	b, active, err := p.chats.Get(key)
 	if err != nil {
 		return pluginapi.SchedulerPickResponse{}
+	}
+	if b.Key == "" && history != key {
+		// A chat new by its name but with a history warm on an account (a fork,
+		// a client restart) stays where that cache is.
+		if b, active, err = p.rescueByHistory(key, history, provider, req.Model, t.Claim); err != nil {
+			return pluginapi.SchedulerPickResponse{}
+		}
 	}
 	if kind == "compaction" && b.Key == "" {
 		return pluginapi.SchedulerPickResponse{}
@@ -675,7 +687,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 			p.mu.Lock()
 			for _, c := range p.creds {
 				if c.Index == affinity.AuthIndex {
-					err = p.chats.Seed(key, tracker.Selection{Auth: c.ID, Account: c.Account, Alias: c.Alias, Provider: provider, Model: req.Model})
+					err = p.chats.Seed(key, tracker.Selection{Auth: c.ID, Account: c.Account, Alias: c.Alias, Provider: provider, Model: req.Model}, "")
 					break
 				}
 			}
@@ -735,6 +747,34 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	return t.RoutingChoice
 }
 
+// rescueByHistory seeds a chat that is new by its key with the account where its
+// history is warm, and returns the chat's binding: still empty without a warm
+// history on this provider and model. The same history start is the same
+// prefix, so the chat continues from its claimed checkpoint, warm.
+func (p *Plugin) rescueByHistory(key, history, provider, model string, q *tracker.Claim) (tracker.Binding, bool, error) {
+	if history == "" {
+		return tracker.Binding{}, false, nil
+	}
+	h, active, err := p.chats.Get(history)
+	if err != nil {
+		return tracker.Binding{}, false, err
+	}
+	p.mu.Lock()
+	warmFor := p.settings.warmFor()
+	p.mu.Unlock()
+	if h.Key == "" || h.Provider != provider || h.Model != model || !warm(h, active, p.now(), warmFor) {
+		return tracker.Binding{}, false, nil
+	}
+	checkpoint := ""
+	if q != nil {
+		checkpoint = q.Checkpoint
+	}
+	if err = p.chats.Seed(key, tracker.Selection{Auth: h.Auth, Account: h.Account, Alias: h.Alias, Provider: provider, Model: model}, checkpoint); err != nil {
+		return tracker.Binding{}, false, err
+	}
+	return p.chats.Get(key)
+}
+
 // pinToChat keeps a request on the chat's model on the chat's account, where
 // it reads and renews the chat's prompt cache. With routing on it holds the
 // auxiliaries (a warming ping, a generation from the chat's context,
@@ -745,7 +785,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 // It never places or rebinds a chat: without a binding on this model, or when
 // CPA does not offer the chat's account, CPA decides.
 func (p *Plugin) pinToChat(id string, t attempt, req pluginapi.SchedulerPickRequest, provider, reason string) pluginapi.SchedulerPickResponse {
-	key := chatKey(t.Caller, provider, req.Model, t.Session, t.Claim)
+	key, _ := t.keys(provider, req.Model)
 	if key == "" {
 		return pluginapi.SchedulerPickResponse{}
 	}
@@ -868,7 +908,19 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
 			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
 		}
-		key := chatKey(t.Caller, c.Provider, req.Model, t.Session, t.Claim)
+		key, history := t.keys(c.Provider, req.Model)
+		kind := "primary"
+		if t.Claim != nil {
+			kind = t.Claim.Kind
+		}
+		if history != key && !managedAux && (kind == "primary" || kind == "generate") {
+			// The history follows its chat's account, so the same history under a
+			// new name finds that account (rescueByHistory). Advisory: a failed
+			// write never refuses the request.
+			if err := p.chats.Follow(history, selectionIntent(t, c, req.Model)); err != nil {
+				p.metricError(err)
+			}
+		}
 		if key != "" && !managedAux {
 			b, err := p.chats.Admit(req.RequestID, key, selectionIntent(t, c, req.Model), t.Claim, gate)
 			if err != nil {
