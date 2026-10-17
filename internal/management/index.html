@@ -1049,10 +1049,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
   function profileWindowPicker(profile){
     const details=document.createElement('section');details.className='usage-window-picker';details.dataset.profile=profile.reference;details.setAttribute('aria-label',profile.name+' window selection');
-    const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
+    // Without a selection of its own a profile counts its latest windows, and keeps following them after a reset.
+    const windows=usageWindowLists.get(profile.reference)||[],chosen=new Set(usageProfileSelection.get(profile.reference)||windows.filter(w=>w.latest).map(w=>w.id));
     const controls=document.createElement('div');controls.className='usage-window-controls';
-    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true)};
-    controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
+    const save=async ids=>{if(ids)usageProfileSelection.set(profile.reference,ids);else usageProfileSelection.delete(profile.reference);await loadUsage(true)};
+    const all=button('Select all',()=>save(new Set(windows.map(w=>w.id))));all.disabled=!usageWindowLists.has(profile.reference);
+    controls.append(all,button('Select latest',()=>save()),button('Deselect all',()=>save(new Set())));
     if(profile.polling_seconds)controls.append(profilePollingControl(profile));
     details.append(controls);
     const list=document.createElement('div');list.className='usage-window-options';
@@ -1065,7 +1067,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       for(const w of windows.filter(w=>w.kind===pool.kind&&w.scope===pool.scope)){
       const label=document.createElement('label');label.className='usage-window-option';
       label.title=shortAccount(w.label)+' · '+windowSpan(w)+(w.excluded?' · excluded from rates':'');
-      const cb=document.createElement('input');cb.type='checkbox';cb.checked=w.latest||chosen.has(w.id);cb.disabled=w.latest;
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=chosen.has(w.id);
       cb.setAttribute('aria-label',label.title+(w.latest?' · Latest':''));
       const text=span('','usage-window-text');
       if(profile.credentials>1)text.append(span(shortAccount(w.label),'usage-window-account'));
@@ -1075,7 +1077,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const change=span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change');
       if(w.latest||w.excluded)change.append(span(w.latest?'Latest':'Excluded','usage-window-badge'));
       text.append(change);
-      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
+      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save(chosen)};
       label.append(cb,text);category.append(label);
       }
       list.append(category);

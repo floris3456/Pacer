@@ -137,39 +137,53 @@ func TestCompareWindowSelectionUsesExistingRateRules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ids := []string{}
-		ex := Exclusions{p.Reference: {}}
+		ids, latest, older := []string{}, []string{}, []string{}
+		onlyLatest, onlyOlder, none := Exclusions{p.Reference: {}}, Exclusions{p.Reference: {}}, Exclusions{p.Reference: {}}
 		for _, w := range list.Windows {
 			ids = append(ids, w.ID)
-			if !w.Latest {
-				ex[p.Reference][w.ID] = "selection control"
+			none[p.Reference][w.ID] = "selection control"
+			if w.Latest {
+				latest = append(latest, w.ID)
+				onlyOlder[p.Reference][w.ID] = "selection control"
+			} else {
+				older = append(older, w.ID)
+				onlyLatest[p.Reference][w.ID] = "selection control"
 			}
 		}
-		selected, err := r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: {}}}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		control, err := r.Compare(ctx, CompareQuery{}, ex)
-		if err != nil {
-			t.Fatal(err)
-		}
-		all, err := r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: ids}}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, profile := range full.Profiles {
-			for j, pool := range profile.Pools {
-				if selected.Profiles[i].Pools[j].Average.DeltaPP != control.Profiles[i].Pools[j].Average.DeltaPP {
-					t.Fatal("selection differs from established normalization")
+		// A selection counts the same windows as excluding all the others; every
+		// window stays listed and the latest one stays shown either way.
+		same := func(name string, q CompareQuery, control Exclusions, onlyThis bool) {
+			t.Helper()
+			selected, err := r.Compare(ctx, q, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := r.Compare(ctx, CompareQuery{}, control)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, profile := range want.Profiles {
+				if onlyThis && profile.Reference != p.Reference {
+					continue
 				}
-				if all.Profiles[i].Pools[j].Average.DeltaPP != pool.Average.DeltaPP {
-					t.Fatal("select all changed normalization")
-				}
-				if selected.Profiles[i].Pools[j].Windows != pool.Windows {
-					t.Fatal("selection discarded history")
+				for j, pool := range profile.Pools {
+					got := selected.Profiles[i].Pools[j]
+					if got.Average.Status != pool.Average.Status || got.Average.DeltaPP != pool.Average.DeltaPP || got.Average.Samples != pool.Average.Samples {
+						t.Fatalf("%s: selection differs from established normalization", name)
+					}
+					if got.Windows != full.Profiles[i].Pools[j].Windows || (got.Latest == nil) != (full.Profiles[i].Pools[j].Latest == nil) {
+						t.Fatalf("%s: selection discarded history", name)
+					}
 				}
 			}
 		}
+		// LatestOnly also limits the other profiles, so only this one is compared.
+		same("latest only", CompareQuery{LatestOnly: true}, onlyLatest, true)
+		same("latest listed", CompareQuery{SelectedWindows: map[string][]string{p.Reference: latest}}, onlyLatest, false)
+		same("latest left out", CompareQuery{SelectedWindows: map[string][]string{p.Reference: older}}, onlyOlder, false)
+		same("latest left out with latest only", CompareQuery{LatestOnly: true, SelectedWindows: map[string][]string{p.Reference: older}}, onlyOlder, true)
+		same("select all", CompareQuery{SelectedWindows: map[string][]string{p.Reference: ids}}, nil, false)
+		same("deselect all", CompareQuery{SelectedWindows: map[string][]string{p.Reference: {}}}, none, false)
 		_, err = r.Compare(ctx, CompareQuery{SelectedWindows: map[string][]string{p.Reference: {"not-a-window"}}}, nil)
 		if !errors.Is(err, ErrInput) {
 			t.Fatal("unknown selection accepted", err)

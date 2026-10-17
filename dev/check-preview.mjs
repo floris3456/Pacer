@@ -83,16 +83,21 @@ try{
   assert.equal(await chat.locator('.usage-meters').count(),0);
   const boxes=chat.locator('.usage-window-option input');
   await boxes.first().waitFor();
-  assert(await chat.locator('.usage-window-option input:disabled:checked').count()>0);
-  assert.equal(await chat.locator('.usage-window-option input:enabled:checked').count(),0);
+  // Without a selection of its own the profile counts its latest windows; they are ordinary choices.
+  assert.equal(await chat.locator('.usage-window-option input:disabled').count(),0);
+  const latest=await chat.locator('.usage-window-option input:checked').count();
+  assert(latest>0,'Latest windows start selected');
+  const checked=n=>page.waitForFunction(n=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.textContent.includes('ChatGPT Pro 20x'));return c&&c.querySelectorAll('.usage-window-option input:checked').length===n},n);
+  const total=await boxes.count();
   const changedWindows=page.waitForResponse(r=>r.url().endsWith('/usage/profiles')&&r.request().postDataJSON()?.selected_windows&&Object.values(r.request().postDataJSON().selected_windows).some(v=>v.length));
   await chat.getByRole('button',{name:'Show more windows',exact:true}).click();
-  await chat.locator('.usage-window-option input:enabled').first().check();assert.equal((await changedWindows).status(),200);
-  await chat.getByRole('button',{name:'Select all',exact:true}).click();
-  await page.waitForFunction(()=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.textContent.includes('ChatGPT Pro 20x'));return c&&c.querySelectorAll('.usage-window-option input:enabled:not(:checked)').length===0});
-  await chat.getByRole('button',{name:'Deselect all',exact:true}).click();
-  await page.waitForFunction(()=>{const c=[...document.querySelectorAll('.usage-card')].find(c=>c.textContent.includes('ChatGPT Pro 20x'));return c&&c.querySelectorAll('.usage-window-option input:enabled:checked').length===0});
-  assert(await chat.locator('.usage-window-option input:disabled:checked').count()>0);
+  await chat.locator('.usage-window-option input:not(:checked)').first().check();assert.equal((await changedWindows).status(),200);
+  await chat.getByRole('button',{name:'Select all',exact:true}).click();await checked(total);
+  await chat.getByRole('button',{name:'Deselect all',exact:true}).click();await checked(0);
+  // Select latest drops the profile's own selection, so it follows its latest windows again.
+  const followLatest=page.waitForResponse(r=>r.url().endsWith('/usage/profiles')&&!Object.values(r.request().postDataJSON()?.selected_windows||{}).length);
+  await chat.getByRole('button',{name:'Select latest',exact:true}).click();
+  assert.equal((await followLatest).status(),200);await checked(latest);
   const polling=page.getByLabel('ChatGPT Pro 20x polling minutes');
   const original=await polling.inputValue();
   const changed=original==='60'?'120':'60';
