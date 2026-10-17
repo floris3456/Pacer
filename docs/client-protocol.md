@@ -187,11 +187,17 @@ session, is never returned. An unknown capability is 401.
 
 `read`, `written` and `uncached` are the provider's own counts. `prefix` is present for Claude
 requests: one tag per cache marker in final-wire order, covering the prompt up to that marker
-after CPA's own changes, and `settings` for the request settings that also key the cache. Tags
-are the first 16 hex characters of CPA's content-free HMACs. They compare only between requests
-with the same `key`; a CPA restart rotates it. When the previous request read or wrote up to a
-marker and this one misses, the first marker whose tag changed names what changed; equal tags
-mean the provider lost the entry. ChatGPT reports no cache writes and CPA no markers for it, so
+after CPA's own changes, and `settings` for the request settings CPA records with the prefix (it
+can change without the cache missing). Tags are the first 16 hex characters of CPA's content-free
+HMACs. They compare only between requests with the same `key`; a CPA restart rotates it.
+
+A marker's position is not part of the response, and the last marker moves to the end of the
+prompt every request, so its tag changes even when nothing else did. Compare tags by value, not by
+index. A tools or system tag that changed means that part changed. A messages tag that stayed the
+same over two requests sits at a fixed place, and when it changes the messages before it changed.
+When a request carries the previous request's last tag, it resent the whole cached prompt, and a
+miss means the provider lost the entry. Otherwise the newest messages cannot be compared from tags
+alone. ChatGPT reports no cache writes and CPA no markers for it, so
 its requests carry counts only. `account` is the account's alias, when it has one.
 
 `limit` (1–500, default 100) bounds a page. `more:true` means older requests remain; pass the
