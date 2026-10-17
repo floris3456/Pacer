@@ -1,6 +1,6 @@
-"""Pacer Phase 1+2 on CT104: Pacer replaces quota-handoff 0.1.5-local.1 (routing dry-run).
+"""Pacer Phase 1+2 on CT104: Pacer replaces quota-handoff 0.1.5-local.2 (routing dry-run).
 
-CPA must run the pacer-boundary host (9f332564), so this swaps the CPA image as well as
+CPA must run the pacer-boundary host (71fb2ac4), so this swaps the CPA image as well as
 the plugin. Server phases run on CT104 with this script on stdin; nothing secret is printed:
 
   ssh <pve> 'pct exec 104 -- python3 -B - recon'                          < phase1.py
@@ -65,7 +65,7 @@ def env(name, default):
     return os.environ.get('PHASE1_' + name, default)
 
 
-TAG = 'pacer-phase1-0efd99c-9f332564'
+TAG = 'pacer-phase1-0efd99c-71fb2ac4-qh2'
 ROOT = Path(env('ROOT', '/opt/cliproxyapi'))
 RELEASE = Path(env('RELEASE', str(ROOT / 'releases' / TAG)))
 BACKUP = Path(env('BACKUP', str(ROOT / 'backups' / TAG)))
@@ -73,7 +73,7 @@ CONFIG = ROOT / 'config.yaml'
 COMPOSE = ROOT / 'docker-compose.yml'
 PLUGINS = ROOT / 'plugins'
 LIBDIR = PLUGINS / 'linux' / 'amd64'
-QH_LIB = LIBDIR / 'quota-handoff-v0.1.5-local.1.so'
+QH_LIB = LIBDIR / 'quota-handoff-v0.1.5-local.2.so'
 QH_STATE = PLUGINS / 'quota-handoff' / 'state.sqlite'
 PACER_LIB = LIBDIR / 'pacer-v0.2.0-dev.so'
 PACER_DIR = PLUGINS / 'pacer'
@@ -96,7 +96,7 @@ OTHERS_PREFIX = env('OTHERS_PREFIX', '')
 CPA_URL = env('CPA_URL', 'http://127.0.0.1:8317')
 PUBLIC_URL = env('PUBLIC_URL', 'https://cliproxy.boe.moe')
 OLD_IMAGE = env('OLD_IMAGE', 'cliproxyapi-opus55:20261007-13')
-NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-9f332564')
+NEW_IMAGE = env('NEW_IMAGE', 'cliproxyapi-opus55:pacer-71fb2ac4')
 PLATFORM = env('PLATFORM', '')
 DOCKER_PREFIX = env('DOCKER_PREFIX', 'pacer-phase1')
 SQLITE_IMAGE = env('SQLITE_IMAGE', '')
@@ -111,18 +111,18 @@ REHEARSAL = env('REHEARSAL', '0') == '1'
 INJECT = env('INJECT_FAIL', '')
 ALLOW_NO_YAML = env('ALLOW_NO_YAML', '0') == '1'
 
-QH_VERSION = '0.1.5-local.1'
+QH_VERSION = '0.1.5-local.2'
 PACER_VERSION = '0.2.0-dev'
 LEGACY_EVENTS = '/v0/resource/plugins/quota-handoff/events'
 PACER_EVENTS = '/v0/resource/plugins/pacer/events'
 TIMER = 'pacer-dry-run-daily.timer'
 UNIT_SERVICE = 'pacer-dry-run-daily.service'
 SOURCES = {'pacer': '0efd99c26b1568fe9b82bf1bed34977ca11b1487',
-           'cpa': '9f332564b5fddb12b9a524a7338952df18b72f1e'}
-PINS = {'image/CLIProxyAPI': '7df161d07f36ce54c2efc6698f168fe33652007f15ebd9a4ab4e03e5b63ad029',
+           'cpa': '71fb2ac4c01cea3676e765a01c8b5d8dfb1011bf'}
+PINS = {'image/CLIProxyAPI': '9eea70f35675070ada63ce5e62062b0e07581c6a38b4019fffed7c5826d53880',
         'pacer-v0.2.0-dev.so': 'cf137cdaa6c8a1126df13c5f0a9fc858da204f7df2a5f918d80999ce1291b010',
         'pacer-state': '80c30903018a62791131afce3b86b04007694f9d1fbf0d6b164c1a7ecd4421dd',
-        'quota-handoff-v0.1.5-local.1.so': 'f40daa696d97a9ef70b5f180a74faeaf2b3ce0c4f333027bf8a214b8f2127c40'}
+        'quota-handoff-v0.1.5-local.2.so': '176f68a8ce34db0f35bc30372d15bddd4348978a3905b6cd916d8a6a40a3343f'}
 DEPLOY_SCRIPTS = ('cutover_v8', 'deploy-discover', 'deploy-compact-on-switch', 'deploy-public-plugin',
                   'deploy-shadow', 'mute-notifications', 'deploy-quota-usage-ct104', 'deploy-profile-keys-ct104',
                   'deploy-model-settings-ct104')
@@ -880,6 +880,14 @@ def recon(args):
     return EXIT_OK
 
 
+def stage_reserve():
+    # Free space already excludes retained reports/images. Reserve their bytes
+    # only if they will be created, plus the same full report-sized growth margin.
+    report_bytes = (RELEASE / 'reports.sqlite').stat().st_size
+    return (report_bytes + (0 if PACER_REPORTS.exists() else report_bytes)
+            + (0 if image_id(NEW_IMAGE) else (RELEASE / 'image/CLIProxyAPI').stat().st_size))
+
+
 def stage(args):
     guard_rehearsal()
     require_yaml()
@@ -888,7 +896,7 @@ def stage(args):
     m = manifest()
     r = {'phase': 'stage', 'started': now(), 'routing_mode': args.routing_mode, 'manifest_files': m['files']}
     # Keep room for the staged report copy, usage-record growth and the CPA image.
-    reserve = 2 * (RELEASE / 'reports.sqlite').stat().st_size + (RELEASE / 'image/CLIProxyAPI').stat().st_size
+    reserve = stage_reserve()
     if shutil.disk_usage(ROOT).free - reserve < 1.5 * 2**30:
         raise Refused('less than 1.5 GiB would remain after staging and usage-record reserve')
     p = process()
@@ -900,7 +908,7 @@ def stage(args):
         raise Refused('quota-handoff %s is not the registered incumbent' % QH_VERSION)
     if 'pacer' in pl or PACER_LIB.exists():
         raise Refused('a Pacer plugin is already present')
-    if digest(QH_LIB) != PINS['quota-handoff-v0.1.5-local.1.so']:
+    if digest(QH_LIB) != PINS[QH_LIB.name]:
         raise Refused('live quota-handoff library differs from the pinned rollback artifact')
     if not snippet_imported():
         raise Refused('Caddyfile does not import the quota-handoff snippet')
@@ -1394,7 +1402,7 @@ def bundle(args):
     (out / 'image').mkdir(parents=True, exist_ok=True)
     (out / 'systemd').mkdir(exist_ok=True)
     sources = {'image/CLIProxyAPI': Path(args.cpa_binary), 'pacer-v0.2.0-dev.so': Path(args.pacer_dist) / 'pacer-v0.2.0-dev.so',
-                'pacer-state': Path(args.pacer_dist) / 'pacer-state', 'quota-handoff-v0.1.5-local.1.so': Path(args.qh_lib),
+                'pacer-state': Path(args.pacer_dist) / 'pacer-state', QH_LIB.name: Path(args.qh_lib),
                 'reports.sqlite': Path(args.reports), 'forward-book.json': Path(args.book_json),
                 'dry-run-daily.py': here / 'dry-run-daily.py', 'phase1.py': here / 'phase1.py'}
     if not re.fullmatch(r'[a-f0-9]{64}', args.book_digest):
