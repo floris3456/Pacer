@@ -156,5 +156,5 @@ try{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:'/evidence/preview-mobile.png',fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log(`PASS: real preview; ${geminiMeters} Gemini meters across ${gp.active_credentials} accounts; combined arithmetic; single-account rows hidden; latest-pinned multi-selection; automatic refresh; persisted polling; dummy keys/models; atomic profile creation with an account; profile/login navigation; mobile fit.`);
+  console.log(`PASS: real preview; ${geminiMeters} Gemini meters across ${gp.active_credentials} accounts; combined arithmetic; single-account rows hidden; latest windows as ordinary choices with Select latest; automatic refresh; persisted polling; dummy keys/models; atomic profile creation with an account; profile/login navigation; mobile fit.`);
 }finally{await browser.close()}
