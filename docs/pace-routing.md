@@ -101,6 +101,22 @@ of the chat repeats that start, because it is what the provider's prompt cache r
 - Two chats that open with the same system prompt, tools and first message share the history key.
   They also share that cache prefix, so keeping them together costs nothing.
 
+## Providers
+
+`routing.providers` (and the page's Providers setting) may name `claude`, `codex`, `antigravity` and
+`opencode-go`. Providers not named stay CPA's: no placement and no binding.
+
+- Claude and Codex: meters from reply headers and their usage endpoints, as before.
+- Antigravity: each account has two quota groups, Gemini and "Claude and GPT", with a 5-hour and a
+  weekly bucket each (`retrieveUserQuotaSummary`, read every 30 minutes). A request is paced by the
+  group of its model. Claude and GPT markers in the name decide before a `gemini` prefix, because
+  routed names can be aliases (`gemini-opus-4-6-thinking` is Claude Opus).
+- OpenCode Go: 5-hour, weekly and monthly windows per key. The monthly window paces like the weekly
+  one, over its own reset.
+- Antigravity and OpenCode Go accounts come from Pacer's usage-only inventory (one account per
+  credential). Their usage keeps its own record path; they never enter coverage or the forward
+  ledger. They have no cache-read evidence, so their chats are warm by time (`warm_minutes`).
+
 ## Safety without dry-run
 
 - Every refusal path falls back to CPA (`Handled:false`); missing evidence is never zero usage.

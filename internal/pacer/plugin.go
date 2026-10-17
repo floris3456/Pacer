@@ -192,7 +192,7 @@ func (p *Plugin) configure(raw []byte) (any, error) {
 		cfg.Routing.Providers = []string{"claude"}
 	}
 	for _, provider := range cfg.Routing.Providers {
-		if provider != "claude" && provider != "codex" {
+		if !routableProvider(provider) {
 			return nil, errors.New("unsupported routing provider")
 		}
 	}
@@ -646,7 +646,7 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 	p.mu.Lock()
 	unknown := false
 	for _, candidate := range req.Candidates {
-		_, known := p.creds[candidate.ID]
+		_, _, known := p.routingCredLocked(candidate.ID)
 		unknown = unknown || !known
 	}
 	p.mu.Unlock()
@@ -823,7 +823,7 @@ func (p *Plugin) chatCredential(req pluginapi.SchedulerPickRequest, b tracker.Bi
 	auth, unknown := "", false
 	candidates := make([]credential, 0, len(req.Candidates))
 	for _, candidate := range req.Candidates {
-		c, ok := p.creds[candidate.ID]
+		c, _, ok := p.routingCredLocked(candidate.ID)
 		if !ok {
 			unknown = true
 			continue
@@ -876,7 +876,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 	auth := text(req.Metadata, "selected_auth_id")
 	p.mu.Lock()
 	t, ok := p.requests[req.RequestID]
-	c, known := p.creds[auth]
+	c, usageOnly, known := p.routingCredLocked(auth)
 	gate := p.cfg.CompactOnSwitch
 	selectedPolicy, managed := p.selections[req.RequestID]
 	managedAux := managed && selectedPolicy.Kind != "primary"
@@ -886,7 +886,7 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		// its local inventory on a newly selected ID; never call analytics here.
 		p.discover(true)
 		p.mu.Lock()
-		c, known = p.creds[auth]
+		c, usageOnly, known = p.routingCredLocked(auth)
 		p.mu.Unlock()
 	}
 	if ok && !known && (managed || t.Claim != nil) {
@@ -905,8 +905,11 @@ func (p *Plugin) after(req pluginapi.RequestInterceptRequest) pluginapi.RequestI
 		}
 	}
 	if ok && known {
-		if err := p.captureUsageCredential(req.RequestID, c); err != nil {
-			return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
+		// A routed usage-only provider's usage is recorded on its own path.
+		if !usageOnly {
+			if err := p.captureUsageCredential(req.RequestID, c); err != nil {
+				return refuse("quota_state_unavailable", "Pacer usage attribution could not be recorded")
+			}
 		}
 		key, history := t.keys(c.Provider, req.Model)
 		kind := "primary"
