@@ -190,6 +190,75 @@ func TestTiesBreakOnLowestAuth(t *testing.T) {
 	want(t, pick(Chat{Account: "acct-a"}, b, a, alias), "0-alias", ColdStay, false)
 }
 
+// shared is the account-wide ("all") 7-day meter the measured $ per 1 % values.
+func shared(left float64, in time.Duration) Budget {
+	b := weekly(left, in)
+	b.Scope = "all"
+	return b
+}
+
+func measured(a Account, usdPerPercent float64) Account {
+	a.USDPerPercent = usdPerPercent
+	return a
+}
+
+// CT104, 18 Oct: minke (Max 20x, ~$24 per 1 %) and ilse (Pro, ~$2.9 per 1 %)
+// reset 5 hours apart; the owner spends ~$6.5 an hour.
+func TestASmallBalanceIsSpentBeforeItsResetAndTheLargeOneIsTheReserve(t *testing.T) {
+	cfg := Default()
+	cfg.Demand = 6.5
+	minke := measured(claude("minke", short(96, 100*time.Minute), shared(95, 80*time.Hour)), 24.3)
+	ilse := measured(claude("ilse", dormant(18000), shared(14, 85*time.Hour)), 2.88)
+	james := measured(claude("james", dormant(18000), shared(1, 33*time.Hour)), 2.88)
+	// ilse needs ~6 h of the demand with 85 h left: not due yet. minke needs
+	// ~355 h with 80 h left: more than the demand can spend, never due.
+	d := Pick(cfg, now, Chat{}, []Account{minke, ilse, james})
+	want(t, d, "minke", NewChat, false)
+	// james is at his 7-day floor: never due, though his empty week "fits".
+	if c := d.Candidates[1]; c.Due || math.Abs(c.NeedHours-14*2.88/6.5) > 1e-9 || c.USDPerPercent != 2.88 || d.Candidates[0].Due || d.Candidates[2].Due {
+		t.Fatalf("trace: %+v", d.Candidates)
+	}
+	// Two days later ilse is due: new and cold chats go there, warm ones stay.
+	later := now.Add(48 * time.Hour)
+	minke.Budgets = []Budget{{Seconds: 18000, Remaining: 90, Reset: later.Add(time.Hour), Known: true}, {Seconds: 604800, Scope: "all", Remaining: 90, Reset: later.Add(32 * time.Hour), Known: true}}
+	ilse.Budgets[1].Reset = now.Add(85 * time.Hour)
+	want(t, Pick(cfg, later, Chat{}, []Account{minke, ilse}), "ilse", NewChat, false)
+	want(t, Pick(cfg, later, Chat{Account: "acct-minke"}, []Account{minke, ilse}), "ilse", ColdMove, false)
+	want(t, Pick(cfg, later, Chat{Account: "acct-minke", Warm: true}, []Account{minke, ilse}), "minke", Warm, false)
+	// Below the new-chat minimum of its 5-hour window, only its own chats stay.
+	ilse.Budgets[0] = Budget{Seconds: 18000, Remaining: 10, Reset: later.Add(time.Hour), Known: true}
+	want(t, Pick(cfg, later, Chat{}, []Account{minke, ilse}), "minke", NewChat, false)
+	want(t, Pick(cfg, later, Chat{Account: "acct-ilse"}, []Account{minke, ilse}), "ilse", ColdStay, false)
+	// Behind (it needs more than the time left, within the slack): still due.
+	ilse.Budgets[0], ilse.Budgets[1].Reset = dormant(18000), later.Add(4*time.Hour)
+	want(t, Pick(cfg, later, Chat{}, []Account{minke, ilse}), "ilse", NewChat, false)
+	// Without a measurement or with the slack at 0, pace decides as before.
+	ilse.Budgets[1].Reset = now.Add(85 * time.Hour)
+	for name, c := range map[string]Config{"no demand": Default(), "no slack": func() Config { c := cfg; c.Slack = 0; return c }()} {
+		if d := Pick(c, later, Chat{}, []Account{minke, ilse}); d.Auth != "minke" || d.Candidates[1].Due {
+			t.Fatal(name, d)
+		}
+	}
+	unmeasured := ilse
+	unmeasured.USDPerPercent = 0
+	want(t, Pick(cfg, later, Chat{}, []Account{minke, unmeasured}), "minke", NewChat, false)
+}
+
+func TestDueAccountsGoByLeastTimeToSpareAndChatsStayOnADueAccount(t *testing.T) {
+	cfg := Default()
+	cfg.Demand = 6.5
+	// Both due: a needs ~45 h with 60 h left (15 h to spare), b ~6 h with 40 h left (34 h).
+	a := measured(claude("a", dormant(18000), shared(100, 60*time.Hour)), 2.9)
+	b := measured(claude("b", dormant(18000), shared(14, 40*time.Hour)), 2.9)
+	want(t, Pick(cfg, now, Chat{}, []Account{b, a}), "a", NewChat, false)
+	want(t, Pick(cfg, now, Chat{Account: "acct-b"}, []Account{b, a}), "b", ColdStay, false)
+	// A fresh week far from its reset is not due: pace decides.
+	fresh := measured(claude("fresh", dormant(18000), shared(100, 160*time.Hour)), 2.9)
+	if d := Pick(cfg, now, Chat{}, []Account{fresh}); d.Candidates[0].Due || d.Reason != NewChat {
+		t.Fatal(d)
+	}
+}
+
 func TestPreviewNamesTheColdMoveAndAComingForcedMove(t *testing.T) {
 	low := claude("low", short(80, 3*time.Hour), weekly(30, 96*time.Hour))
 	high := claude("high", short(80, 3*time.Hour), weekly(80, 96*time.Hour))

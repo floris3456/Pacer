@@ -90,6 +90,10 @@ type Settings struct {
 	// ForceWarning: points above a floor from which clients show FORCE USE,
 	// the account a forced move will soon send the chat to.
 	ForceWarning float64 `json:"force_warning_percent"`
+	// DueSlackHours: an account takes new and cold chats first once the
+	// measured spend per hour needs about the time to its 7-day reset, give or
+	// take this many hours, to spend its measured 7-day balance. 0 turns it off.
+	DueSlackHours float64 `json:"due_slack_hours"`
 	// Providers routed by pace.
 	Providers []string `json:"providers"`
 	// PausedAccounts take no new or moved chats; their warm chats stay.
@@ -106,7 +110,7 @@ const (
 var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+\- ]{0,127}$`)
 
 func defaultSettings() Settings {
-	return Settings{CompactionModels: []string{}, Band: 90, NewChatMinimum: 15, ShortFloor: 2, LongFloor: 1, WarmMinutes: 60, TransientRetries: 3, ForceWarning: 5, Providers: []string{"claude"}, PausedAccounts: []string{}}
+	return Settings{CompactionModels: []string{}, Band: 90, NewChatMinimum: 15, ShortFloor: 2, LongFloor: 1, WarmMinutes: 60, TransientRetries: 3, ForceWarning: 5, DueSlackHours: 48, Providers: []string{"claude"}, PausedAccounts: []string{}}
 }
 
 // seedSettings: the YAML values where CPA's YAML has them, else the defaults.
@@ -139,6 +143,8 @@ func (s Settings) validate() error {
 		return errors.New("retries are 0 to 10")
 	case !in(s.ForceWarning, 0, 50):
 		return errors.New("force warning is 0 to 50 %")
+	case !in(s.DueSlackHours, 0, 168):
+		return errors.New("slack before a reset is 0 to 168 hours")
 	case len(s.Providers) == 0:
 		return errors.New("route at least one provider")
 	case len(s.PausedAccounts) > maxPausedAccounts:
@@ -169,6 +175,7 @@ func (s Settings) validate() error {
 func (s Settings) routing() routing.Config {
 	c := routing.Default()
 	c.Band, c.NewShort, c.ShortFloor, c.LongFloor = s.Band/100, s.NewChatMinimum, s.ShortFloor, s.LongFloor
+	c.Slack = time.Duration(s.DueSlackHours * float64(time.Hour))
 	return c
 }
 

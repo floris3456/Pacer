@@ -18,6 +18,7 @@ const LongSeconds = 7 * 24 * 3600
 // not yet started), which counts as 100 % left.
 type Budget struct {
 	Seconds   int64     `json:"seconds"`
+	Scope     string    `json:"scope,omitempty"`
 	Remaining float64   `json:"remaining"`
 	Reset     time.Time `json:"reset,omitzero"`
 	Known     bool      `json:"known"`
@@ -30,12 +31,14 @@ type Budget struct {
 // its meters are usable the decision says so (Decision.Unoffered), because CPA
 // left it out for another reason (a failed attempt of this request, a
 // transient-error cooldown). Paused accounts take no new or moved chats; their
-// warm chats stay.
+// warm chats stay. USDPerPercent is the measured value of 1 % of the account's
+// shared ("all") 7-day meter, 0 when unmeasured.
 type Account struct {
 	Auth, Account string
 	Budgets       []Budget
-	NotOffered    bool `json:"-"`
-	Paused        bool `json:"-"`
+	USDPerPercent float64 `json:"-"`
+	NotOffered    bool    `json:"-"`
+	Paused        bool    `json:"-"`
 }
 
 // Chat is the chat being placed. Account is empty for a new chat. Warm means
@@ -51,10 +54,15 @@ type Config struct {
 	ShortFloor, LongFloor float64 // % left at or below which an account cannot serve
 	NewShort              float64 // minimum short-window % left for a new placement
 	MinHorizon            time.Duration
+	// Demand is the provider's measured spend in USD per hour, 0 when
+	// unmeasured. An account is due when Demand needs about the time to its
+	// 7-day reset, give or take Slack, to spend its 7-day balance.
+	Demand float64
+	Slack  time.Duration
 }
 
 func Default() Config {
-	return Config{Band: .9, ShortFloor: 2, LongFloor: 1, NewShort: 15, MinHorizon: time.Hour}
+	return Config{Band: .9, ShortFloor: 2, LongFloor: 1, NewShort: 15, MinHorizon: time.Hour, Slack: 48 * time.Hour}
 }
 
 // Candidate records the inputs of one offered account in the decision trace.
@@ -67,6 +75,12 @@ type Candidate struct {
 	Eligible bool     `json:"eligible"`
 	Paused   bool     `json:"paused,omitempty"`
 	Offered  *bool    `json:"offered,omitempty"` // false only for the chat's own account CPA left out
+	// The measured inputs: $ per 1 % of the 7-day meter, the hours the
+	// measured demand needs to spend the 7-day balance, and whether that makes
+	// the account due.
+	USDPerPercent float64 `json:"usd_per_percent,omitempty"`
+	NeedHours     float64 `json:"need_hours,omitempty"`
+	Due           bool    `json:"due,omitempty"`
 }
 
 type Decision struct {
@@ -107,6 +121,10 @@ type score struct {
 	pace, short, long float64
 	running           bool      // a short window is running (its capacity expires at its reset)
 	shortReset        time.Time // earliest reset of a running short window
+	// need: hours the measured demand needs to spend the 7-day balance; spare:
+	// hours to the 7-day reset minus need (negative when it cannot be spent).
+	need, spare float64
+	due         bool
 }
 
 func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
@@ -132,7 +150,7 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 		if ok {
 			eligible = append(eligible, s)
 		}
-		c := Candidate{Auth: s.Auth, Account: s.Account.Account, Budgets: s.Budgets, Known: s.known, Pace: s.pace, Eligible: ok, Paused: s.Paused}
+		c := Candidate{Auth: s.Auth, Account: s.Account.Account, Budgets: s.Budgets, Known: s.known, Pace: s.pace, Eligible: ok, Paused: s.Paused, USDPerPercent: s.USDPerPercent, NeedHours: s.need, Due: s.due}
 		if s.NotOffered {
 			c.Offered = new(bool)
 		}
@@ -150,32 +168,7 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 		}
 		return Decision{Reason: reason, Forced: forced, Unoffered: unoffered, Candidates: trace}
 	}
-	best := 0.0
-	for _, s := range eligible {
-		best = math.Max(best, s.pace)
-	}
-	band := eligible[:0]
-	for _, s := range eligible {
-		if s.pace >= best*cfg.Band {
-			band = append(band, s)
-		}
-	}
-	// Within the band: stay, then spend a running short window (the one that
-	// expires first), then lowest auth. Dormant capacity does not expire.
-	sort.Slice(band, func(i, j int) bool {
-		a, b := band[i], band[j]
-		if stay := a.Account.Account == chat.Account; stay != (b.Account.Account == chat.Account) {
-			return stay
-		}
-		if a.running != b.running {
-			return a.running
-		}
-		if a.running && !a.shortReset.Equal(b.shortReset) {
-			return a.shortReset.Before(b.shortReset)
-		}
-		return a.Auth < b.Auth
-	})
-	choice := band[0]
+	choice := placement(cfg, chat, eligible)
 	switch {
 	case forced:
 		d := chosen(choice, ForcedMove, true, trace)
@@ -189,10 +182,67 @@ func Pick(cfg Config, now time.Time, chat Chat, accounts []Account) Decision {
 	return chosen(choice, ColdMove, false, trace)
 }
 
+// placement picks among eligible accounts. Due accounts come first: the chat's
+// own account, then the least time to spare, then lowest auth. Without a due
+// account, the best pace band: stay, then spend a running short window (the
+// one that expires first), then lowest auth. Dormant capacity does not expire.
+func placement(cfg Config, chat Chat, eligible []score) score {
+	due := []score{}
+	for _, s := range eligible {
+		if s.due {
+			due = append(due, s)
+		}
+	}
+	if len(due) > 0 {
+		sort.Slice(due, func(i, j int) bool {
+			a, b := due[i], due[j]
+			if stay := a.Account.Account == chat.Account; stay != (b.Account.Account == chat.Account) {
+				return stay
+			}
+			if a.spare != b.spare {
+				return a.spare < b.spare
+			}
+			return a.Auth < b.Auth
+		})
+		return due[0]
+	}
+	best := 0.0
+	for _, s := range eligible {
+		best = math.Max(best, s.pace)
+	}
+	band := []score{}
+	for _, s := range eligible {
+		if s.pace >= best*cfg.Band {
+			band = append(band, s)
+		}
+	}
+	sort.Slice(band, func(i, j int) bool {
+		a, b := band[i], band[j]
+		if stay := a.Account.Account == chat.Account; stay != (b.Account.Account == chat.Account) {
+			return stay
+		}
+		if a.running != b.running {
+			return a.running
+		}
+		if a.running && !a.shortReset.Equal(b.shortReset) {
+			return a.shortReset.Before(b.shortReset)
+		}
+		return a.Auth < b.Auth
+	})
+	return band[0]
+}
+
 // Pace is the account's 7-day pace in % per hour, if its meters are usable.
 func Pace(cfg Config, now time.Time, a Account) (float64, bool) {
 	s := evaluate(cfg, now, a)
 	return s.pace, s.known
+}
+
+// Spend is the hours the measured demand needs to spend the account's 7-day
+// balance and whether that makes it due, when both are measured.
+func Spend(cfg Config, now time.Time, a Account) (need float64, due, ok bool) {
+	s := evaluate(cfg, now, a)
+	return s.need, s.due, s.need > 0
 }
 
 // Preview tells, without a request, where the chat's next routing moments send
@@ -250,10 +300,15 @@ func chosen(s score, reason string, forced bool, trace []Candidate) Decision {
 // spends the meter by its reset (a dormant 7-day window has its full length
 // ahead). With several paced windows the slowest binds. Short windows only
 // gate eligibility. An account is known when every window is usable and at
-// least one is paced.
+// least one is paced. With the account's measured $ per 1 % and the measured
+// demand, need is the hours that demand takes to spend the shared 7-day
+// balance; the account is due when need is within Slack of the time to that
+// reset. An account with more than the demand can spend is not due, nor one
+// whose reset is still far off.
 func evaluate(cfg Config, now time.Time, a Account) score {
 	s := score{Account: a, known: true, pace: math.Inf(1), short: math.Inf(1), long: math.Inf(1)}
 	paced := false
+	week, weekLeft, weekAhead := false, 0.0, time.Duration(0)
 	for _, b := range a.Budgets {
 		remaining := b.Remaining
 		if b.Dormant {
@@ -273,6 +328,9 @@ func evaluate(cfg Config, now time.Time, a Account) score {
 				horizon = b.Reset.Sub(now)
 			}
 			s.pace = math.Min(s.pace, remaining/math.Max(cfg.MinHorizon.Hours(), horizon.Hours()))
+			if b.Seconds == LongSeconds && b.Scope == "all" {
+				week, weekLeft, weekAhead = true, remaining, horizon
+			}
 			continue
 		}
 		s.hard = s.hard || remaining <= cfg.ShortFloor
@@ -289,6 +347,11 @@ func evaluate(cfg Config, now time.Time, a Account) score {
 	}
 	if !s.known {
 		s.pace = 0
+	}
+	if s.known && week && a.USDPerPercent > 0 && cfg.Demand > 0 && cfg.Slack > 0 {
+		s.need = weekLeft * a.USDPerPercent / cfg.Demand
+		s.spare = weekAhead.Hours() - s.need
+		s.due = !s.hard && math.Abs(s.spare) <= cfg.Slack.Hours()
 	}
 	return s
 }

@@ -65,6 +65,34 @@ Example, 2026-10-14 20:00 UTC (live meters):
 `70f0…`, `1655…` and `a41a…` are all within the band. They are filled one running 5-hour window at a
 time, and none drains its 7-day meter days before its reset.
 
+## Spending before the reset
+
+Pace compares percentages of each account's own meter. With accounts of very different sizes (a Max
+20x account is ~8× a Pro account) the large one always has the highest pace, and a small account's
+remainder expired unused while the large one could never be spent anyway (CT104, 18 Oct: minke 95 %
+≈ $2,300 with 80 h left; ilse 14 % ≈ $40 with 85 h left; spend ≈ $6.5 an hour).
+
+The usage page measures both missing inputs:
+
+- **Value**: $ per 1 % of an account's shared ("all") 7-day meter, the weekly average of the account's
+  current profile, with the page's window exclusions.
+- **Demand**: the provider's recorded spend per hour since midnight UTC 7 days ago, all profiles of
+  that provider.
+
+`need = 7-day % left × value / demand` is the hours your use takes to spend the balance. An account
+is **due** when `|time to its 7-day reset − need| ≤ slack` (setting, default 48 h; 0 turns it off)
+and it is not at a floor. Due accounts take new, cold and forced placements before the pace band: the chat's own
+account if it is due, then the least time to spare, then the lowest auth. An account with far more
+than the demand can spend (need beyond the reset plus the slack) is not due and stays the reserve;
+an account whose reset is far off is not due yet. Without due accounts, or without measurements
+(no profile rate, no recorded spend, measurements older than an hour), the rule above decides as
+before. The decision trace records each candidate's `usd_per_percent`, `need_hours` and `due`; the
+Pacer page shows them per account, with the demand under `routing.demand_usd_per_hour`.
+
+Example (the case above): ilse needs ~6 h, so she becomes due with about 54 h left and takes new chats
+until her 14 % is used or her 5-hour window is below the new-chat minimum. A fresh Pro week (~$290,
+~45 h of use) becomes due about 93 h before its reset.
+
 ## When routing happens
 
 Pacer decides only when the prompt cache is cold on every account, or the current account cannot serve:

@@ -365,6 +365,8 @@ func (p *Plugin) refreshUsageLive(ctx context.Context) error {
 	}
 	reader.UseLive(facts)
 	p.refreshVerified(ctx, store, record, reader, source)
+	// Without a refresh the last measurements age out (measuredAge).
+	_ = p.refreshMeasuredPace(ctx, reader)
 	u.built, u.next, u.inputs = now, facts.NextTransition, inputs
 	if st.WakeMS != 0 && (u.next == 0 || st.WakeMS < u.next) {
 		u.next = st.WakeMS

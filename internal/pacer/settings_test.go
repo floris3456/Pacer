@@ -82,17 +82,17 @@ func TestPageSettingsPersistUntilTheirYAMLSeedChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.sqlite")
 	p := startPlugin(t, path)
 	// startPlugin's YAML has compact_on_switch: true; the rest are defaults.
-	if s := p.settings; !s.CompactOnSwitch || s.Band != 90 || s.NewChatMinimum != 15 || s.WarmMinutes != 60 || s.TransientRetries != 3 || len(s.Providers) != 1 {
+	if s := p.settings; !s.CompactOnSwitch || s.Band != 90 || s.NewChatMinimum != 15 || s.WarmMinutes != 60 || s.TransientRetries != 3 || len(s.Providers) != 1 || s.routing().Slack != 48*time.Hour {
 		t.Fatalf("defaults %+v", s)
 	}
-	r := patchSettings(t, p, `{"compact_on_switch":false,"compaction_models":["claude-sonnet-4-6","gemini-3.8-flash-high"],"band_percent":80,"warm_minutes":5,"paused_accounts":["claude:abc"]}`)
-	if r.StatusCode != 200 || p.cfg.CompactOnSwitch || p.settings.Band != 80 || p.settings.routing().Band != .8 || !p.settings.paused("claude:abc") || p.settings.warmFor() != 5*time.Minute {
+	r := patchSettings(t, p, `{"compact_on_switch":false,"compaction_models":["claude-sonnet-4-6","gemini-3.8-flash-high"],"band_percent":80,"warm_minutes":5,"paused_accounts":["claude:abc"],"due_slack_hours":36}`)
+	if r.StatusCode != 200 || p.cfg.CompactOnSwitch || p.settings.Band != 80 || p.settings.routing().Band != .8 || !p.settings.paused("claude:abc") || p.settings.warmFor() != 5*time.Minute || p.settings.routing().Slack != 36*time.Hour {
 		t.Fatal(r.StatusCode, string(r.Body))
 	}
 	var view struct {
 		Changed []string `json:"changed"`
 	}
-	if json.Unmarshal(r.Body, &view) != nil || len(view.Changed) != 5 {
+	if json.Unmarshal(r.Body, &view) != nil || len(view.Changed) != 6 {
 		t.Fatal(string(r.Body))
 	}
 	p.Close()
@@ -123,6 +123,7 @@ func TestPageSettingsRefuseInvalidValues(t *testing.T) {
 		`{"transient_retries":11}`, `{"providers":[]}`, `{"providers":["gemini"]}`, `{"providers":["claude","claude"]}`,
 		`{"compaction_models":["a","a"]}`, `{"compaction_models":[""]}`, `{"compaction_models":["bad\nname"]}`,
 		`{"compaction_models":["1","2","3","4","5","6","7","8","9"]}`, `{"paused_accounts":[""]}`,
+		`{"due_slack_hours":-1}`, `{"due_slack_hours":169}`,
 	} {
 		if r := patchSettings(t, p, body); r.StatusCode != 400 {
 			t.Fatal("accepted", body, r.StatusCode)

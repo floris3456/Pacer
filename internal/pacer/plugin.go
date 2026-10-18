@@ -129,6 +129,7 @@ type Plugin struct {
 	priceSync          priceSync
 	requests           map[string]attempt
 	previews           map[string]routingPreviewInput
+	measured           measuredPace // routing's measured inputs (measured_pace.go)
 	decisionErrors     int64
 	workerOnce         sync.Once
 	workerDone         chan struct{}
@@ -725,8 +726,9 @@ func (p *Plugin) pick(req pluginapi.SchedulerPickRequest) pluginapi.SchedulerPic
 		p.rememberPreviewLocked(key, input)
 	}
 	accounts, candidates := p.routingInputsLocked(input, now, b.Account)
+	rc := p.routingConfigLocked(provider, now)
 	p.mu.Unlock()
-	d := routing.Pick(settings.routing(), now, chat, accounts)
+	d := routing.Pick(rc, now, chat, accounts)
 	p.mu.Lock()
 	t.Key = key
 	t.Decision = d
@@ -1088,8 +1090,13 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			}
 			row["account"] = c.Account
 			row["paused"] = p.settings.paused(c.Account)
-			if pace, ok := routing.Pace(p.settings.routing(), p.now(), routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now())}); ok {
+			rc := p.routingConfigLocked(c.Provider, p.now())
+			a := routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(c.Provider, "", windows, p.now()), USDPerPercent: p.measuredValueLocked(c.Account, p.now())}
+			if pace, ok := routing.Pace(rc, p.now(), a); ok {
 				row["pace"] = pace
+			}
+			if need, due, ok := routing.Spend(rc, p.now(), a); ok {
+				row["usd_per_percent"], row["need_hours"], row["due"] = a.USDPerPercent, need, due
 			}
 			// Additive readback only: a lower bound never reaches routing.
 			row["capacity"] = p.capacityView(c)
@@ -1101,7 +1108,7 @@ func (p *Plugin) manage(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			pin := p.reports.DefaultPin()
 			historyCoverage = fmt.Sprintf("Frozen reports at %s, event checkpoint %d. Native future usage is separate. Legacy views, real-data migration and retirement gates remain unverified.", time.UnixMilli(pin.At).UTC().Format(time.RFC3339), pin.Through)
 		}
-		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "modes": []string{"off", "on"}, "providers": p.cfg.Routing.Providers}, "settings": p.settingsViewLocked(), "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "No account size is ever known. accounts[].capacity holds a measured lower bound only where a quiescent sample pair proves membership and carry-in; otherwise it is unknown with reasons.", "errors": p.measurementErrors, "capacity_known": false, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
+		return resource(200, map[string]any{"history_available": p.reports != nil, "history_coverage": historyCoverage, "routing": map[string]any{"mode": p.cfg.Routing.Mode, "modes": []string{"off", "on"}, "providers": p.cfg.Routing.Providers, "demand_usd_per_hour": p.measuredDemandLocked(p.now())}, "settings": p.settingsViewLocked(), "accounts": accounts, "decisions": decisions, "decision_write_errors": p.decisionErrors, "measurement": map[string]any{"delivery": "native-acknowledged-scoped", "coverage": "No account size is ever known. accounts[].capacity holds a measured lower bound only where a quiescent sample pair proves membership and carry-in; otherwise it is unknown with reasons.", "errors": p.measurementErrors, "capacity_known": false, "source_checkpoint": map[string]any{"calls": p.coverageStats.Calls, "errors": p.coverageStats.Errors, "stale": p.coverageStats.Stale, "reason": p.coverageStats.Reason, "domain": "request_start_only", "account_membership_complete": false, "physical_carry_in_proven": false}}})
 	}
 	if req.Method == "PATCH" && req.Path == "/v0/management/plugins/pacer/settings" {
 		p.mu.Lock()

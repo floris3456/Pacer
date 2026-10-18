@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 
 const html=fs.readFileSync(new URL('../../internal/management/index.html',import.meta.url));
-const defaults={compact_on_switch:false,compaction_models:[],band_percent:90,new_chat_minimum_percent:15,short_floor_percent:2,long_floor_percent:1,warm_minutes:60,transient_retries:3,force_warning_percent:5,providers:['claude'],paused_accounts:[]};
+const defaults={compact_on_switch:false,compaction_models:[],band_percent:90,new_chat_minimum_percent:15,short_floor_percent:2,long_floor_percent:1,warm_minutes:60,transient_retries:3,force_warning_percent:5,due_slack_hours:48,providers:['claude'],paused_accounts:[]};
 let settings=structuredClone(defaults);
 const patches=[];
 const view=()=>({settings,seed:defaults,changed:Object.keys(settings).filter(k=>JSON.stringify(settings[k])!==JSON.stringify(defaults[k])),limits:{compaction_models:8}});
@@ -20,7 +20,7 @@ const server=http.createServer(async(req,res)=>{
   let data,status=200;
   if(req.url.endsWith('/state'))data={routing:{mode:'on',modes:['off','on'],providers:settings.providers},settings:view(),accounts:[
     {id:'claude-jan.json',alias:'jan',account:'claude:jan',provider:'claude',state:'current',pace:0.5,paused:settings.paused_accounts.includes('claude:jan'),windows:[]},
-    {id:'claude-ilse.json',alias:'ilse',account:'claude:ilse',provider:'claude',state:'current',pace:2.4,paused:settings.paused_accounts.includes('claude:ilse'),windows:[]}],decisions:[]};
+    {id:'claude-ilse.json',alias:'ilse',account:'claude:ilse',provider:'claude',state:'current',pace:2.4,usd_per_percent:2.88,need_hours:6.2,due:true,paused:settings.paused_accounts.includes('claude:ilse'),windows:[]}],decisions:[]};
   else if(req.url.endsWith('/settings')&&req.method==='PATCH'){
     patches.push(body);
     if(body.band_percent!==undefined&&body.band_percent<50){status=400;data={error:'Settings not saved: band is 50 to 100 %'}}
@@ -45,6 +45,10 @@ try{
   assert.equal(await page.locator('#set-warm').inputValue(),'60');
   assert.equal(await page.locator('#set-retries').inputValue(),'3');
   assert.equal(await page.locator('#set-force-warning').inputValue(),'5');
+  assert.equal(await page.locator('#set-due-slack').inputValue(),'48');
+  // The measured value, the hours your use needs, and whether the account is due.
+  assert.match(await page.locator('#accounts').innerText(),/2\.40 %\/h · \$2\.88 per 1% · your use needs 6 h · due/);
+  assert.doesNotMatch(await page.locator('#accounts').innerText(),/0\.50 %\/h ·/);
   assert.equal(await page.locator('#set-claude').isChecked(),true);
   assert.equal(await page.locator('#set-models input').count(),1,'one empty field to start');
   // Suggestions: the models CPA serves, not disabled ones.
@@ -67,14 +71,15 @@ try{
   await page.locator('#set-warm').fill('5');
   await page.locator('#set-retries').fill('2');
   await page.locator('#set-force-warning').fill('7.5');
+  await page.locator('#set-due-slack').fill('36');
   await page.locator('#set-codex').check();
   // An auto-refresh while editing keeps the edits.
   await page.evaluate(()=>document.activeElement.blur());
   await page.locator('#save-mode').evaluate(b=>b.focus());
   await page.getByRole('button',{name:'Save settings'}).click();
   await page.waitForFunction(()=>document.getElementById('message').textContent.startsWith('Settings saved'));
-  assert.deepEqual(patches.at(-1),{compact_on_switch:true,compaction_models:['claude-sonnet-4-6','gemini-3.8-flash-high'],providers:['claude','codex'],band_percent:90,new_chat_minimum_percent:15,short_floor_percent:2,long_floor_percent:1,warm_minutes:5,transient_retries:2,force_warning_percent:7.5});
-  assert.match(await page.locator('#settings-status').innerText(),/compact on switch, summary models, warm for, retries, forced move warning, providers/);
+  assert.deepEqual(patches.at(-1),{compact_on_switch:true,compaction_models:['claude-sonnet-4-6','gemini-3.8-flash-high'],providers:['claude','codex'],band_percent:90,new_chat_minimum_percent:15,short_floor_percent:2,long_floor_percent:1,warm_minutes:5,transient_retries:2,force_warning_percent:7.5,due_slack_hours:36});
+  assert.match(await page.locator('#settings-status').innerText(),/compact on switch, summary models, warm for, retries, forced move warning, slack before a reset, providers/);
   // A name CPA does not list is saved with a note.
   await page.getByLabel('Fallback model 2',{exact:true}).fill('my-private-model');
   await page.getByRole('button',{name:'Save settings'}).click();

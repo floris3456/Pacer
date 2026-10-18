@@ -80,7 +80,7 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, c
 			continue
 		}
 		offered = offered || c.Account == chatAccount
-		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), Paused: p.settings.paused(c.Account)})
+		accounts = append(accounts, routing.Account{Auth: c.ID, Account: c.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), USDPerPercent: p.measuredValueLocked(c.Account, now), Paused: p.settings.paused(c.Account)})
 	}
 	if chatAccount != "" && !offered {
 		var own *credential
@@ -94,7 +94,7 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, c
 		}
 		if own != nil {
 			if windows, err := p.observer.ReadWindows(own.Account); err == nil {
-				accounts = append(accounts, routing.Account{Auth: own.ID, Account: own.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), NotOffered: true, Paused: p.settings.paused(own.Account)})
+				accounts = append(accounts, routing.Account{Auth: own.ID, Account: own.Account, Budgets: routingBudgets(input.Provider, input.Model, windows, now), USDPerPercent: p.measuredValueLocked(own.Account, now), NotOffered: true, Paused: p.settings.paused(own.Account)})
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func (p *Plugin) nextUse(binding tracker.Binding) nextUseView {
 		return view
 	}
 	accounts, candidates := p.routingInputsLocked(input, now, current.Account)
-	next, force := routing.Preview(p.settings.routing(), now, current.Account, accounts, p.settings.ForceWarning)
+	next, force := routing.Preview(p.routingConfigLocked(binding.Provider, now), now, current.Account, accounts, p.settings.ForceWarning)
 	// While warm too: where the chat goes once it is cold.
 	view.Reason, view.Warm = next.Reason, warm(current, active, now, p.settings.warmFor())
 	alias := func(d routing.Decision) (string, string) {
