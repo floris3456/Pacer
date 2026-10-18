@@ -67,9 +67,28 @@ func (w Window) Applies(model string) bool {
 		return true
 	case "opus", "sonnet", "haiku", "spark":
 		return strings.Contains(strings.ToLower(model), w.Scope)
+	case "gemini", "claude_gpt":
+		return AntigravityGroup(model) == w.Scope
 	default:
 		return strings.HasPrefix(w.Scope, "model:") && strings.EqualFold(strings.TrimPrefix(w.Scope, "model:"), model)
 	}
+}
+
+// AntigravityGroup names the Antigravity quota group serving a model: "gemini",
+// "claude_gpt", or "" when neither. Routed names may be aliases of another
+// family (gemini-opus-4-6-thinking is Claude Opus, gemini-oss-120b GPT-OSS), so
+// Claude and GPT markers decide before the gemini prefix.
+func AntigravityGroup(model string) string {
+	m := strings.ToLower(model)
+	for _, marker := range []string{"claude", "gpt", "opus", "sonnet", "haiku", "oss"} {
+		if strings.Contains(m, marker) {
+			return "claude_gpt"
+		}
+	}
+	if strings.Contains(m, "gemini") {
+		return "gemini"
+	}
+	return ""
 }
 
 func (w Window) ObservedAt() time.Time {

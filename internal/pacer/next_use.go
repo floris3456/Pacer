@@ -70,7 +70,7 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, c
 	candidates := []credential{}
 	offered := false
 	for _, id := range input.Candidates {
-		c, ok := p.creds[id]
+		c, _, ok := p.routingCredLocked(id)
 		if !ok || c.Provider != input.Provider {
 			continue
 		}
@@ -84,10 +84,12 @@ func (p *Plugin) routingInputsLocked(input routingPreviewInput, now time.Time, c
 	}
 	if chatAccount != "" && !offered {
 		var own *credential
-		for _, c := range p.creds {
-			if c.Account == chatAccount && c.Provider == input.Provider && (own == nil || c.ID < own.ID) {
-				c := c
-				own = &c
+		for _, inventory := range []map[string]credential{p.creds, p.usageCreds} {
+			for _, c := range inventory {
+				if c.Account == chatAccount && c.Provider == input.Provider && (own == nil || c.ID < own.ID) {
+					c := c
+					own = &c
+				}
 			}
 		}
 		if own != nil {

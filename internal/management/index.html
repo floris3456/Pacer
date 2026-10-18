@@ -288,7 +288,7 @@ tr.usage-window-excluded td{color:var(--muted);opacity:.7}
 <label class="setting"><input type="number" id="set-force-warning" min="0" max="50" step="0.5" required aria-labelledby="set-force-warning-name" aria-describedby="set-force-warning-help"> <span><b id="set-force-warning-name">Forced move warning (points above a floor)</b><small id="set-force-warning-help">When a chat’s account is this close to its 5-hour or 7-day floor, clients mark the account the chat will be forced to as FORCE USE. 0 shows it only once the move is due.</small></span></label>
 </fieldset>
 <fieldset><legend>Providers</legend><span class="setting-block"><small>Pace routing applies to these providers; others use CPA’s routing. Pause single accounts in the table above.</small></span>
-<label><input type="checkbox" id="set-claude"> Claude</label> <label><input type="checkbox" id="set-codex"> Codex</label></fieldset>
+<label><input type="checkbox" id="set-claude"> Claude</label> <label><input type="checkbox" id="set-codex"> Codex</label> <label><input type="checkbox" id="set-antigravity"> Antigravity</label> <label><input type="checkbox" id="set-opencode-go"> OpenCode Go</label></fieldset>
 <div class="toolbar"><button id="save-settings">Save settings</button><button type="button" id="reset-settings">Revert unsaved changes</button><span id="settings-status" class="muted" role="status"></span></div></form><details><summary>Recent decisions and technical details</summary><pre id="decisions"></pre></details></section>
 <section id="usage" hidden><h2>Usage Quota</h2>
 <div class="toolbar" role="search" aria-label="Usage filters"><label>API key <select id="usage-key"><option value="">All keys</option></select></label><label>From <input id="usage-from" type="date"></label><label>Through <input id="usage-through" type="date"></label><button type="button" id="usage-accounts">Accounts &amp; profiles</button></div>
@@ -1049,10 +1049,12 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
 
   function profileWindowPicker(profile){
     const details=document.createElement('section');details.className='usage-window-picker';details.dataset.profile=profile.reference;details.setAttribute('aria-label',profile.name+' window selection');
-    const windows=usageWindowLists.get(profile.reference)||[],chosen=usageProfileSelection.get(profile.reference)||new Set();
+    // Without a selection of its own a profile counts its latest windows, and keeps following them after a reset.
+    const windows=usageWindowLists.get(profile.reference)||[],chosen=new Set(usageProfileSelection.get(profile.reference)||windows.filter(w=>w.latest).map(w=>w.id));
     const controls=document.createElement('div');controls.className='usage-window-controls';
-    const save=async()=>{usageProfileSelection.set(profile.reference,chosen);await loadUsage(true)};
-    controls.append(button('Select all',()=>{for(const w of windows)if(!w.latest)chosen.add(w.id);return save()}),button('Deselect all',()=>{chosen.clear();return save()}));
+    const save=async ids=>{if(ids)usageProfileSelection.set(profile.reference,ids);else usageProfileSelection.delete(profile.reference);await loadUsage(true)};
+    const all=button('Select all',()=>save(new Set(windows.map(w=>w.id))));all.disabled=!usageWindowLists.has(profile.reference);
+    controls.append(all,button('Select latest',()=>save()),button('Deselect all',()=>save(new Set())));
     if(profile.polling_seconds)controls.append(profilePollingControl(profile));
     details.append(controls);
     const list=document.createElement('div');list.className='usage-window-options';
@@ -1065,7 +1067,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       for(const w of windows.filter(w=>w.kind===pool.kind&&w.scope===pool.scope)){
       const label=document.createElement('label');label.className='usage-window-option';
       label.title=shortAccount(w.label)+' · '+windowSpan(w)+(w.excluded?' · excluded from rates':'');
-      const cb=document.createElement('input');cb.type='checkbox';cb.checked=w.latest||chosen.has(w.id);cb.disabled=w.latest;
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=chosen.has(w.id);
       cb.setAttribute('aria-label',label.title+(w.latest?' · Latest':''));
       const text=span('','usage-window-text');
       if(profile.credentials>1)text.append(span(shortAccount(w.label),'usage-window-account'));
@@ -1075,7 +1077,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
       const change=span((start==null?'—':pct1(100-start)+'%')+' → '+(end==null?'—':pct1(100-end)+'%'),'usage-window-change');
       if(w.latest||w.excluded)change.append(span(w.latest?'Latest':'Excluded','usage-window-badge'));
       text.append(change);
-      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save()};
+      cb.onchange=()=>{if(cb.checked)chosen.add(w.id);else chosen.delete(w.id);return save(chosen)};
       label.append(cb,text);category.append(label);
       }
       list.append(category);
@@ -1955,6 +1957,8 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   // Settings: rendered from the state, saved as one PATCH. Auto-refresh does
   // not overwrite unsaved edits.
   let settings=null, settingsDirty=false, modelOptions=null;
+  // Antigravity is paced per quota group (Gemini; Claude and GPT), OpenCode Go per key.
+  const routedProviders=['claude','codex','antigravity','opencode-go'];
   const numberFields={'set-band':'band_percent','set-new-min':'new_chat_minimum_percent','set-short-floor':'short_floor_percent','set-long-floor':'long_floor_percent','set-warm':'warm_minutes','set-retries':'transient_retries','set-force-warning':'force_warning_percent'};
   function renderSettings(view){
     if(!view?.settings)return;
@@ -1963,7 +1967,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
     const s=view.settings;
     el('set-compact').checked=!!s.compact_on_switch;
     for(const [id,name] of Object.entries(numberFields))el(id).value=s[name];
-    el('set-claude').checked=(s.providers||[]).includes('claude');el('set-codex').checked=(s.providers||[]).includes('codex');
+    for(const provider of routedProviders)el('set-'+provider).checked=(s.providers||[]).includes(provider);
     renderModelList(s.compaction_models||[]);
     const changed=view.changed||[];
     const names={compact_on_switch:'compact on switch',compaction_models:'summary models',band_percent:'equal pace band',new_chat_minimum_percent:'new-chat minimum',short_floor_percent:'5-hour floor',long_floor_percent:'7-day floor',warm_minutes:'warm for',transient_retries:'retries',force_warning_percent:'forced move warning',providers:'providers',paused_accounts:'paused accounts'};
@@ -2025,7 +2029,7 @@ function emptyRow(target,columns){const tr=document.createElement('tr');tr.class
   el('reset-settings').onclick=()=>{settingsDirty=false;renderSettings(settings);message('')};
   el('settings-form').onsubmit=async event=>{
     event.preventDefault();
-    const body={compact_on_switch:el('set-compact').checked,compaction_models:modelValues(),providers:['claude','codex'].filter(p=>el('set-'+p).checked)};
+    const body={compact_on_switch:el('set-compact').checked,compaction_models:modelValues(),providers:routedProviders.filter(p=>el('set-'+p).checked)};
     for(const [id,name] of Object.entries(numberFields)){const input=el(id),value=Number(input.value);if(input.value===''||!input.checkValidity()||!Number.isFinite(value)){input.focus();message('Check “'+input.closest('label').querySelector('b').textContent+'”: '+(input.validationMessage||'enter a number'),true);return}body[name]=value}
     if(!body.providers.length){message('Route at least one provider, or turn routing off above.',true);return}
     if(new Set(body.compaction_models).size!==body.compaction_models.length){message('A summary model is listed twice.',true);return}

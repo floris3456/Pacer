@@ -11,6 +11,7 @@ package pacer
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,29 @@ import (
 // page only.
 func usageOnlyProvider(provider string) bool {
 	return provider != "" && provider != "claude" && provider != "codex" && len(provider) <= 64
+}
+
+// routableProvider reports whether pace routing can serve a provider: Claude
+// and Codex, and the usage-only providers whose meters Pacer reads
+// (Antigravity per quota group, OpenCode Go).
+func routableProvider(provider string) bool {
+	switch provider {
+	case "claude", "codex", "antigravity", "opencode-go":
+		return true
+	}
+	return false
+}
+
+// routingCredLocked returns a credential that routing can place a chat on:
+// Claude and Codex from Pacer's inventory, and a usage-only provider's from
+// the usage-only inventory (usageOnly) while that provider is routed. Those
+// still never enter coverage or the forward ledger. Callers hold p.mu.
+func (p *Plugin) routingCredLocked(id string) (c credential, usageOnly, ok bool) {
+	if c, ok = p.creds[id]; ok {
+		return c, false, true
+	}
+	c, ok = p.usageCreds[id]
+	return c, true, ok && slices.Contains(p.cfg.Routing.Providers, c.Provider)
 }
 
 // discoverUsageOnly keeps the credentials of usage-only providers. Their

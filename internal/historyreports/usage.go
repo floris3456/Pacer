@@ -355,7 +355,10 @@ func (r *Reader) Inspect(ctx context.Context, q InspectQuery, ex Exclusions) (In
 			}
 			if len(windowIDs) == 0 { // nothing measured: still show the mix of every counted window
 				ids, filtered := q.SelectedWindows[ref]
-				keep := latestProfileWindows(p)
+				keep := map[string]bool{}
+				if !filtered {
+					keep = latestProfileWindows(p)
+				}
 				for _, id := range ids {
 					keep[id] = true
 				}

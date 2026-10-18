@@ -153,8 +153,8 @@ func (s Settings) validate() error {
 	}
 	seen = map[string]bool{}
 	for _, v := range s.Providers {
-		if (v != "claude" && v != "codex") || seen[v] {
-			return errors.New("providers are claude and codex")
+		if !routableProvider(v) || seen[v] {
+			return errors.New("providers are claude, codex, antigravity and opencode-go")
 		}
 		seen[v] = true
 	}

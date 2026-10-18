@@ -19,7 +19,7 @@ func routingAction(req pluginapi.SchedulerPickRequest, d routing.Decision, candi
 	if provider == "" {
 		provider = req.Candidates[0].Provider
 	}
-	if provider != "claude" && provider != "codex" {
+	if !routableProvider(provider) {
 		return pluginapi.SchedulerPickResponse{}
 	}
 	for _, p := range req.Providers {

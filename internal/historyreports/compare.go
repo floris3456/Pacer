@@ -29,7 +29,8 @@ type CompareQuery struct {
 	// From and Through are inclusive UTC days, YYYY-MM-DD.
 	From    string `json:"from,omitempty"`
 	Through string `json:"through,omitempty"`
-	// Request-local rate selection; latest windows always remain included.
+	// Request-local rate selection: a listed profile counts exactly its listed
+	// windows; with LatestOnly an unlisted profile counts its latest windows.
 	SelectedWindows map[string][]string `json:"selected_windows,omitempty"`
 	LatestOnly      bool                `json:"latest_only,omitempty"`
 }
@@ -306,7 +307,10 @@ func (r *Reader) compareWorkspace(ctx context.Context, q CompareQuery, ex Exclus
 			if len(ids) > 10000 {
 				return nil, Workspace{}, ErrInput
 			}
-			keep := latestProfileWindows(c.usage)
+			keep := map[string]bool{}
+			if !ok {
+				keep = latestProfileWindows(c.usage)
+			}
 			valid := map[string]bool{}
 			for _, win := range c.usage.Windows {
 				valid[win.ID] = true
